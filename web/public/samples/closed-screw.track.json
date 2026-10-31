@@ -1,0 +1,241 @@
+{
+ "version": 1,
+ "name": "Closed Screw",
+ "closed": true,
+ "points": [
+  {
+   "position": [
+    150,
+    24,
+    -100
+   ],
+   "handleIn": [
+    0,
+    0,
+    -40
+   ],
+   "handleOut": [
+    0,
+    0,
+    40
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    150,
+    24,
+    -30
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    150,
+    24,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 120,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    150,
+    24,
+    30
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": -120,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    150,
+    24,
+    60
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    160
+   ],
+   "handleIn": [
+    60,
+    0,
+    0
+   ],
+   "handleOut": [
+    -60,
+    0,
+    0
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    -150,
+    24,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    60
+   ],
+   "handleOut": [
+    0,
+    0,
+    -60
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    -160
+   ],
+   "handleIn": [
+    -60,
+    0,
+    0
+   ],
+   "handleOut": [
+    60,
+    0,
+    0
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+# Build output
+**/bin/
+**/obj/
+**/node_modules/
+web/dist/
+web/public/_framework/
+.vs/
+.idea/
+*.user
+
+# Game data extracted/converted locally (Nadeo's assets): never commit
+artifacts/
+*.dds
+*.Prefab.Gbx
+*.EDClassic.Gbx
+*.EDClip.Gbx
+*.Material.Gbx
+*.Texture.Gbx
+*.Item.Gbx
+*.Map.Gbx
+!src/TmSpline.Server/Templates/*.Map.Gbx
+
+# Local scratch: screenshots and test tracks in the repo root
+/*.png
+/*.track.json

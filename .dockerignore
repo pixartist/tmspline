@@ -1,0 +1,10 @@
+**/bin
+**/obj
+**/node_modules
+web/public/_framework
+web/dist
+artifacts
+tools
+samples
+docker
+*.png

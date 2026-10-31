@@ -1,0 +1,204 @@
+{
+ "version": 1,
+ "name": "Corkscrew Test",
+ "closed": false,
+ "points": [
+  {
+   "position": [
+    0,
+    24,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    64
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    96
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 90,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    128
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 180,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    160
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": -90,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    192
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    24,
+    256
+   ],
+   "handleIn": [
+    0,
+    0,
+    -10
+   ],
+   "handleOut": [
+    0,
+    0,
+    10
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  }
+ ]
+}

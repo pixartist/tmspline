@@ -1,0 +1,519 @@
+{
+  "version": 1,
+  "name": "TMSpline Sample",
+  "closed": true,
+  "points": [
+    {
+      "position": [
+        -24.59487330116871,
+        15.623880551911657,
+        -7.359113186334399
+      ],
+      "handleIn": [
+        -21.291263003992295,
+        -1.7907210429972462,
+        -15.634279344603035
+      ],
+      "handleOut": [
+        25.26136893268099,
+        2.124630413620206,
+        18.54954769224146
+      ],
+      "bank": 3.4,
+      "width": 50,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -0.7060820974970913,
+        19.34061283288272,
+        62.88123405817169
+      ],
+      "handleIn": [
+        -0.3169233672883885,
+        -0.5806565897204469,
+        -28.401831928675872
+      ],
+      "handleOut": [
+        0.17112560175165142,
+        0.3135307098909958,
+        15.335822729730276
+      ],
+      "bank": 19.5,
+      "width": 32,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -20.028598205785055,
+        23.990059881939324,
+        107.13792059338071
+      ],
+      "handleIn": [
+        12.238367485537506,
+        -1.7679554911944728,
+        -11.735612525281992
+      ],
+      "handleOut": [
+        -12.636875625306972,
+        1.825524007160651,
+        12.117749858715722
+      ],
+      "bank": 27.1,
+      "width": 27.5,
+      "curve": 178,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -71.29635612001454,
+        26.591116755713838,
+        124.13395009590135
+      ],
+      "handleIn": [
+        19.88299587924138,
+        -0.156631754416537,
+        -0.40406384737547046
+      ],
+      "handleOut": [
+        -29.599308966860338,
+        0.23317369883060904,
+        0.6015195463220693
+      ],
+      "bank": 18.7,
+      "width": 20,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -158.29193374979428,
+        27.852678287679552,
+        127.99989689849905
+      ],
+      "handleIn": [
+        29.530235027232525,
+        0.07763190487739871,
+        -0.601905113603684
+      ],
+      "handleOut": [
+        -27.929678022111837,
+        -0.0734242076119419,
+        0.5692814841233256
+      ],
+      "bank": -14.3,
+      "width": 20,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -227.29782397872663,
+        25.081986770481564,
+        135.83471998733307
+      ],
+      "handleIn": [
+        27.726478055940852,
+        0.33505402528882505,
+        -2.040456999560198
+      ],
+      "handleOut": [
+        -17.80816338880261,
+        -0.21519851220847486,
+        1.3105447999086268
+      ],
+      "bank": 10.8,
+      "width": 16,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -297.59421293913914,
+        22.388768693485158,
+        161.27474732546366
+      ],
+      "handleIn": [
+        19.72192783983731,
+        -0.11249479231828094,
+        -9.134943749839051
+      ],
+      "handleOut": [
+        -17.70848603641505,
+        0.10101002676390089,
+        8.202343358680304
+      ],
+      "bank": 21.6,
+      "width": 16.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -348.1273927835812,
+        31.729564424814356,
+        171.21904623930962
+      ],
+      "handleIn": [
+        11.052719319849407,
+        -9.14072675999774,
+        -1.1145391993207696
+      ],
+      "handleOut": [
+        -27.080037256615547,
+        22.3955041334257,
+        2.7307092642226007
+      ],
+      "bank": 26.6,
+      "width": 17,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -310.45640307793866,
+        70.18639271379736,
+        121.65253130068764
+      ],
+      "handleIn": [
+        -44.97864505600451,
+        11.025182460041211,
+        8.556147045864279
+      ],
+      "handleOut": [
+        26.332907150595705,
+        -6.4547321440463,
+        -5.009226610651533
+      ],
+      "bank": -154.8,
+      "width": 19.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -312.4204136801003,
+        39.38635374469541,
+        111.74705278241662
+      ],
+      "handleIn": [
+        17.09782473004733,
+        -1.0487923106143127,
+        5.4648774147712835
+      ],
+      "handleOut": [
+        -24.286993282688083,
+        1.48978084668635,
+        -7.762709184286778
+      ],
+      "bank": 26.6,
+      "width": 30.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -349.7134130994015,
+        72.78686696836147,
+        39.43097101986765
+      ],
+      "handleIn": [
+        3.0310065899392264,
+        -0.7400574236746548,
+        39.8135933860467
+      ],
+      "handleOut": [
+        -2.2564874093927965,
+        0.5509490689635921,
+        -29.63994618042055
+      ],
+      "bank": 86.5,
+      "width": 36,
+      "curve": 26,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -271.7255471796237,
+        66.57397553735063,
+        -3.708997912480608
+      ],
+      "handleIn": [
+        -41.36065089741778,
+        3.605674007059077,
+        -16.828833768128437
+      ],
+      "handleOut": [
+        15.902328777366233,
+        -1.3863082973831227,
+        6.4703441970525
+      ],
+      "bank": 30.7,
+      "width": 16,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -221.25911484995956,
+        72.75704089474517,
+        -4.390929703399524
+      ],
+      "handleIn": [
+        -18.243104051530477,
+        5.291028425802145,
+        6.869521558007437
+      ],
+      "handleOut": [
+        21.58105309919486,
+        -6.259130303924678,
+        -8.12644104263523
+      ],
+      "bank": -107,
+      "width": 23.5,
+      "curve": 129,
+      "flat": 0,
+      "borderHeight": 3
+    },
+    {
+      "position": [
+        -176.21283288400016,
+        54.69830783812841,
+        -4.8276426161860675
+      ],
+      "handleIn": [
+        -19.21272775620537,
+        4.428133670353199,
+        0.8764032367084207
+      ],
+      "handleOut": [
+        22.679838298183917,
+        -5.227230452683497,
+        -1.034558129630092
+      ],
+      "bank": -173.8,
+      "width": 23.5,
+      "curve": 117,
+      "flat": 0,
+      "borderHeight": 3.6
+    },
+    {
+      "position": [
+        -91.85909337252255,
+        56.85642114378858,
+        -3.742194644045189
+      ],
+      "handleIn": [
+        -10.088733891526775,
+        -23.04691974582843,
+        -16.279656208714336
+      ],
+      "handleOut": [
+        6.058633751698477,
+        13.840472684291502,
+        9.776496796590385
+      ],
+      "bank": 24.8,
+      "width": 23.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -117.8303406494578,
+        87.45988913750038,
+        -2.3384965813423926
+      ],
+      "handleIn": [
+        7.731003435831959,
+        -0.05517967571856348,
+        14.42272191220887
+      ],
+      "handleOut": [
+        -10.527315466356239,
+        0.0751382221521472,
+        -19.6394355161753
+      ],
+      "bank": 93,
+      "width": 23.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    },
+    {
+      "position": [
+        -69.85599563748663,
+        44.28000279450736,
+        -42.49544580767778
+      ],
+      "handleIn": [
+        -27.417320288527073,
+        12.417313076966149,
+        -5.486692102774278
+      ],
+      "handleOut": [
+        19.695504735397968,
+        -8.920100357533684,
+        3.941419845362533
+      ],
+      "bank": 29.5,
+      "width": 23.5,
+      "curve": 0,
+      "flat": 0,
+      "borderHeight": 0.8
+    }
+  ],
+  "segments": [
+    {
+      "surface": "RoadTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadIce",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 45,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadIce",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadDirt",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "PlatformTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "Turbo",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "PlatformTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "PlatformTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "PlatformTech",
+      "borders": true,
+      "borderMaterial": "Rubber",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadIce",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadIce",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadDirt",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadDirt",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadDirt",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    },
+    {
+      "surface": "RoadDirt",
+      "borders": true,
+      "borderMaterial": "Plastic",
+      "effect": "None",
+      "effectYaw": 0,
+      "effectPitch": 0
+    }
+  ]
+}

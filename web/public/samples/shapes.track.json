@@ -1,0 +1,310 @@
+{
+ "version": 1,
+ "name": "Shapes Test",
+ "closed": false,
+ "points": [
+  {
+   "position": [
+    0,
+    20,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    64
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    128
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": -120,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    192
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    256
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 40,
+   "curve": 180,
+   "flat": 0.5
+  },
+  {
+   "position": [
+    0,
+    20,
+    320
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 40,
+   "curve": 180,
+   "flat": 0.5
+  },
+  {
+   "position": [
+    0,
+    20,
+    384
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 32,
+   "curve": 180,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    448
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 56,
+   "curve": 360,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    544
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 56,
+   "curve": 360,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    608
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  },
+  {
+   "position": [
+    0,
+    20,
+    672
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadBump",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadBump",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": false,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  }
+ ]
+}

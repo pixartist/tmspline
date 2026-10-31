@@ -1,0 +1,211 @@
+{
+ "version": 1,
+ "name": "Loop Test",
+ "closed": false,
+ "points": [
+  {
+   "position": [
+    0.0,
+    20.0,
+    0.0
+   ],
+   "handleIn": [
+    0.0,
+    0.0,
+    -20.0
+   ],
+   "handleOut": [
+    0.0,
+    0.0,
+    20.0
+   ],
+   "bank": 0.0
+  },
+  {
+   "position": [
+    0.0,
+    20.0,
+    64.0
+   ],
+   "handleIn": [
+    0.0,
+    0.0,
+    -30.0
+   ],
+   "handleOut": [
+    0.0,
+    0.0,
+    15.0
+   ],
+   "bank": 0.0
+  },
+  {
+   "position": [
+    -20.75,
+    24.0,
+    107.25
+   ],
+   "handleIn": [
+    12.25,
+    -2.0,
+    -12.25
+   ],
+   "handleOut": [
+    -12.25,
+    2.0,
+    12.25
+   ],
+   "bank": 10.0
+  },
+  {
+   "position": [
+    -64.0,
+    26.51,
+    123.19
+   ],
+   "handleIn": [
+    15.0,
+    0.0,
+    0.0
+   ],
+   "handleOut": [
+    -30.0,
+    0.0,
+    0.0
+   ],
+   "bank": -30.0
+  },
+  {
+   "position": [
+    -160.0,
+    28.0,
+    128.0
+   ],
+   "handleIn": [
+    29.78,
+    0.0,
+    0.0
+   ],
+   "handleOut": [
+    -30.0,
+    0.0,
+    0.0
+   ],
+   "bank": 0.0
+  },
+  {
+   "position": [
+    -227.41,
+    25.67,
+    128.61
+   ],
+   "handleIn": [
+    30.0,
+    0.0,
+    0.0
+   ],
+   "handleOut": [
+    -30.0,
+    0.0,
+    0.0
+   ],
+   "bank": 70.0
+  },
+  {
+   "position": [
+    -320.0,
+    28.0,
+    128.0
+   ],
+   "handleIn": [
+    29.53,
+    -5.3,
+    0.0
+   ],
+   "handleOut": [
+    -37.47,
+    6.73,
+    0.0
+   ],
+   "bank": 30.0
+  },
+  {
+   "position": [
+    -293.36,
+    100.8,
+    118.17
+   ],
+   "handleIn": [
+    -46.83,
+    3.78,
+    7.26
+   ],
+   "handleOut": [
+    37.14,
+    -2.99,
+    -5.76
+   ],
+   "bank": 2.0
+  },
+  {
+   "position": [
+    -273.98,
+    39.2,
+    110.74
+   ],
+   "handleIn": [
+    22.95,
+    1.29,
+    0.27
+   ],
+   "handleOut": [
+    -22.21,
+    -1.25,
+    -0.27
+   ],
+   "bank": -2.0
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "RoadIce",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "RoadIce",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "RoadDirt",
+   "width": 24.0,
+   "borders": true
+  },
+  {
+   "surface": "PlatformTech",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "RoadTech",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "Magnet",
+   "width": 16.0,
+   "borders": true
+  },
+  {
+   "surface": "PlatformTech",
+   "width": 16.0,
+   "borders": true
+  }
+ ]
+}

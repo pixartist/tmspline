@@ -1,0 +1,159 @@
+{
+ "version": 1,
+ "name": "Race Test",
+ "closed": false,
+ "points": [
+  {
+   "position": [
+    0,
+    20,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16
+  },
+  {
+   "position": [
+    0,
+    20,
+    64
+   ],
+   "handleIn": [
+    0,
+    0,
+    -30
+   ],
+   "handleOut": [
+    0,
+    0,
+    30
+   ],
+   "bank": 0,
+   "width": 16
+  },
+  {
+   "position": [
+    -64,
+    28,
+    128
+   ],
+   "handleIn": [
+    30,
+    0,
+    0
+   ],
+   "handleOut": [
+    -30,
+    0,
+    0
+   ],
+   "bank": 20,
+   "width": 16
+  },
+  {
+   "position": [
+    -160,
+    28,
+    128
+   ],
+   "handleIn": [
+    30,
+    0,
+    0
+   ],
+   "handleOut": [
+    -30,
+    0,
+    0
+   ],
+   "bank": 0,
+   "width": 24,
+   "waypoint": "Checkpoint"
+  },
+  {
+   "position": [
+    -240,
+    28,
+    128
+   ],
+   "handleIn": [
+    30,
+    0,
+    0
+   ],
+   "handleOut": [
+    -30,
+    0,
+    0
+   ],
+   "bank": 70,
+   "width": 16
+  },
+  {
+   "position": [
+    -320,
+    28,
+    128
+   ],
+   "handleIn": [
+    30,
+    0,
+    0
+   ],
+   "handleOut": [
+    -30,
+    0,
+    0
+   ],
+   "bank": 0,
+   "width": 16
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "effect": "ReactorBoost",
+   "effectYaw": 0,
+   "effectPitch": 90
+  },
+  {
+   "surface": "RoadDirt",
+   "borders": true,
+   "effect": "SlowMotion",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "Magnet",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "Magnet",
+   "borders": true,
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  }
+ ]
+}

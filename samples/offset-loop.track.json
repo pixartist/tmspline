@@ -1,0 +1,211 @@
+{
+ "version": 1,
+ "name": "Offset Loop",
+ "closed": false,
+ "points": [
+  {
+   "position": [
+    0,
+    10,
+    -60
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    0,
+    10,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -14
+   ],
+   "handleOut": [
+    0,
+    0,
+    14
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    6,
+    34,
+    26
+   ],
+   "handleIn": [
+    -1.5,
+    -14,
+    -1
+   ],
+   "handleOut": [
+    1.5,
+    14,
+    1
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    15,
+    58,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    14
+   ],
+   "handleOut": [
+    0,
+    0,
+    -14
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    24,
+    34,
+    -26
+   ],
+   "handleIn": [
+    -1.5,
+    14,
+    1
+   ],
+   "handleOut": [
+    1.5,
+    -14,
+    -1
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    30,
+    10,
+    0
+   ],
+   "handleIn": [
+    0,
+    0,
+    -14
+   ],
+   "handleOut": [
+    0,
+    0,
+    14
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  },
+  {
+   "position": [
+    30,
+    10,
+    60
+   ],
+   "handleIn": [
+    0,
+    0,
+    -20
+   ],
+   "handleOut": [
+    0,
+    0,
+    20
+   ],
+   "bank": 0,
+   "width": 16,
+   "curve": 0,
+   "flat": 0,
+   "borderHeight": 0.8
+  }
+ ],
+ "segments": [
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  },
+  {
+   "surface": "RoadTech",
+   "borders": true,
+   "borderMaterial": "Rubber",
+   "effect": "None",
+   "effectYaw": 0,
+   "effectPitch": 0
+  }
+ ]
+}

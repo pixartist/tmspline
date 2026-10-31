@@ -1,0 +1,7 @@
+[meta]
+name     = "TMSpline Extract"
+author   = "TMSpline"
+category = "Development"
+version  = "1.0.0"
+
+[script]
