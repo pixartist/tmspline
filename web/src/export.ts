@@ -10,13 +10,14 @@ const CALIBRATION_KEY = "tmspline.sizeCalibration";
 /** The game's limit for custom items embedded in a map. */
 const MAP_LIMIT_BYTES = 5_000_000;
 
-const QUALITIES = ["Low", "Normal", "Fine", "High", "Ultra"] as const;
+const QUALITIES = ["Low", "Normal", "Fine", "High", "Extra", "Ultra"] as const;
 type Quality = (typeof QUALITIES)[number];
 const QUALITY_HINTS: Record<Quality, string> = {
   Low: "smallest; fast sweeping curves can feel bumpy",
   Normal: "smooth for most tracks",
   Fine: "smoother at high speed, still compact",
   High: "for very fast, high-g sections",
+  Extra: "between High and Ultra in smoothness and size",
   Ultra: "smoothest; usually too big for long tracks",
 };
 

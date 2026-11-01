@@ -12,6 +12,8 @@ public enum MeshQuality
     Normal,
     Fine,
     High,
+    /// <summary>Between High and Ultra: about the middle in map size.</summary>
+    Extra,
     Ultra,
 }
 
@@ -26,6 +28,7 @@ public static class MeshQualities
         MeshQuality.Normal => new SamplerSettings { MaxStep = 8, MaxAngleDegrees = 1 },
         MeshQuality.Fine => new SamplerSettings { MaxStep = 6, MaxAngleDegrees = 0.7 },
         MeshQuality.High => new SamplerSettings { MaxStep = 4, MaxAngleDegrees = 0.5 },
+        MeshQuality.Extra => new SamplerSettings { MaxStep = 3, MaxAngleDegrees = 0.35 },
         _ => new SamplerSettings { MaxStep = 2, MaxAngleDegrees = 0.25 },
     };
 
@@ -36,6 +39,7 @@ public static class MeshQualities
         MeshQuality.Normal => 5,
         MeshQuality.Fine => 4.25,
         MeshQuality.High => 3.75,
+        MeshQuality.Extra => 3.25,
         _ => 2.5,
     };
 
