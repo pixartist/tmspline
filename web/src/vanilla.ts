@@ -21,7 +21,32 @@ export interface PillarParam { block: string; offset: [number, number, number]; 
  * A piece the game adds on a free face of a unit (side walls, caps, the walls of columns): unit offset, face (0..5 =
  * North (+Z), East (-X), South (-Z), West (+X), Top, Bottom) and its mesh. Side pieces are modelled on the North face.
  */
-export interface ClipEntry { unit: [number, number, number]; face: number; mesh: { file: string } }
+export interface ClipEntry {
+  unit: [number, number, number]; face: number;
+  /** The free clip, shown unless the face is connected (null: the face only offers clip groups). */
+  mesh: { file: string } | null;
+  /** Clip groups of the neighbouring face that connect to this one (and hide the free clip). */
+  connects?: string[] | null;
+  /** Clip groups this face offers to its neighbour. */
+  offers?: string[] | null;
+  /** Top/bottom clips: quarter turns Ry(turn·90°) about the cell's centre. */
+  turn?: number;
+  /** Vertical clips (walls): shapes as the middle, top, bottom of a wall over several levels, or alone. */
+  stack?: ({ file: string } | null)[] | null;
+  /** Vertical clips: walls of the same group continue each other (e.g. a column's wall into its block's adapter). */
+  stackGroup?: string | null;
+  /** Every free clip of the face (the first one is `mesh`), see faceOptions. */
+  options?: {
+    name: string; mesh: { file: string } | null; connects: string[];
+    stack?: ({ file: string } | null)[] | null; stackGroup?: string | null;
+  }[] | null;
+  /** Set by visibleClips: drawn without its floor plate (a flat bottom piece on the ground keeps only its trims). */
+  floorless?: boolean;
+}
+
+/** Materials of the flat floor plates and lids in bottom clips (see VanillaLibrary.hasTrims). */
+const FLOOR_MATERIALS = new Set(["Grass", "TrackWallClips"]);
+
 export interface BlockVariant {
   size: [number, number, number]; units: number[][]; mesh: { file: string } | null; pillars?: PillarParam[] | null;
   clips?: ClipEntry[] | null;
@@ -34,6 +59,10 @@ interface BlockEntry {
   pillar?: boolean;
   /** The game's surface modifier (e.g. "PlatformGrass"): swaps materials of the shared mesh (see LibraryIndex.modifiers). */
   modifier?: string | null;
+  /** The air variant used with a column below (its clips: e.g. a slope's wedge walls); null: same as air. */
+  airPillar?: BlockVariant | null;
+  /** The ground variant with the same "column below" adapter, which the game also shows on the ground. */
+  groundPillar?: BlockVariant | null;
 }
 
 /** What the palette shows for a block. */
@@ -66,6 +95,7 @@ const MATERIAL_LOOKS: [RegExp, number | null][] = [
   [/Grass/i, 0x5a9e3c],
   [/Plastic/i, 0xf0c040],
   [/Wood/i, 0x8a5a33],
+  [/BordersOff/i, 0x1d1f23],
   [/TrackBorder|TrackWall/i, 0xe9e9ea],
   [/Trims/i, 0x3d4047],
   [/Technics|Structure|Pylon|Pillar|Support|Metal/i, 0x6c7078],
@@ -84,7 +114,8 @@ export class VanillaLibrary {
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
     this.materials = index.materials.map((name) => {
       const tex = index.textures?.[name];
-      if (tex?.texture && (index.format ?? 1) >= 2 && !/^(Collision|Trigger|Invisible|Shadow|Occ)|FX/i.test(name))
+      // "Off" borders are the unlit look of the light strips: dark in game, whatever their texture's white parts.
+      if (tex?.texture && (index.format ?? 1) >= 2 && !/^(Collision|Trigger|Invisible|Shadow|Occ)|FX|BordersOff/i.test(name))
         return texturedMaterial(name, tex, this.textureCache);
       const look = lookOf(name);
       if (look === null) return hidden;
@@ -120,6 +151,11 @@ export class VanillaLibrary {
     }).sort((a, b) => a.page.localeCompare(b.page) || a.catalog - b.catalog || a.name.localeCompare(b.name));
   }
 
+  /** The block's surface modifier (e.g. "PlatformGrass"), if it has one. */
+  modifierOf(name: string): string | undefined {
+    return this.index.blocks[name]?.modifier ?? undefined;
+  }
+
   /** Pillar blocks are column pieces: placed with the pillar flag, grid only. */
   isPillar(name: string): boolean {
     return !!this.index.blocks[name]?.pillar;
@@ -129,11 +165,77 @@ export class VanillaLibrary {
     return name in this.index.blocks;
   }
 
+  /** The clips of a block: those of its variant, or of the "column below" variant when a column stands under it. */
+  /**
+   * The variant the game shows: on the ground and over a column, the one with the column adapter (its own mesh, e.g. a
+   * loop's back side, and clips, e.g. a slope's wedge walls); otherwise the ground or air variant.
+   */
+  shownVariant(name: string, ground: boolean, columnBelow: boolean): BlockVariant | null {
+    const b = this.index.blocks[name];
+    if (ground && b?.groundPillar) return b.groundPillar;
+    if (columnBelow && !ground && b?.airPillar) return b.airPillar;
+    return this.variant(name, ground);
+  }
+
+  clipsOf(name: string, ground: boolean, columnBelow: boolean): ClipEntry[] {
+    return this.shownVariant(name, ground, columnBelow)?.clips ?? [];
+  }
+
+  /** Whether a mesh is only a plain cap (the flat TrackWallClips lids on top of and under walls). */
+  isCap(file: string): boolean {
+    const groups = this.index.meshes[file]?.groups ?? [];
+    return groups.length > 0 && groups.every((g) => this.index.materials[g.m] === "TrackWallClips");
+  }
+
+  /** Whether a mesh is flat (at most 1.5 m high): a plate or edge trim that lies flush on the ground there. */
+  isFlat(file: string): boolean {
+    const b = this.index.meshes[file]?.bounds;
+    return !!b && b[1][1] - b[0][1] <= 1.5;
+  }
+
+  /** Whether a mesh lies within one cell's footprint (x and z within 0..32), as single-cell trims do. */
+  inOneCell(file: string): boolean {
+    const b = this.index.meshes[file]?.bounds;
+    return !!b && b[0][0] >= -1 && b[0][2] >= -1 && b[1][0] <= 33 && b[1][2] <= 33;
+  }
+
+  /** Whether a mesh has parts besides floor plates and lids (Grass, TrackWallClips): trims, borders, decals. */
+  hasTrims(file: string): boolean {
+    return (this.index.meshes[file]?.groups ?? []).some((g) => !FLOOR_MATERIALS.has(this.index.materials[g.m]));
+  }
+
+  /** A material list (by material index) with the floor plates hidden, see hasTrims. */
+  floorless(list: THREE.Material[]): THREE.Material[] {
+    let out = this.floorlessLists.get(list);
+    if (!out) {
+      const hidden = new THREE.MeshBasicMaterial({ visible: false });
+      out = list.map((m, i) => (FLOOR_MATERIALS.has(this.index.materials[i]) ? hidden : m));
+      this.floorlessLists.set(list, out);
+    }
+    return out;
+  }
+
+  /** Whether a block has an adapter for a column below (which encloses the column's top). */
+  hasColumnAdapter(name: string): boolean {
+    return !!this.index.blocks[name]?.airPillar;
+  }
+
   /** The variant used at a height: ground variant on level 0, air above (each falls back to the other). */
   variant(name: string, ground: boolean): BlockVariant | null {
     const b = this.index.blocks[name];
     if (!b) return null;
     return ground ? b.ground ?? b.air : b.air ?? b.ground;
+  }
+
+  /** Resolves once every mesh asked for so far and every texture has loaded (for previews and screenshots). */
+  async settled(): Promise<void> {
+    for (let seen = -1; seen !== this.geometries.size; ) {
+      seen = this.geometries.size;
+      await Promise.allSettled([...this.geometries.values()]);
+      // Meshes arrive in callbacks that may ask for more (clips): give them a frame.
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    while ([...this.textureCache.values()].some((t) => !t.image)) await new Promise((r) => setTimeout(r, 50));
   }
 
   /** Mesh of a variant (cached; shared by all blocks that use it), with one group per game material. */
@@ -151,13 +253,14 @@ export class VanillaLibrary {
   }
 
   private readonly modifiedMaterials = new Map<string, THREE.Material[]>();
+  private readonly floorlessLists = new Map<THREE.Material[], THREE.Material[]>();
 
   /**
    * The materials of a block's mesh: the game's surface modifier (PlatformGrass, PlatformDirt, ...) swaps some of them
    * for its own, the others stay.
    */
-  materialsOf(name: string): THREE.Material[] {
-    const modifier = this.index.blocks[name]?.modifier;
+  materialsOf(name: string, modifierOverride?: string): THREE.Material[] {
+    const modifier = modifierOverride ?? this.index.blocks[name]?.modifier;
     const swaps = modifier ? this.index.modifiers?.[modifier] : undefined;
     if (!modifier || !swaps) return this.materials;
     let list = this.modifiedMaterials.get(modifier);
@@ -245,7 +348,8 @@ function texturedMaterial(name: string, tex: TextureEntry, cache: Map<string, TH
   const decal = tex.alpha === "decal", blend = tex.alpha === "blend";
   const material = new THREE.MeshStandardMaterial({
     map, roughness: 0.75, side: THREE.DoubleSide,
-    transparent: decal || blend, depthWrite: !(decal || blend), alphaTest: decal ? 0.05 : 0,
+    // Decals use their alpha as a cut-out mask (it is 0 or ~1 in the game's images), not as see-through blending.
+    transparent: blend, depthWrite: !blend, alphaTest: decal ? 0.5 : 0,
     opacity: blend && /Glass/i.test(name) ? 0.6 : 1,
     // Decals lie on the surfaces they mark: pulled towards the camera so they win the depth test.
     polygonOffset: decal, polygonOffsetFactor: decal ? -2 : 0, polygonOffsetUnits: decal ? -4 : 0,
@@ -344,32 +448,154 @@ export function occupiedCells(blocks: VanillaBlock[], lib: VanillaLibrary | null
 /** Face directions in block-local cells (North, East, South, West, Top, Bottom), as the blocks' directions turn. */
 const FACE_DIRS: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0], [0, 1, 0], [0, -1, 0]];
 
+/** A clip's unit cell and the world direction of its face. */
+function clipFace(b: VanillaBlock, m: THREE.Matrix4, rotation: THREE.Matrix4, c: ClipEntry): { cell: [number, number, number]; dir: [number, number, number] } {
+  const [x, z] = cellOf(m, (c.unit[0] + 0.5) * BLOCK_CELL, (c.unit[2] + 0.5) * BLOCK_CELL);
+  const d = new THREE.Vector3(...FACE_DIRS[c.face]).applyMatrix4(rotation);
+  return { cell: [x, b.y + c.unit[1], z], dir: [Math.round(d.x), Math.round(d.y), Math.round(d.z)] };
+}
+
 /**
- * The clips of a block that the game shows: those on faces with nothing next to them (no unit of any grid block; below
- * level 0 is the ground). Free blocks show all of theirs except the bottom ones.
+ * Who takes each grid cell, the clip groups each unit face offers and the wall (vertical clip) group on each face (key:
+ * cell|direction), for visibleClips.
  */
-function visibleClips(b: VanillaBlock, lib: VanillaLibrary, occupied: Set<string>): ClipEntry[] {
-  const clips = lib.variant(b.name, isGroundBlock(b))?.clips ?? [];
+export interface ClipNeighbours { owners: Map<string, VanillaBlock>; offers: Map<string, string[]>; walls: Map<string, string> }
+
+export function clipNeighbours(blocks: VanillaBlock[], lib: VanillaLibrary | null): ClipNeighbours {
+  const owners = new Map<string, VanillaBlock>(), offers = new Map<string, string[]>(), walls = new Map<string, string>();
+  for (const b of blocks) {
+    if (b.free) continue;
+    const m = blockMatrix(b, blockSize(lib, b));
+    for (const [ux, uy, uz] of lib?.variant(b.name, isGroundBlock(b))?.units ?? [[0, 0, 0]]) {
+      const [x, z] = cellOf(m, (ux + 0.5) * BLOCK_CELL, (uz + 0.5) * BLOCK_CELL);
+      owners.set(cellKey(x, b.y + uy, z), b);
+    }
+  }
+  for (const b of blocks) {
+    if (b.free) continue;
+    const m = blockMatrix(b, blockSize(lib, b));
+    const rotation = new THREE.Matrix4().extractRotation(m);
+    for (const c of blockClips(b, lib, owners)) {
+      if (!c.offers?.length && !c.stackGroup) continue;
+      const f = clipFace(b, m, rotation, c);
+      if (c.offers?.length) offers.set(`${f.cell}|${f.dir}`, c.offers);
+      if (c.stackGroup) walls.set(`${f.cell}|${f.dir}`, c.stackGroup);
+    }
+  }
+  return { owners, offers, walls };
+}
+
+/**
+ * The clips of a block that the game shows, as the game connects them: a free clip is hidden when the neighbouring
+ * unit face offers a clip group it connects to (a platform's underside on a column's top, two platforms side by side)
+ * or belongs to the same block; below level 0 is the ground. Faces next to empty cells or to blocks without a matching
+ * clip keep theirs (a column's cap under a slope, a platform's edge next to a road). Free blocks show all of theirs
+ * except the bottom ones.
+ */
+/** The variant the game shows for a block (see VanillaLibrary.shownVariant): column below = a column piece right under it. */
+function blockVariant(b: VanillaBlock, lib: VanillaLibrary | null, owners: Map<string, VanillaBlock>): BlockVariant | null {
+  if (!lib) return null;
+  if (b.free) return lib.variant(b.name, false);
+  if (isGroundBlock(b)) return lib.shownVariant(b.name, true, false);
+  const m = blockMatrix(b, blockSize(lib, b));
+  // A column under any of its bottom units (a loop's column stands under its second cell).
+  const bottom = lib.variant(b.name, false)?.units?.filter((u) => u[1] === 0) ?? [[0, 0, 0]];
+  const onColumn = bottom.some((u) => {
+    const [x, z] = cellOf(m, (u[0] + 0.5) * BLOCK_CELL, (u[2] + 0.5) * BLOCK_CELL);
+    const below = owners.get(cellKey(x, b.y - 1, z));
+    return !!below?.pillar && below !== b;
+  });
+  return lib.shownVariant(b.name, false, onColumn);
+}
+
+function blockClips(b: VanillaBlock, lib: VanillaLibrary | null, owners: Map<string, VanillaBlock>): ClipEntry[] {
+  return blockVariant(b, lib, owners)?.clips ?? [];
+}
+
+function visibleClips(b: VanillaBlock, lib: VanillaLibrary, n: ClipNeighbours): ClipEntry[] {
+  const clips = blockClips(b, lib, n.owners).flatMap((c) => faceOptions(c, lib)).filter((c) => c.mesh);
   if (b.free) return clips.filter((c) => c.face !== 5);
   const m = blockMatrix(b, blockSize(lib, b));
   const rotation = new THREE.Matrix4().extractRotation(m);
-  return clips.filter((c) => {
-    const [x, z] = cellOf(m, (c.unit[0] + 0.5) * BLOCK_CELL, (c.unit[2] + 0.5) * BLOCK_CELL);
-    const d = new THREE.Vector3(...FACE_DIRS[c.face]).applyMatrix4(rotation);
-    const level = b.y + c.unit[1] + Math.round(d.y);
-    return level >= 0 && !occupied.has(cellKey(x + Math.round(d.x), level, z + Math.round(d.z)));
+  const shown: ClipEntry[] = [];
+  for (const c of clips) {
+    const { cell, dir } = clipFace(b, m, rotation, c);
+    const next: [number, number, number] = [cell[0] + dir[0], cell[1] + dir[1], cell[2] + dir[2]];
+    // Towards the ground only real pieces show (the foot of a slope's start is a bottom clip), not the plain lids; of
+    // the flat floor pieces only their trims (wall feet), not the grass floor plate, which the game does not show there.
+    if (next[1] < 0) {
+      if (c.face !== 5 || !c.mesh || lib.isCap(c.mesh.file)) continue;
+      if (lib.isFlat(c.mesh.file)) {
+        if (!lib.hasTrims(c.mesh.file)) continue;
+        shown.push({ ...c, floorless: true });
+        continue;
+      }
+    }
+    const owner = n.owners.get(cellKey(...next));
+    if (owner === b) continue;
+    if (owner) {
+      // A column's top is enclosed by the adapter of the block standing on it.
+      if (b.pillar && c.face === 4 && !owner.pillar && lib.hasColumnAdapter(owner.name)) continue;
+      // ... and the block's own plain underside there with it (not real pieces stored as bottom clips).
+      if (!b.pillar && c.face === 5 && owner.pillar && lib.hasColumnAdapter(b.name) && c.mesh && lib.isCap(c.mesh.file)) continue;
+      const offered = n.offers.get(`${next}|${dir.map((v) => -v)}`);
+      if (offered && c.connects?.some((g) => offered.includes(g))) continue;
+    }
+    // Walls take the shape for their place in a wall of the same group over several levels.
+    if (c.stack && c.stackGroup) {
+      // It continues into the same wall group, or into another unit of the same block (whose own clips end it).
+      const continues = (dy: number) => n.walls.get(`${[cell[0], cell[1] + dy, cell[2]]}|${dir}`) === c.stackGroup
+        || n.owners.get(cellKey(cell[0], cell[1] + dy, cell[2])) === b;
+      const above = continues(1), below = continues(-1);
+      const shape = c.stack[above && below ? 0 : below ? 1 : above ? 2 : 3] ?? c.mesh;
+      shown.push({ ...c, mesh: shape });
+    } else shown.push(c);
+  }
+  return shown;
+}
+
+/**
+ * All free clips of a face, each as its own entry hidden by its own connection: a face often has several that go
+ * together (the two halves of a loop's side wall, inside and outside walls). A cap listed twice is the same trim on
+ * both edges (the two rims of a half-pipe): the second turns the other way.
+ */
+function faceOptions(c: ClipEntry, lib: VanillaLibrary): ClipEntry[] {
+  if (!c.options?.length) return [c];
+  const seen = new Map<string, number>();
+  return c.options.filter((o) => o.mesh).map((o) => {
+    const repeat = seen.get(o.name) ?? 0;
+    seen.set(o.name, repeat + 1);
+    return {
+      ...c,
+      mesh: o.mesh,
+      connects: o.connects.length ? o.connects : null,
+      stack: o.stack ?? null,
+      stackGroup: o.stackGroup ?? null,
+      turn: ((c.turn ?? 0) + (c.face >= 4 && lib.inOneCell(o.mesh!.file) ? repeat * 2 : 0)) % 4,
+      options: null,
+    };
   });
 }
 
 /** Where a clip's mesh goes in its block (block-local): on its unit, turned to its face; caps in the cell above/below. */
 function clipMatrix(c: ClipEntry): THREE.Matrix4 {
   const m = new THREE.Matrix4().makeTranslation(c.unit[0] * BLOCK_CELL, c.unit[1] * BLOCK_LEVEL, c.unit[2] * BLOCK_CELL);
-  if (c.face === 4) return m.multiply(new THREE.Matrix4().makeTranslation(0, BLOCK_LEVEL, 0));
-  if (c.face === 5) return m.multiply(new THREE.Matrix4().makeTranslation(0, -BLOCK_LEVEL, 0));
   const half = BLOCK_CELL / 2;
+  if (c.face >= 4)
+    // Caps are modelled in the cell above/below; shared ones are turned to the block (e.g. a slope's underside).
+    return m.multiply(new THREE.Matrix4().makeTranslation(half, c.face === 4 ? BLOCK_LEVEL : -BLOCK_LEVEL, half))
+      .multiply(new THREE.Matrix4().makeRotationY(((c.turn ?? 0) * Math.PI) / 2))
+      .multiply(new THREE.Matrix4().makeTranslation(-half, 0, -half));
   return m.multiply(new THREE.Matrix4().makeTranslation(half, 0, half))
+    // Side pieces are modelled on the North face (+Z) and turn like block directions (East = -X).
     .multiply(new THREE.Matrix4().makeRotationY((-c.face * Math.PI) / 2))
-    .multiply(new THREE.Matrix4().makeTranslation(-half, 0, -half));
+    .multiply(new THREE.Matrix4().makeTranslation(-half, 0, -half))
+    // The game models side pieces from the neighbouring cell's side (just outside the face, z 32..33), as that cell
+    // sees them: turned around the face's centre they lie inside the block (lip flush with the edge, trims under it,
+    // sloped and curved trims running the right way; checked on Slope2 and LoopStartCurve1In).
+    .multiply(new THREE.Matrix4().makeTranslation(half, 0, BLOCK_CELL))
+    .multiply(new THREE.Matrix4().makeRotationY(Math.PI))
+    .multiply(new THREE.Matrix4().makeTranslation(-half, 0, -BLOCK_CELL));
 }
 
 export function pillarColumns(blocks: VanillaBlock[], lib: VanillaLibrary | null): VanillaBlock[] {
@@ -395,7 +621,8 @@ export function pillarColumns(blocks: VanillaBlock[], lib: VanillaLibrary | null
         const key = `${p.block}|${x}|${level}|${z}`;
         if (placed.has(key)) continue;
         placed.add(key);
-        columns.push({ name: p.block, x, y: level, z, dir: (b.dir + p.dir) % 4, pillar: true });
+        const modifier = lib.modifierOf(b.name);
+        columns.push({ name: p.block, x, y: level, z, dir: (b.dir + p.dir) % 4, pillar: true, ...(modifier ? { modifier } : {}) });
       }
     }
   }
@@ -415,6 +642,11 @@ export class BlockLayer {
   });
   private readonly dropMaterial = new THREE.LineBasicMaterial({ color: 0x1c2228, transparent: true, opacity: 0.6 });
 
+  /** Shows or hides the ground shadows and drop lines (the block preview hides them). */
+  set shadowsVisible(on: boolean) {
+    this.shadows.visible = on;
+  }
+
   constructor() {
     this.group.add(this.shadows);
   }
@@ -431,17 +663,18 @@ export class BlockLayer {
     this.keys = [];
   }
 
-  /** Cells taken by all grid blocks and columns: clips only show on faces next to free cells (see visibleClips). */
-  private occupied = new Set<string>();
+  /** Cells and clip groups of all grid blocks and columns: which clips show depends on them (see visibleClips). */
+  private neighbours: ClipNeighbours = { owners: new Map(), offers: new Map(), walls: new Map() };
 
   setNeighbours(blocks: VanillaBlock[]): void {
-    this.occupied = occupiedCells(blocks, this.lib);
+    this.neighbours = clipNeighbours(blocks, this.lib);
   }
 
   /** Cache key of a block's look: where it is and which of its clips show. */
   private keyOf(b: VanillaBlock): string {
-    const clips = this.lib ? visibleClips(b, this.lib, this.occupied).map((c) => `${c.unit}/${c.face}`).join(";") : "";
-    return `${blockKey(b)}|${this.lib ? 1 : 0}|${clips}`;
+    const clips = this.lib ? visibleClips(b, this.lib, this.neighbours).map((c) => `${c.unit}/${c.face}/${c.mesh?.file}`).join(";") : "";
+    const mesh = blockVariant(b, this.lib, this.neighbours.owners)?.mesh?.file ?? "";
+    return `${blockKey(b)}|${b.modifier ?? ""}|${this.lib ? 1 : 0}|${mesh}|${clips}`;
   }
 
   get library(): VanillaLibrary | null {
@@ -567,9 +800,9 @@ export class BlockLayer {
     item.add(outline);
     item.userData.outline = outline;
 
-    const file = this.lib?.variant(b.name, isGroundBlock(b))?.mesh?.file;
-    const clips = this.lib ? visibleClips(b, this.lib, this.occupied) : [];
-    if ((!file && !this.lib?.variant(b.name, isGroundBlock(b))?.clips?.length) || !this.lib) {
+    const file = blockVariant(b, this.lib, this.neighbours.owners)?.mesh?.file;
+    const clips = this.lib ? visibleClips(b, this.lib, this.neighbours) : [];
+    if ((!file && !clips.length && !this.lib?.variant(b.name, isGroundBlock(b))?.clips?.length) || !this.lib) {
       // No mesh (no library, or a block it does not know): a box of the block's size.
       const placeholder = new THREE.Mesh(box, ghost ? this.ghostMaterial : this.placeholderMaterial);
       item.add(placeholder);
@@ -577,12 +810,13 @@ export class BlockLayer {
     }
     const lib = this.lib;
     const parts = [
-      ...(file ? [{ file, matrix: null as THREE.Matrix4 | null }] : []),
-      ...clips.map((c) => ({ file: c.mesh.file, matrix: clipMatrix(c) })),
+      ...(file ? [{ file, matrix: null as THREE.Matrix4 | null, floorless: false }] : []),
+      ...clips.map((c) => ({ file: c.mesh!.file, matrix: clipMatrix(c), floorless: !!c.floorless })),
     ];
     for (const part of parts)
       lib.geometry(part.file).then((geo) => {
-        const mesh = new THREE.Mesh(geo, ghost ? this.ghostMaterial : lib.materialsOf(b.name));
+        const materials = lib.materialsOf(b.name, b.modifier);
+        const mesh = new THREE.Mesh(geo, ghost ? this.ghostMaterial : part.floorless ? lib.floorless(materials) : materials);
         if (part.matrix) {
           mesh.matrixAutoUpdate = false;
           mesh.matrix.copy(part.matrix);

@@ -48,6 +48,8 @@ var missingFiles = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal
 var refCache = new ConcurrentDictionary<string, Lazy<string[]>>(StringComparer.OrdinalIgnoreCase);
 var materialFiles = new ConcurrentDictionary<string, string>();
 var blockModifiers = new ConcurrentDictionary<string, string>();
+var meshVertices = new ConcurrentDictionary<string, Vector3[]>();
+var meshSamples = new ConcurrentDictionary<string, Lazy<Vector3[]>>();
 var clipMeshes = new ConcurrentDictionary<string, Lazy<MeshRef?>>(StringComparer.OrdinalIgnoreCase);
 string[] ClipFaces = ["ClipsNorth", "ClipsEast", "ClipsSouth", "ClipsWest", "ClipsTop", "ClipsBottom"];
 var nodeCache = new ConcurrentDictionary<string, Lazy<(object?, int)>>(StringComparer.OrdinalIgnoreCase);
@@ -69,6 +71,17 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
             }
             var ground = Variant(info.VariantBaseGround, file, level, true);
             var air = Variant(info.VariantBaseAir, file, level, false);
+            // The air variant the game uses with a column below (e.g. a slope with the column's wedge walls), when the
+            // base one is the "no pillar below" variant.
+            var withPillar = info.VariantBaseAir is { IsNoPillarBelowVariant: true }
+                ? (info.AdditionalVariantsAir ?? []).FirstOrDefault(v => v is { IsNoPillarBelowVariant: false })
+                : null;
+            var airPillar = withPillar is null ? null : Variant(withPillar, file, level, false);
+            // The same on the ground: the version with its "column below" adapter, which the game shows there too.
+            var groundWith = info.VariantBaseGround is { IsNoPillarBelowVariant: true }
+                ? (info.AdditionalVariantsGround ?? []).FirstOrDefault(v => v is { IsNoPillarBelowVariant: false })
+                : null;
+            var groundPillar = groundWith is null ? null : Variant(groundWith, file, level, true);
             // Blocks without a mesh of their own (shaped only by the clips the game adds, e.g. Deco walls) stay in the
             // palette with their icon and show as boxes.
             if (ground?.Mesh is not null || air?.Mesh is not null || ground?.Clips is not null || air?.Clips is not null)
@@ -82,7 +95,7 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
                 }
                 blocks[name] = new BlockInfo(Path.GetRelativePath(blockDir, Path.GetDirectoryName(file)!).Replace('\\', '/'), ground, air,
                     icon, info.PageName ?? "", info.CatalogPosition, info.IsPillar,
-                    blockModifiers.TryGetValue(name, out var mod) ? Path.GetFileName(mod).Split('.')[0] : null);
+                    blockModifiers.TryGetValue(name, out var mod) ? Path.GetFileName(mod).Split('.')[0] : null, airPillar, groundPillar);
             }
         }
     }
@@ -181,12 +194,23 @@ VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, 
     var units = unitInfos.Select(u => u.RelativeOffset).ToList();
     var size = units.Count == 0 ? new[] { 1, 1, 1 } : new[] { units.Max(u => u.X) + 1, units.Max(u => u.Y) + 1, units.Max(u => u.Z) + 1 };
     var mesh = MeshOf(variant, file, level);
+    Int3 Cell(Int3 u) => u;
     // The pieces the game adds on free faces of each unit (sides, caps, walls of columns): one "free clip" per face.
+    // A free clip is hidden when the neighbouring face offers a clip group it connects to (its symmetrical group).
     var clips = new List<ClipInfo>();
     foreach (var u in unitInfos)
         for (var face = 0; face < ClipFaces.Length; face++)
-            if (FreeClipMesh(u, ClipFaces[face], file, level, ground) is { } clipMesh)
-                clips.Add(new ClipInfo([u.RelativeOffset.X, u.RelativeOffset.Y, u.RelativeOffset.Z], face, clipMesh));
+        {
+            // The ground version of a clip only on the bottom level; the levels above use the air one (otherwise
+            // walls get a base trim on every level).
+            var (clipMesh, connects, offers, stack, stackGroup, options) = FaceClips(u, ClipFaces[face], file, level, ground && u.RelativeOffset.Y == 0);
+            var cell = Cell(u.RelativeOffset);
+            if (clipMesh is not null || offers.Length > 0)
+                clips.Add(new ClipInfo([cell.X, cell.Y, cell.Z], face, clipMesh,
+                    connects.Length > 0 ? connects : null, offers.Length > 0 ? offers : null,
+                    face >= 4 && clipMesh is not null && mesh is not null ? CapTurn(clipMesh, mesh, cell, face == 4) : 0,
+                    stack, stackGroup, options.Length > 1 ? options : null));
+        }
     // The columns the game's editor puts under this variant: pillar block, unit (offset in cells) and direction.
     var pillars = (variant.PlacedPillarParams ?? []).Select(p => new PillarInfo(
             p.BlockInfo?.Ident.Id is { Length: > 0 } id ? id
@@ -201,8 +225,14 @@ VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, 
 /// Mesh of a unit face's free clip (the piece shown when nothing is next to that face), from the clip's ground or air
 /// variant. Clips are embedded in the block's file or are external .EDClip files.
 /// </summary>
-MeshRef? FreeClipMesh(CGameCtnBlockUnitInfo unit, string face, string file, int level, bool ground)
+(MeshRef? Mesh, string[] Connects, string[] Offers, MeshRef?[]? Stack, string? StackGroup, ClipOption[] Options) FaceClips(CGameCtnBlockUnitInfo unit, string face, string file, int level, bool ground)
 {
+    MeshRef? found = null;
+    MeshRef?[]? stack = null;
+    string? stackGroup = null;
+    var connects = new List<string>();
+    var offers = new HashSet<string>();
+    var options = new List<ClipOption>();
     var refs = unit.GetType().GetProperty("References")!.GetValue(unit);
     var refList = refs?.GetType().GetProperty(face)?.GetValue(refs) as System.Collections.IList;
     System.Collections.IList? nodes = null;
@@ -225,21 +255,41 @@ MeshRef? FreeClipMesh(CGameCtnBlockUnitInfo unit, string face, string file, int 
         }
         else clip = nodes is not null && i < nodes.Count ? nodes[i] as CGameCtnBlockInfo : null;
         if (clip is not CGameCtnBlockInfoClip c) continue;
+        foreach (var g in new[] { c.ClipGroupId, c.ClipGroupId2 }) if (!string.IsNullOrEmpty(g)) offers.Add(g);
         var type = c.ClipType.ToString();
         if (!c.IsFullFreeClip && !type.StartsWith("FreeClip", StringComparison.Ordinal)) continue;
         var key = $"{clipFile}|{(external is null ? $"{face}{i}|{unit.RelativeOffset}" : "")}|{ground}";
-        var result = clipMeshes.GetOrAdd(key, _ => new Lazy<MeshRef?>(() =>
-            MeshOf(ground ? (CGameCtnBlockInfoVariant?)c.VariantBaseGround ?? c.VariantBaseAir : (CGameCtnBlockInfoVariant?)c.VariantBaseAir ?? c.VariantBaseGround, clipFile, clipLevel))).Value;
-        if (result is not null) return result;
+        // The variant for the block's height; when it has no mesh (e.g. a column's cap on the ground), the other one.
+        MeshRef? ShapeOf(int set) => clipMeshes.GetOrAdd($"{key}|{set}", _ => new Lazy<MeshRef?>(() =>
+            (ground ? MeshOf(c.VariantBaseGround, clipFile, clipLevel, set) : MeshOf(c.VariantBaseAir, clipFile, clipLevel, set))
+            ?? (ground ? MeshOf(c.VariantBaseAir, clipFile, clipLevel, set) : MeshOf(c.VariantBaseGround, clipFile, clipLevel, set)))).Value;
+        // Vertical clips (walls of columns and the adapters above them) come in shapes for their place in a wall that
+        // runs over several levels: middle, top, bottom, alone (mobil sets 0..3). Some have no middle shape (an adapter
+        // wedge only exists as the top of a wall), so any shape makes them count.
+        MeshRef?[]? shapes = c is CGameCtnBlockInfoClipVertical ? [ShapeOf(0), ShapeOf(1), ShapeOf(2), ShapeOf(3)] : null;
+        var result = shapes?.FirstOrDefault(m => m is not null) ?? ShapeOf(0);
+        // What it connects to: its symmetrical groups, or its own groups when it has none (vertical clips of columns).
+        var symmetric = new[] { c.SymmetricalClipGroupId, c.SymmetricalClipGroupId2 }.Where(g => !string.IsNullOrEmpty(g)).Select(g => g!).ToList();
+        var joins = symmetric.Count > 0 ? symmetric : new[] { c.ClipGroupId, c.ClipGroupId2 }.Where(g => !string.IsNullOrEmpty(g)).Select(g => g!).ToList();
+        var clipName = external?.FilePath is { Length: > 0 } ? Path.GetFileName(clipFile).Split('.')[0] : c.Ident.Id is { Length: > 0 } id ? id : $"embedded{i}";
+        options.Add(new ClipOption(clipName, result, joins.ToArray(), shapes, (c as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId));
+        if (found is not null || result is null) continue;
+        found = result;
+        if (c is CGameCtnBlockInfoClipVertical vertical)
+        {
+            stack = shapes;
+            stackGroup = vertical.VerticalClipGroupId;
+        }
+        connects.AddRange(joins);
     }
-    return null;
+    return (found, connects.Distinct().ToArray(), offers.Order().ToArray(), stack, stackGroup, options.ToArray());
 }
 
-MeshRef? MeshOf(CGameCtnBlockInfoVariant? variant, string file, int level)
+MeshRef? MeshOf(CGameCtnBlockInfoVariant? variant, string file, int level, int set = 0)
 {
     if (variant is null) return null;
     var builder = new MeshBuilder();
-    foreach (var mobil in variant.Mobils?.FirstOrDefault() ?? [])
+    foreach (var mobil in variant.Mobils?.ElementAtOrDefault(set) ?? [])
     {
         if (mobil is null) continue;
         var m = mobil.HasGeomTransformation
@@ -387,6 +437,109 @@ static string MaterialName(string? path)
     return dot > 0 ? name[..dot] : name;
 }
 
+/// <summary>
+/// Quarter turns (about the cell's vertical axis, as Ry(k·90°)) for a top or bottom clip: the game shares such clips
+/// between blocks that point different ways (a slope's underside under Slope2 Up, Down, Left, Right) and turns them to
+/// the block. Picked as the turn whose height profile matches the block's own mesh over the unit's cell best; flat clips
+/// keep 0.
+/// </summary>
+int CapTurn(MeshRef clip, MeshRef block, Int3 unit, bool topFace)
+{
+    if (!meshVertices.TryGetValue(clip.File, out var cv) || !meshVertices.TryGetValue(block.File, out var bv)) return 0;
+    if (cv.Length == 0) return 0;
+    // Flat caps (edge trims, plates): turned to lie where the block's own mesh meets that face. Caps over several cells
+    // (a curve's column top) are modelled in place in the block's frame and keep 0.
+    var multiCell = cv.Min(v => Math.Min(v.X, v.Z)) < -1 || cv.Max(v => Math.Max(v.X, v.Z)) > 33;
+    if (cv.Max(v => v.Y) - cv.Min(v => v.Y) < 2) return multiCell ? 0 : FootprintTurn(clip, block, unit, topFace);
+    // Uphill directions: of the clip's top profile (highest point per bin, so walls hanging below do not count) and of
+    // the block's mesh over the unit's cell.
+    const int n = 8;
+    static int Bin(float c) => Math.Clamp((int)(c / 32f * n), 0, n - 1);
+    var top = new float?[n, n];
+    foreach (var v in cv)
+    {
+        ref var h = ref top[Bin(v.X), Bin(v.Z)];
+        h = Math.Max(h ?? float.MinValue, v.Y);
+    }
+    var clipPoints = new List<(double X, double Z, double Y)>();
+    for (var a = 0; a < n; a++)
+        for (var b = 0; b < n; b++)
+            if (top[a, b] is { } h) clipPoints.Add(((a + 0.5) * 32 / n, (b + 0.5) * 32 / n, h));
+    var blockPoints = bv.Select(v => (X: (double)v.X - unit.X * 32, Z: (double)v.Z - unit.Z * 32, Y: (double)v.Y))
+        .Where(v => v.X >= 0 && v.X <= 32 && v.Z >= 0 && v.Z <= 32).ToList();
+    var (cx, cz) = Gradient(clipPoints);
+    var (bx, bz) = Gradient(blockPoints);
+    if (Math.Sqrt(bx * bx + bz * bz) < 0.05 || Math.Sqrt(cx * cx + cz * cz) < 0.05) return 0;
+    var best = 0;
+    var bestDot = double.MinValue;
+    for (var k = 0; k < 4; k++)
+    {
+        double cos = Math.Round(Math.Cos(k * Math.PI / 2)), sin = Math.Round(Math.Sin(k * Math.PI / 2));
+        var dot = (cx * cos + cz * sin) * bx + (-cx * sin + cz * cos) * bz;
+        if (dot > bestDot + 1e-9) { bestDot = dot; best = k; }
+    }
+    return best;
+}
+
+/// <summary>
+/// Quarter turn for a flat cap: the game shares edge trims and plates between blocks (one trim modelled along the cell's
+/// South edge serves walls and loops on any edge) and turns them to the block. Picked as the turn that puts most of the
+/// clip over the block's own surface at that face's height (within the unit's cell); 0 when none is clearly better.
+/// </summary>
+int FootprintTurn(MeshRef clip, MeshRef block, Int3 unit, bool top)
+{
+    if (!meshSamples.TryGetValue(clip.File, out var cs) || !meshSamples.TryGetValue(block.File, out var bs)) return 0;
+    var height = unit.Y * 8f + (top ? 8 : 0);
+    const float reach = 2.5f;
+    var near = bs.Value
+        .Select(v => (X: v.X - unit.X * 32f, Z: v.Z - unit.Z * 32f, v.Y))
+        .Where(v => v.X >= -0.5f && v.X <= 32.5f && v.Z >= -0.5f && v.Z <= 32.5f && Math.Abs(v.Y - height) <= 2f)
+        .ToList();
+    if (near.Count == 0) return 0;
+    // Grid of the block's surface near the face (2.5 m cells) for quick look-ups.
+    var grid = new HashSet<(int, int)>(near.Select(v => ((int)Math.Floor(v.X / reach), (int)Math.Floor(v.Z / reach))));
+    bool Covered(double x, double z)
+    {
+        int gx = (int)Math.Floor(x / reach), gz = (int)Math.Floor(z / reach);
+        for (var a = -1; a <= 1; a++)
+            for (var b = -1; b <= 1; b++)
+                if (grid.Contains((gx + a, gz + b))) return true;
+        return false;
+    }
+    var points = cs.Value;
+    var scores = new double[4];
+    for (var k = 0; k < 4; k++)
+    {
+        double cos = Math.Round(Math.Cos(k * Math.PI / 2)), sin = Math.Round(Math.Sin(k * Math.PI / 2));
+        var hit = 0;
+        foreach (var p in points)
+        {
+            double x = p.X - 16, z = p.Z - 16;
+            if (Covered(16 + x * cos + z * sin, 16 - x * sin + z * cos)) hit++;
+        }
+        scores[k] = hit / (double)Math.Max(1, points.Length);
+    }
+    var best = 0;
+    for (var k = 1; k < 4; k++) if (scores[k] > scores[best]) best = k;
+    // Plates count mostly by their large flat part, which overlaps alike in every turn; the edge decides.
+    return scores[best] - scores[0] > 0.02 && scores[best] > scores[0] * 1.25 ? best : 0;
+}
+
+/// <summary>Least-squares plane y = a·x + b·z + c through points: its uphill gradient (a, b).</summary>
+static (double A, double B) Gradient(List<(double X, double Z, double Y)> p)
+{
+    if (p.Count < 3) return (0, 0);
+    double mx = p.Average(q => q.X), mz = p.Average(q => q.Z), my = p.Average(q => q.Y);
+    double sxx = 0, szz = 0, sxz = 0, sxy = 0, szy = 0;
+    foreach (var (x, z, y) in p)
+    {
+        double dx = x - mx, dz = z - mz, dy = y - my;
+        sxx += dx * dx; szz += dz * dz; sxz += dx * dz; sxy += dx * dy; szy += dz * dy;
+    }
+    var det = sxx * szz - sxz * sxz;
+    return Math.Abs(det) < 1e-9 ? (0, 0) : ((sxy * szz - szy * sxz) / det, (szy * sxx - sxy * sxz) / det);
+}
+
 MeshRef Save(MeshBuilder b)
 {
     var (bytes, groups, min, max) = b.Serialize();
@@ -395,6 +548,8 @@ MeshRef Save(MeshBuilder b)
     // Blocks share meshes; the first one to get here writes the file (GetOrAdd alone may run the factory twice).
     if (meshes.TryAdd(file, new MeshInfo(file, groups, min, max)))
         File.WriteAllBytes(Path.Combine(outDir, file), bytes);
+    meshVertices.TryAdd(file, b.Vertices.ToArray());
+    meshSamples.TryAdd(file, new Lazy<Vector3[]>(() => b.Samples().ToArray()));
     return new MeshRef(file);
 }
 
@@ -408,9 +563,20 @@ static string FindRepoRoot()
 record MeshRef(string File);
 record PillarInfo(string Block, int[] Offset, int Dir);
 /// <summary>A unit face's free clip: unit offset, face (0..5 = North, East, South, West, Top, Bottom) and mesh.</summary>
-record ClipInfo(int[] Unit, int Face, MeshRef Mesh);
+/// <param name="Mesh">The free clip shown when the face is not connected (null: the face only offers groups).</param>
+/// <param name="Connects">Clip groups of a neighbouring face that hide the free clip.</param>
+/// <param name="Offers">Clip groups this face offers to its neighbours.</param>
+/// <param name="Turn">Top/bottom clips: quarter turns Ry(k·90°) about the cell's centre (see CapTurn).</param>
+/// <param name="Stack">Vertical clips: shapes as the middle, top, bottom of a wall over several levels, or alone.</param>
+/// <param name="StackGroup">Vertical clips: their VerticalClipGroupId (walls of the same group continue each other).</param>
+/// <param name="Options">Every free clip of the face (name, mesh, groups it connects to), in the file's order.</param>
+record ClipInfo(int[] Unit, int Face, MeshRef? Mesh, string[]? Connects, string[]? Offers, int Turn, MeshRef?[]? Stack, string? StackGroup, ClipOption[]? Options);
+/// <summary>One free clip of a face: its name, mesh (null: none for this height) and the groups that hide it.</summary>
+record ClipOption(string Name, MeshRef? Mesh, string[] Connects, MeshRef?[]? Stack, string? StackGroup);
 record VariantInfo(int[] Size, int[][] Units, MeshRef? Mesh, PillarInfo[]? Pillars, ClipInfo[]? Clips);
-record BlockInfo(string Folder, VariantInfo? Ground, VariantInfo? Air, string? Icon, string Page, int Catalog, bool Pillar, string? Modifier);
+/// <param name="AirPillar">The air variant used when a column stands below the block (null: same as Air).</param>
+record BlockInfo(string Folder, VariantInfo? Ground, VariantInfo? Air, string? Icon, string Page, int Catalog, bool Pillar, string? Modifier,
+    VariantInfo? AirPillar, VariantInfo? GroundPillar);
 record Group(int M, int V, int I);
 record MeshInfo(string File, Group[] Groups, float[] Min, float[] Max);
 
@@ -419,6 +585,22 @@ sealed class MeshBuilder
 {
     readonly SortedDictionary<int, (List<Vector3> V, List<Vector2> T, List<int> I)> groups = new();
     public bool IsEmpty => groups.Count == 0;
+    public IEnumerable<Vector3> Vertices => groups.Values.SelectMany(g => g.V);
+
+    /// <summary>Points spread over the triangles (about every 2 m), so large faces count where their vertices are few.</summary>
+    public IEnumerable<Vector3> Samples()
+    {
+        foreach (var g in groups.Values)
+            for (var i = 0; i + 2 < g.I.Count; i += 3)
+            {
+                Vector3 a = g.V[g.I[i]], b = g.V[g.I[i + 1]], c = g.V[g.I[i + 2]];
+                var longest = Math.Max(Vector3.Distance(a, b), Math.Max(Vector3.Distance(b, c), Vector3.Distance(c, a)));
+                var n = Math.Clamp((int)Math.Ceiling(longest / 2f), 1, 24);
+                for (var p = 0; p <= n; p++)
+                    for (var q = 0; p + q <= n; q++)
+                        yield return a + (b - a) * (p / (float)n) + (c - a) * (q / (float)n);
+            }
+    }
 
     public void Add(int material, Vector3[] positions, Vector2[] uvs, int[] indices)
     {

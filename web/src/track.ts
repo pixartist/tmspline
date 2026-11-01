@@ -173,6 +173,11 @@ export interface VanillaBlock {
    * generated under an air block (only in exports).
    */
   pillar?: boolean;
+  /**
+   * Generated columns only (preview, never saved): the surface modifier of the block they stand under, whose materials
+   * they take (concrete walls under grass platforms, ...), as in game.
+   */
+  modifier?: string;
 }
 
 export const BLOCK_CELL = 32;
