@@ -92,7 +92,7 @@ public sealed class TrackPoint
     public double BankDegrees { get; set; }
 
     /// <summary>Road width at this point in meters (measured along the surface); blended smoothly towards the neighbouring points.</summary>
-    public double Width { get; set; } = 16;
+    public double Width { get; set; } = DefaultWidth;
 
     /// <summary>
     /// Cross-section bend in degrees: 0 = flat, negative = convex (sausage, down to -180), positive = concave
@@ -121,7 +121,10 @@ public sealed class TrackPoint
 
     public const double DefaultBorderHeight = 0.8;
 
-    public TrackPoint(Vec3d position, Vec3d handleOut, double bankDegrees = 0, double width = 16)
+    /// <summary>Width of new roads: the driving surface of the game's road blocks between their curbs (x 2.7..29.3).</summary>
+    public const double DefaultWidth = 26.6;
+
+    public TrackPoint(Vec3d position, Vec3d handleOut, double bankDegrees = 0, double width = DefaultWidth)
     {
         Position = position;
         HandleOut = handleOut;

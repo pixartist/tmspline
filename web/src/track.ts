@@ -67,6 +67,11 @@ export interface TrackPoint {
 }
 
 export const DEFAULT_BORDER_HEIGHT = 0.8;
+/**
+ * Road width of new tracks: the driving surface of the game's road blocks between the inner faces of their curbs
+ * (RoadTech/Dirt/Bump: x 2.7..29.3 in their 32 m cell). Our borders sit outside the width, as theirs do.
+ */
+export const DEFAULT_ROAD_WIDTH = 26.6;
 
 /** Named cross-section shapes for the inspector. */
 export const SHAPE_PRESETS: { label: string; curve: number; flat: number; sausage: number }[] = [
@@ -246,7 +251,7 @@ export function newTrack(center: Vec3 = [0, 16, 0], direction: Vec3 = [0, 0, 1])
   if (length(dir) === 0) dir = [0, 0, 1];
   const point = (along: number): TrackPoint => ({
     position: add(center, scale(dir, along)), handleIn: scale(dir, -24), handleOut: scale(dir, 24),
-    bank: 0, width: 16, curve: 0, flat: 0, sausage: 0, borderHeight: DEFAULT_BORDER_HEIGHT, waypoint: "None",
+    bank: 0, width: DEFAULT_ROAD_WIDTH, curve: 0, flat: 0, sausage: 0, borderHeight: DEFAULT_BORDER_HEIGHT, waypoint: "None",
   });
   return { closed: false, points: [point(-64), point(64)], segments: [defaultSegment()], objects: [] };
 }
