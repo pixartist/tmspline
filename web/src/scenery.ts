@@ -133,34 +133,39 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   const { dist, base } = spread(track);
 
   const blocks: VanillaBlock[] = [];
-  let cliffHigh = new Set<string>(), cliffFront = new Set<string>();
+  let cliff: Cliffs | null = null;
   if (options.cliffs > 0) {
     const walls = cliffWalls(lib, options.theme, dist, options.cliffs);
     if (!walls) return null;
     blocks.push(...walls.blocks);
-    cliffHigh = walls.high;
-    // Vertical faces (the 64 m cliffs stay within their wall cell): the hills run up against them. Faces that lean out
-    // over the next row (80 m) keep it free.
+    // Vertical faces (the 64 m cliffs stay within their wall cell) take land right up to them; faces that lean out over
+    // the next row (80 m) keep it free.
     const small = lib.variant(`${options.theme.prefix}StraightSmall`, true)?.mesh?.file;
-    if (!small || !lib.inOneCell(small)) cliffFront = walls.front;
+    cliff = { high: walls.high, front: walls.front, top: walls.top, leaning: !small || !lib.inOneCell(small) };
   }
   if (options.hills) {
-    const land = hills(lib, track, dist, base, cliffHigh, cliffFront, options);
+    const land = hills(lib, track, dist, base, cliff, options);
     if (!land) return null;
     blocks.push(...land);
   }
   return blocks;
 }
 
+/** The cliff walls as the land sees them: behind them, the cells in front of their faces, the top level, leaning faces. */
+interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: boolean }
+
 /**
- * Land and hills: every cell gets a height in levels, even (one DecoHill slope rises 2 levels). Under the track the highest
- * that stays below it; beside it, for the gap, the same; further out it rises by 2 every `hillStep` cells, up to
- * `hillRise` above. Neighbours differ by one slope at most (lower cells are pulled down, not walls built up), and the
- * cells in front of the cliffs stay on the ground. Flat cells get a DecoPlatformBase (its columns come with it), cells
- * below a higher neighbour a slope, inner and outer corners the curved ones.
+ * Land and hills: every cell gets a height in levels. Under the track the highest that stays below it; beside it, for the
+ * gap, the same. With cliffs the land climbs to their top: in front of the faces it is level with it, and from there it
+ * steps down by 2 every `hillStep` cells towards the track. Without cliffs it rises away from the track by 2 every
+ * `hillStep` cells, up to `hillRise` above it. Neighbours differ by one slope at most (lower cells are pulled down, not
+ * walls built up). Flat cells get a DecoPlatformBase (its columns come with it), cells below a higher neighbour a slope,
+ * inner and outer corners the curved ones.
  */
 function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string, number>, base: Map<string, number>,
-  cliffHigh: Set<string>, cliffFront: Set<string>, options: SceneryLandOptions): VanillaBlock[] | null {
+  cliff: Cliffs | null, options: SceneryLandOptions): VanillaBlock[] | null {
+  const cliffHigh = cliff?.high ?? new Set<string>(), cliffFront = cliff?.front ?? new Set<string>();
+  const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
   // Slopes by the height they climb: DecoHill for 2 levels, the deco platform's own for 1 (as modelled: straight up to
   // +Z, the inner corner high but at (-X, +Z), the outer corner high only there).
   const flat = "DecoPlatformBase";
@@ -177,10 +182,15 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       const k = key(x, z);
       if (cliffHigh.has(k)) continue;
       if (track.has(k)) { height.set(k, track.get(k)!); continue; }
-      if (cliffFront.has(k)) { height.set(k, 0); continue; }
+      if (cliff && cliffFront.has(k)) { height.set(k, cliff.top); continue; }
       const d = dist.get(k) ?? Infinity, b = base.get(k) ?? 0;
-      const steps = d <= options.gap + 1 ? 0 : Math.floor((d - options.gap - 2) / Math.max(1, options.hillStep)) + 1;
-      height.set(k, b + Math.min(2 * steps, even2(options.hillRise)));
+      const step = Math.max(1, options.hillStep);
+      if (d <= options.gap + 1) height.set(k, b);
+      else if (cliff && toCliff) {
+        // Cells in front of the faces are 1 away; the top terrace is `step` cells deep, then 2 lower every `step`.
+        const c = toCliff.get(k) ?? Infinity;
+        height.set(k, Math.max(b, cliff.top - 2 * Math.floor((c - 1) / step)));
+      } else height.set(k, b + Math.min(2 * (Math.floor((d - options.gap - 2) / step) + 1), even2(options.hillRise)));
     }
   const h = (x: number, z: number) => height.get(key(x, z));
   const fixed = (k: string) => track.has(k) || cliffFront.has(k);
@@ -216,8 +226,8 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
   const same = (a: Cell, b: Cell) => a[0] === b[0] && a[1] === b[1];
   const at = (name: string, x: number, z: number, level: number, dir: number): VanillaBlock => ({ name, x, y: level, z, dir, scenery: id });
   for (const [k, v] of height) {
-    // Under a leaning cliff face: nothing.
-    if (cliffFront.has(k)) continue;
+    // Under a leaning cliff face: nothing (its height still shapes the land round it).
+    if (cliff?.leaning && cliffFront.has(k)) continue;
     const [x, z] = parse(k);
     // Slopes rise to higher neighbours, 1 or 2 levels (track cells stay flat under the road).
     const up = ORTHO.filter(([dx, dz]) => (h(x + dx, z + dz) ?? -1) > v);
@@ -244,7 +254,7 @@ const even2 = (n: number) => Math.max(0, 2 * Math.floor(n / 2));
 
 /** Cliff walls `gap` cells (plus their face) away from the track; null when the theme's pieces are missing. */
 function cliffWalls(lib: VanillaLibrary, theme: SceneryTheme, dist: Map<string, number>, gap: number):
-  { blocks: VanillaBlock[]; high: Set<string>; front: Set<string> } | null {
+  { blocks: VanillaBlock[]; high: Set<string>; front: Set<string>; top: number } | null {
   const { prefix, id } = theme;
   const straight = piece(lib, `${prefix}Straight`), small = piece(lib, `${prefix}StraightSmall`);
   const outer = piece(lib, `${prefix}CornerOut`), inner = piece(lib, `${prefix}CornerInSmall`);
@@ -347,7 +357,8 @@ function cliffWalls(lib: VanillaLibrary, theme: SceneryTheme, dist: Map<string, 
       for (let dz = -1; dz <= 1; dz++)
         if (inMap(x + dx, z + dz) && isLow(x + dx, z + dz)) front.add(key(x + dx, z + dz));
   }
-  return { blocks, high, front };
+  // Their top: the walls are a level taller in units than the land level that meets their top edge (64 m: level 8).
+  return { blocks, high, front, top: outer.height - 1 };
 }
 
 /** Lowest road point per grid column, from road meshes (world space). Triangles are sampled every few metres. */

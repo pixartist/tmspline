@@ -480,7 +480,9 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
     if (scenery.hills) {
       numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
-      numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
+      // With cliffs the hills climb to their top instead.
+      if (scenery.cliffs === 0)
+        numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
     }
     numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => (scenery.cliffs = int(v, 0, 24)), 1);
     if (scenery.cliffs > 0)
