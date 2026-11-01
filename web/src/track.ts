@@ -49,7 +49,7 @@ export interface TrackPoint {
   /** Road width in meters (measured along the surface); blended smoothly towards the neighbouring points. */
   width: number;
   /**
-   * Cross-section bend in degrees: 0 = flat, negative = convex (sausage, down to -180),
+   * Cross-section bend in degrees: 0 = flat, negative = convex (sausage; -360 = a closed tube driven on its outside),
    * positive = concave (90 = gutter, 180 = half-pipe, 360 = closed pipe).
    */
   curve: number;

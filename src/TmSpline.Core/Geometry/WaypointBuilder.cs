@@ -142,8 +142,9 @@ public static class WaypointBuilder
 
         if (Math.Abs(ring.Curve) >= PipeCurveDegrees * Math.PI / 180)
         {
-            // Around the outside (below the underside), closed over the top of the pipe.
-            var outside = -(settings.Thickness + BeamWidth / 2 + 0.3);
+            // Around the outside, closed all round: for a pipe below the underside, for a convex tube (driven on its
+            // outside) above the road with the usual clearance.
+            var outside = ring.Curve > 0 ? -(settings.Thickness + BeamWidth / 2 + 0.3) : ClearanceAbove;
             for (var i = 0; i <= ArchSegments * 2; i++)
                 points.Add(Offset(-half + ring.Width * i / (ArchSegments * 2), outside));
             points.Add(points[0]);
@@ -183,7 +184,17 @@ public static class WaypointBuilder
             return (p.X + p.NX * distance, p.Y + p.NY * distance);
         }
 
-        if (Math.Abs(ring.Curve) >= PipeCurveDegrees * Math.PI / 180)
+        if (ring.Curve <= -PipeCurveDegrees * Math.PI / 180)
+        {
+            // Convex tube: a band from the road out to the gate's ring all round.
+            for (var i = 0; i <= ArchSegments * 2; i++)
+            {
+                var s = half - ring.Width * i / (ArchSegments * 2);
+                pairs.Add((Offset(s, 0.05), Offset(s, ClearanceAbove - BeamWidth / 2)));
+            }
+            return pairs;
+        }
+        if (ring.Curve >= PipeCurveDegrees * Math.PI / 180)
         {
             // Right to left like the arch, so both sides of the strip wind like their normals.
             var samples = Enumerable.Range(0, ArchSegments * 2 + 1).Select(i => Offset(half - ring.Width * i / (ArchSegments * 2), 0.05)).ToList();

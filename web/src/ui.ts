@@ -523,7 +523,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     rangeField(root, "Bank °", -180, 180, 1, () => p().bank,
       (v) => editor.edit((tr) => (tr.points[s.index].bank = wrapBank(v)), false, `bank:${s.index}`), 360);
     rangeField(root, "Width m", 4, 128, 0.5, () => p().width, (v) => editor.edit((tr) => (tr.points[s.index].width = v), false, `width:${s.index}`));
-    rangeField(root, "Shape °", -180, 360, 1, () => p().curve, (v) => editor.edit((tr) => (tr.points[s.index].curve = v), false, `curve:${s.index}`));
+    rangeField(root, "Shape °", -360, 360, 1, () => p().curve, (v) => editor.edit((tr) => (tr.points[s.index].curve = v), false, `curve:${s.index}`));
     rangeField(root, "Flat in %", 0, 90, 1, () => Math.round(p().flat * 100),
       (v) => editor.edit((tr) => (tr.points[s.index].flat = v / 100), false, `flat:${s.index}`));
     rangeField(root, "Sausage %", 0, 100, 1, () => Math.round(p().sausage * 100),
