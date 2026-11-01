@@ -53,7 +53,7 @@ if (args[0] == "--variants")
             foreach (var b in Gbx.ParseNode<CGameCtnChallenge>(f).Blocks ?? [])
                 if (pattern.IsMatch(b.Name))
                 {
-                    var k = $"{b.Name} ground={b.IsGround} pillar={b.IsPillar} variant={b.Variant} sub={b.SubVariant}";
+                    var k = $"{b.Name} ground={b.IsGround} pillar={b.IsPillar} variant={b.Variant} sub={b.SubVariant} flags=0x{b.Flags:X8}";
                     counts[k] = counts.GetValueOrDefault(k) + 1;
                 }
         }

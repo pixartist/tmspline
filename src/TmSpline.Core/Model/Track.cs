@@ -256,6 +256,14 @@ public sealed class VanillaBlock
     /// <summary>The block's variant as the game numbers them (0: base, 1..: the additional ones).</summary>
     public int Variant { get; set; }
 
+    /// <summary>
+    /// Extra block flag bits the game sets on some blocks (only <see cref="AllowedExtraFlags"/>; e.g. 0x400000 on ground hill
+    /// slopes in maps it saved, meaning not yet known).
+    /// </summary>
+    public int ExtraFlags { get; set; }
+
+    public const int AllowedExtraFlags = 0x200000 | 0x400000;
+
     /// <summary>The block's colour (Default: the game's own look, e.g. wooden road columns).</summary>
     public ItemColor Color { get; set; }
 }

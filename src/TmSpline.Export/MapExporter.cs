@@ -131,6 +131,8 @@ public static class MapExporter
             // Columns under air blocks are pillar blocks with the pillar flag, as the game's editor saves them.
             if (block.Pillar)
                 placed.IsPillar = true;
+            if (block.ExtraFlags != 0)
+                placed.Flags |= block.ExtraFlags & VanillaBlock.AllowedExtraFlags;
             if (block.Color != ItemColor.Default)
                 placed.Color = (DifficultyColor)(int)block.Color;
             log?.Invoke($"Placed {(block.Pillar ? "pillar" : "block")} {block.Name} at {coord} ({(Direction)(block.Dir & 3)}), flags 0x{placed.Flags:X8}");
