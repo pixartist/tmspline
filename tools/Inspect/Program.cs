@@ -26,7 +26,8 @@ if (args[0] == "--items")
             foreach (var o in m.AnchoredObjects ?? [])
             {
                 var k = $"{o.ItemModel.Id} | {o.ItemModel.Collection} | {o.ItemModel.Author}";
-                if (!seen.ContainsKey(k) && args.Contains("--where") is var _ && o.ItemModel.Author == "Nadeo")
+                // One example placement per vanilla item: where the game puts its base, and its turn.
+                if (!seen.ContainsKey(k) && o.ItemModel.Author == "Nadeo")
                     Console.WriteLine($"  e.g. {o.ItemModel.Id}: pos {o.AbsolutePositionInMap} ypr {o.YawPitchRoll} pivot {o.PivotPosition} in {Path.GetFileName(f)}");
                 seen[k] = seen.GetValueOrDefault(k) + 1;
             }
