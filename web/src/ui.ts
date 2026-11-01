@@ -689,14 +689,21 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     const set = (key: string, fn: (object: Track["objects"][number]) => void) =>
       editor.edit((tr) => fn(tr.objects[s.index]), false, `object${key}:${s.index}`);
     section(obj.kind);
-    if (obj.kind !== "Gap") {
+    if (obj.kind === "Pillar") {
+      // The game's obstacle pillars: round, 7 m tall, in these thicknesses.
+      const sizes = ["2", "4", "8", "16"] as const;
+      const nearest = () => sizes.reduce((a, b) => (Math.abs(Math.log(o().width / +b)) < Math.abs(Math.log(o().width / +a)) ? b : a));
+      selectField(root, "Size", sizes, nearest, (v) => editor.edit((tr) => {
+        const x = tr.objects[s.index];
+        x.width = x.length = +v;
+      }), false, { 2: "2 m", 4: "4 m", 8: "8 m", 16: "16 m" });
+      rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
+    } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
         false, { Rect: "Rectangle" });
       rangeField(root, "Length m", 0.5, 32, 0.1, () => o().length, (v) => set("Length", (x) => (x.length = Math.max(0.1, v))), 256);
       rangeField(root, "Width m", 0.5, 32, 0.1, () => o().width, (v) => set("Width", (x) => (x.width = Math.max(0.1, v))), 256);
       rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
-      if (obj.kind === "Pillar")
-        rangeField(root, "Height m", 0.5, 32, 0.1, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(0.1, v))), 256);
       if (obj.kind === "Bump")
         rangeField(root, "Height m", -4, 4, 0.05, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(-8, Math.min(8, v)))), 8);
     } else {
@@ -706,8 +713,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     const placed = editor.placement(s.index)?.placed ?? true;
     if (!placed) hint(root, obj.kind === "Pillar" ? "This pillar is not built: it stands in a gap." : "This gap has no length on the track.");
     hint(root, {
-      Pillar: "Drag the marker to move the pillar. It stands on the road, upright to the surface (also on banked and bent road), "
-        + "and stays inside the driving surface. Length runs along the road, width across it.",
+      Pillar: "Drag the marker to move the pillar. It exports as the game's own obstacle pillar (round, 7 m tall, 2 to 16 m "
+        + "thick), standing on the road upright to the surface (also on banked and bent road) and inside the driving surface.",
       Hole: "Drag the marker to move the hole along and across the road. It cuts through the road (and its boost marking) and "
         + "always stays inside the driving surface. Length runs along the road, width across it.",
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "

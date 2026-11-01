@@ -95,8 +95,21 @@ public static class MeshQualities
         var settings = new RoadMeshSettings { MaxChunkLength = maxChunkLength, MaxColumnAngleDegrees = ColumnAngleDegrees(quality) };
         meshes.AddRange(RoadMeshBuilder.Build(track, rings, Vec3d.Zero, prefix + "Road", settings));
         meshes.AddRange(WaypointBuilder.Build(track, rings, Vec3d.Zero, settings, prefix + "Gate"));
-        if (PillarBuilder.Build(track, rings, TrackSampler.SegmentStarts(track), Vec3d.Zero, settings, prefix + "Pillars") is { } pillars)
-            meshes.Add(pillars);
+        // Pillars are the game's own items (see GamePillars), not part of the custom meshes.
         return (rings, meshes);
+    }
+
+    /// <summary>The placed pillars of all tracks as the game's obstacle pillar items.</summary>
+    public static List<VanillaItem> GamePillars(TrackMap map, MeshQuality quality)
+    {
+        var items = new List<VanillaItem>();
+        foreach (var track in map.Tracks)
+        {
+            if (!track.Objects.Any(o => o.Kind == TrackObjectKind.Pillar)) continue;
+            var rings = TrackSampler.Sample(track, Sampler(quality));
+            if (rings.Count >= 2)
+                items.AddRange(PillarBuilder.GameItems(track, rings, TrackSampler.SegmentStarts(track)));
+        }
+        return items;
     }
 }

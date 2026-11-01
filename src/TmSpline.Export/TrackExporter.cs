@@ -40,7 +40,8 @@ public static class TrackExporter
             AuthorNickname = request.AuthorNickname,
             Laps = request.Map.Laps,
             Blocks = request.Map.Blocks,
-            Items = request.Map.Items,
+            // Vanilla items: the map's own (trees ...) and the placed pillars as the game's obstacle pillars.
+            Items = [.. request.Map.Items, .. MeshQualities.GamePillars(request.Map, request.Quality)],
         }, log);
 
         return new TrackExportResult(items.Count, meshes.Sum(m => m.Triangles.Count), length, itemFolder);

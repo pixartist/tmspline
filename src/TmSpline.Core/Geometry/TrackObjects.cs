@@ -433,11 +433,51 @@ public static class PillarBuilder
     private const double Sink = 0.2;
     private const int RoundSegments = 24;
 
+    /// <summary>
+    /// Diameters of the game's obstacle pillars (ObstaclePillar2m ... 16m; the number is the thickness, per the user). They
+    /// are round, stand 7 m above their base (the item's pivot) and reach 1 m below it (measured on the 2/4/8 m models).
+    /// </summary>
+    public static readonly double[] GameSizes = [2, 4, 8, 16];
+    public const double GameHeight = 7;
+
+    /// <summary>The game pillar nearest to a pillar's width.</summary>
+    public static double GameSize(double width) => GameSizes.MinBy(s => Math.Abs(Math.Log(Math.Max(0.1, width) / s)));
+
+    public static string GameItemName(double size) => $"ObstaclePillar{size:0}m";
+
+    /// <summary>
+    /// The track's pillars as the game's items: at their foot on the surface, upright to it and facing along the road,
+    /// turned as (yaw, pitch, roll) degrees for the anchored-object convention (Ry·Rx, roll innermost about Z).
+    /// </summary>
+    public static IEnumerable<VanillaItem> GameItems(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts)
+    {
+        var gaps = TrackObjects.GapRanges(track, segmentStarts);
+        foreach (var o in track.Objects.Where(o => o.Kind == TrackObjectKind.Pillar && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1))
+        {
+            var distance = TrackObjects.CenterDistance(o, segmentStarts);
+            var (across, placed) = Footing(o, rings, distance, gaps);
+            if (!placed) continue;
+            var ring = TrackObjects.RingAt(rings, distance);
+            var (point, up) = TrackObjects.SurfacePoint(ring, across);
+            var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
+            // R = Ry(yaw)·Rx(pitch)·Rz(roll): R·Z = forward gives yaw and pitch, then roll from where Y has to go.
+            var yaw = Math.Atan2(forward.X, forward.Z);
+            var pitch = -Math.Asin(Math.Clamp(forward.Y, -1, 1));
+            // w = Rx(-pitch)·Ry(-yaw)·up = Rz(roll)·Y = (-sin roll, cos roll, 0)
+            double cy = Math.Cos(yaw), sy = Math.Sin(yaw), cp = Math.Cos(pitch), sp = Math.Sin(pitch);
+            var t = new Vec3d(cy * up.X - sy * up.Z, up.Y, sy * up.X + cy * up.Z);
+            var w = new Vec3d(t.X, cp * t.Y + sp * t.Z, -sp * t.Y + cp * t.Z);
+            var roll = Math.Atan2(-w.X, w.Y);
+            const double deg = 180 / Math.PI;
+            yield return new VanillaItem { Name = GameItemName(GameSize(o.Width)), Position = point, Yaw = yaw * deg, Pitch = pitch * deg, Roll = roll * deg };
+        }
+    }
+
     /// <summary>Where a pillar stands: its center across the surface (kept inside the road) and whether it can be built.</summary>
     internal static (double Across, bool Placed) Footing(TrackObject o, IReadOnlyList<Ring> rings, double distance, List<(double Start, double End)> gaps)
     {
         var half = TrackObjects.RingAt(rings, distance).Width / 2;
-        var halfWidth = Math.Min(o.Width / 2, half);
+        var halfWidth = Math.Min(GameSize(o.Width) / 2, half);
         var across = Math.Clamp(o.Offset, -half + halfWidth, half - halfWidth);
         return (across, !gaps.Any(g => distance >= g.Start && distance <= g.End));
     }
@@ -469,13 +509,16 @@ public static class PillarBuilder
             var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
             var right = Vec3d.Cross(forward, up).Normalized();
             var stretch = TrackObjects.AlongStretch(rings, distance, across);
-            var (hl, hw) = (o.Length / 2, o.Width / 2);
-            var height = Math.Max(0.1, o.Height);
+            // The editor's stand-in for the game pillar the export places: round, its diameter, 7 m tall.
+            var size = GameSize(o.Width);
+            var (hl, hw) = (size / 2, size / 2);
+            var height = GameHeight;
+            var shape = ObjectShape.Round;
 
             // Outline in the pillar's (along, across) frame with outward normals; rect corners are doubled so every
             // face has its own normals.
             var outline = new List<(double A, double C, double NA, double NC)>();
-            if (o.Shape == ObjectShape.Rect)
+            if (shape == ObjectShape.Rect)
             {
                 var corners = new[] { (-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0) };
                 var normals = new[] { (0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0) };
@@ -505,7 +548,7 @@ public static class PillarBuilder
             for (var k = 1; k < outline.Count; k++)
                 lengths[k] = lengths[k - 1] + Math.Sqrt(Math.Pow(outline[k].A - outline[k - 1].A, 2) + Math.Pow(outline[k].C - outline[k - 1].C, 2));
             var perimeter = Math.Max(1e-9, lengths[^1]);
-            var pairs = o.Shape == ObjectShape.Rect ? Enumerable.Range(0, 4).Select(f => (2 * f, 2 * f + 1)) : Enumerable.Range(0, RoundSegments).Select(k => (k, k + 1));
+            var pairs = shape == ObjectShape.Rect ? Enumerable.Range(0, 4).Select(f => (2 * f, 2 * f + 1)) : Enumerable.Range(0, RoundSegments).Select(k => (k, k + 1));
             foreach (var (ka, kb) in pairs)
             {
                 var first = chunk.Positions.Count;
@@ -541,7 +584,7 @@ public static class PillarBuilder
                 chunk.Surface.Add(MeshChunk.NoSurface);
             }
             CapVertex(center + up * height - origin, 0, 0);
-            var rim = outline.Where((_, k) => o.Shape == ObjectShape.Rect ? k % 2 == 0 : k < RoundSegments).ToList();
+            var rim = outline.Where((_, k) => shape == ObjectShape.Rect ? k % 2 == 0 : k < RoundSegments).ToList();
             foreach (var p in rim)
                 CapVertex(Top(p), p.A / hl, p.C / hw);
             for (var k = 0; k < rim.Count; k++)

@@ -267,6 +267,9 @@ public sealed class VanillaItem
     public string Name { get; set; } = "";
     public Vec3d Position { get; set; }
     public double Yaw { get; set; }
+    /// <summary>Tilt (degrees) for items standing upright on sloped or banked road: pitch about X, roll about Z.</summary>
+    public double Pitch { get; set; }
+    public double Roll { get; set; }
 }
 
 public sealed class VanillaBlock
