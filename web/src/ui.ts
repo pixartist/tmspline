@@ -6,7 +6,7 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 /** Scenery panel settings (kept while the page is open). */
 const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
 import {
-  appendPoint, BORDER_MATERIALS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES,
+  appendPoint, BORDER_MATERIALS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
 } from "./track";
 
@@ -436,6 +436,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}`
+    + `:${(s?.kind === "point" || s?.kind === "handle") ? t.points[s.index]?.borders : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}`;
   if (key === lastInspectorKey) {
@@ -526,8 +527,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       (v) => editor.edit((tr) => (tr.points[s.index].flat = v / 100), false, `flat:${s.index}`));
     rangeField(root, "Sausage %", 0, 100, 1, () => Math.round(p().sausage * 100),
       (v) => editor.edit((tr) => (tr.points[s.index].sausage = v / 100), false, `sausage:${s.index}`));
-    rangeField(root, "Border m", 0.2, 8, 0.1, () => p().borderHeight,
-      (v) => editor.edit((tr) => (tr.points[s.index].borderHeight = v), false, `borderHeight:${s.index}`));
+    checkbox(root, "Borders", () => p().borders, (v) => editor.edit((tr) => {
+      tr.points[s.index].borders = v;
+      syncSegments(tr);
+    }, true));
+    if (p().borders)
+      rangeField(root, "Border m", 0.2, 8, 0.1, () => p().borderHeight,
+        (v) => editor.edit((tr) => (tr.points[s.index].borderHeight = v), false, `borderHeight:${s.index}`));
+    else
+      hint(root, "No borders here: next to points with borders they fade out towards this one.");
     const waypoints = WAYPOINTS.filter((w) => editor.track.closed || w !== "StartFinish");
     selectField(root, "Waypoint", waypoints, () => p().waypoint, (v) => editor.edit((tr) => (tr.points[s.index].waypoint = v as Waypoint), true),
       false, { StartFinish: "Start / finish (laps)" });
@@ -557,14 +565,13 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     const seg = () => editor.track.segments[s.index];
     section(`Segment ${s.index + 1}`);
     selectField(root, "Surface", SURFACES, () => seg().surface, (v) => editor.edit((tr) => (tr.segments[s.index].surface = v as Surface)));
-    selectField(root, "Borders", ["None", ...BORDER_MATERIALS], () => (seg().borders ? seg().borderMaterial : "None"), (v) =>
-      editor.edit((tr) => {
-        const segment = tr.segments[s.index];
-        segment.borders = v !== "None";
-        if (v !== "None") segment.borderMaterial = v as BorderMaterial;
-      }));
-    if (seg().borders && seg().borderMaterial === "Plastic")
-      hint(root, "Plastic borders can be grinded without losing speed, and the car bounces off them.");
+    // Borders are switched on the points (either end of the segment); the segment picks their material.
+    if (seg().borders) {
+      selectField(root, "Border material", BORDER_MATERIALS, () => seg().borderMaterial,
+        (v) => editor.edit((tr) => (tr.segments[s.index].borderMaterial = v as BorderMaterial)));
+      if (seg().borderMaterial === "Plastic")
+        hint(root, "Plastic borders can be grinded without losing speed, and the car bounces off them.");
+    } else hint(root, "No borders: neither of this segment's points has them (turn them on in a point).");
     selectField(root, "Color", ITEM_COLORS, () => seg().color, (v) => editor.edit((tr) => (tr.segments[s.index].color = v as ItemColor)),
       false);
     checkbox(root, "Underside", () => seg().underside, (v) => editor.edit((tr) => (tr.segments[s.index].underside = v)));

@@ -93,6 +93,9 @@ public static class TrackJson
         public double Sausage { get; set; }
         /// <summary>Border height in meters. Missing in files from before border heights were adjustable.</summary>
         public double? BorderHeight { get; set; }
+        /// <summary>Borders at this point (see TrackPoint.Borders). Missing in files from before borders moved to points.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Borders { get; set; }
         public Waypoint Waypoint { get; set; }
     }
 
@@ -154,7 +157,7 @@ public static class TrackJson
             var width = p.Width ?? LegacyPointWidth(dto, i);
             track.Points.Add(new TrackPoint(V(p.Position), V(p.HandleOut), p.Bank, width) { HandleIn = V(p.HandleIn), Curve = p.Curve, Flat = Math.Clamp(p.Flat, 0, 0.9),
                 Sausage = Math.Clamp(p.Sausage, 0, 1),
-                BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Waypoint = p.Waypoint });
+                BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Borders = p.Borders, Waypoint = p.Waypoint });
         }
         foreach (var s in dto.Segments)
             track.Segments.Add(new TrackSegment
@@ -178,7 +181,7 @@ public static class TrackJson
         Closed = track.Closed,
         Points = track.Points.Select(p => new PointDto
         {
-            Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, BorderHeight = p.BorderHeight, Waypoint = p.Waypoint,
+            Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
         }).ToList(),
         Segments = track.Segments.Select(s => new SegmentDto
         {

@@ -62,6 +62,11 @@ export interface TrackPoint {
   sausage: number;
   /** Height of the road borders in meters; blended smoothly towards the neighbouring points. */
   borderHeight: number;
+  /**
+   * Road borders at this point: a segment has them when either of its points does, and they fade out towards a point
+   * without (over the core's border ramp length). Segment.borders follows from these (see syncSegments).
+   */
+  borders: boolean;
   /** Race gate at this point. */
   waypoint: Waypoint;
 }
@@ -246,6 +251,8 @@ export function syncSegments(t: Track): void {
   }
   t.segments.length = n;
   t.objects = t.objects.filter((o) => o.segment >= 0 && o.segment < n);
+  // Borders are set on the points: a segment has them when either end does.
+  t.segments.forEach((s, i) => (s.borders = !!t.points[i]?.borders || !!t.points[(i + 1) % t.points.length]?.borders));
 }
 
 /** A straight 128 m track through `center` (default: the map center, 16 m up), heading along the horizontal `direction`. */
@@ -254,7 +261,7 @@ export function newTrack(center: Vec3 = [0, 16, 0], direction: Vec3 = [0, 0, 1])
   if (length(dir) === 0) dir = [0, 0, 1];
   const point = (along: number): TrackPoint => ({
     position: add(center, scale(dir, along)), handleIn: scale(dir, -24), handleOut: scale(dir, 24),
-    bank: 0, width: DEFAULT_ROAD_WIDTH, curve: 0, flat: 0, sausage: 0, borderHeight: DEFAULT_BORDER_HEIGHT, waypoint: "None",
+    bank: 0, width: DEFAULT_ROAD_WIDTH, curve: 0, flat: 0, sausage: 0, borderHeight: DEFAULT_BORDER_HEIGHT, borders: true, waypoint: "None",
   });
   return { closed: false, points: [point(-64), point(64)], segments: [defaultSegment()], objects: [] };
 }
@@ -287,6 +294,7 @@ export function appendPoint(t: Track, at?: Vec3): number {
     flat: last.flat,
     sausage: last.sausage,
     borderHeight: last.borderHeight,
+    borders: last.borders,
     waypoint: "None",
   });
   syncSegments(t);
@@ -360,6 +368,8 @@ export function splitSegment(t: Track, s: number, at = 0.5): number {
     bank: wrapBank(a.bank + wrapBank(b.bank - a.bank) * fraction),
     width: blend("width"), curve: blend("curve"), flat: blend("flat"), sausage: blend("sausage"),
     borderHeight: blend("borderHeight"),
+    // On if either end is: the segment keeps its borders, fading where it did.
+    borders: a.borders || b.borders,
     waypoint: "None",
   };
   t.points.splice(s + 1, 0, point);
@@ -560,6 +570,31 @@ function normalizeTrack(t: Track, label: string): Track {
   }
   // Files from before gameplay effects existed.
   t.segments = t.segments.map((s) => ({ ...defaultSegment(), ...s }));
+  migrateBorders(t);
   syncSegments(t);
   return t;
+}
+
+/**
+ * Borders used to be set per segment. Old files: a point gets borders when every segment it joins had them, so each
+ * segment keeps its borders (either end) and they fade out at the same points as before (where a segment without
+ * borders begins).
+ */
+function migrateBorders(t: Track): void {
+  if (t.points.some((p) => typeof p.borders === "boolean")) {
+    for (const p of t.points) p.borders = !!p.borders;
+    return;
+  }
+  const n = t.points.length;
+  t.points.forEach((p, i) => {
+    const joins = [i > 0 || t.closed ? t.segments[(i - 1 + n) % n] : undefined, i < t.segments.length ? t.segments[i] : undefined]
+      .filter((s): s is TrackSegment => !!s);
+    p.borders = joins.length > 0 && joins.every((s) => s.borders !== false);
+  });
+  // A lone segment with borders between two without: neither end qualifies, so both get them (it keeps its borders,
+  // which now fade out over the neighbouring segments instead of inside it).
+  t.segments.forEach((s, i) => {
+    const [a, b] = [t.points[i], t.points[(i + 1) % n]];
+    if (s.borders !== false && !a.borders && !b.borders) a.borders = b.borders = true;
+  });
 }

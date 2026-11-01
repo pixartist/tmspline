@@ -116,6 +116,13 @@ public sealed class TrackPoint
     /// <summary>Height of the road borders (curbs) at this point in meters; blended smoothly towards the neighbouring points.</summary>
     public double BorderHeight { get; set; } = DefaultBorderHeight;
 
+    /// <summary>
+    /// Road borders (curbs) at this point: a segment has them when either of its points does, and they fade out towards a
+    /// point without (see TrackSampler's border ramps). Null on every point: the segments' own Borders settings (older
+    /// tracks and code that sets them directly).
+    /// </summary>
+    public bool? Borders { get; set; }
+
     /// <summary>Race gate at this point (start, checkpoint, finish).</summary>
     public Waypoint Waypoint { get; set; }
 
@@ -299,7 +306,14 @@ public sealed class Track
         while (Segments.Count > SegmentCount)
             Segments.RemoveAt(Segments.Count - 1);
         Objects.RemoveAll(o => o.Segment < 0 || o.Segment >= SegmentCount);
+        // Borders set on the points: a segment has them when either end does.
+        if (PointBorders)
+            for (var s = 0; s < SegmentCount; s++)
+                Segments[s].Borders = SegmentStart(s).Borders == true || SegmentEnd(s).Borders == true;
     }
+
+    /// <summary>Whether the borders are set on the points (see TrackPoint.Borders) rather than on the segments.</summary>
+    public bool PointBorders => Points.Any(p => p.Borders is not null);
 
     private static TrackSegment Clone(TrackSegment s) => new()
     {

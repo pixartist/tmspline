@@ -165,8 +165,10 @@ public static class TrackSampler
                 length += starts[seg + 1] - starts[seg];
             }
             var (a, b) = ((first + i) % n, (first + j - 1) % n);
-            var rampStart = track.Closed || a > 0;
-            var rampEnd = track.Closed || b < n - 1;
+            // Borders on the points: they fade out towards an end point without them (a bordered point at an open
+            // track's end keeps them full). On the segments: they fade where a segment without borders follows.
+            var rampStart = track.PointBorders ? track.SegmentStart(a).Borders != true : track.Closed || a > 0;
+            var rampEnd = track.PointBorders ? track.SegmentEnd(b).Borders != true : track.Closed || b < n - 1;
             var ramp = Math.Min(settings.BorderRampLength, rampStart && rampEnd ? length / 2 : length);
             if (ramp > 1e-6) runs.Add(new BorderRun(starts[a], length, rampStart, rampEnd, ramp));
             i = j;
