@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, BLOCK_LEVEL, type VanillaBlock } from "./track";
+import { BLOCK_CELL, BLOCK_LEVEL, ITEM_COLORS, type ItemColor, type VanillaBlock } from "./track";
 import { BlockLayer, pillarColumns, VanillaLibrary } from "./vanilla";
 
 /**
@@ -9,7 +9,7 @@ import { BlockLayer, pillarColumns, VanillaLibrary } from "./vanilla";
  *   /preview.html?blocks=PlatformGrassSlope2Straight,PlatformGrassLoopStart&levels=0,3&size=360
  *
  * blocks: comma-separated names; levels: grid levels to place each block at (0 = ground; above it gets its columns);
- * dir: block direction 0..3; size: pixels per view. Rows are block × level, columns the views. window.previewDone turns
+ * dir: block direction 0..3; color: block colour (Default, White, Green, Blue, Red, Black); size: pixels per view. Rows are block × level, columns the views. window.previewDone turns
  * true when the sheet is complete.
  */
 
@@ -17,6 +17,7 @@ const params = new URLSearchParams(location.search);
 const names = (params.get("blocks") ?? "PlatformGrassBase").split(",").map((s) => s.trim()).filter(Boolean);
 const levels = (params.get("levels") ?? "0,3").split(",").map(Number).filter((n) => Number.isFinite(n) && n >= 0);
 const dir = Math.round(Number(params.get("dir") ?? 0)) & 3;
+const color = (ITEM_COLORS as readonly string[]).includes(params.get("color") ?? "") ? params.get("color") as ItemColor : "Default";
 const size = Math.max(160, Math.min(800, Number(params.get("size") ?? 320)));
 
 /**
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
     scene.add(grid);
 
     const known = lib.has(row.name);
-    const block: VanillaBlock = { name: row.name, x: 0, y: row.level, z: 0, dir };
+    const block: VanillaBlock = { name: row.name, x: 0, y: row.level, z: 0, dir, ...(color !== "Default" ? { color } : {}) };
     const layer = new BlockLayer();
     layer.setLibrary(lib);
     // Only real geometry: the editor's ground shadow looks like a floor plate here.
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
     ctx.font = "13px system-ui, sans-serif";
     ctx.fillStyle = "#9aa4ae";
     ctx.fillText(row.level === 0 ? "on the ground" : `level ${row.level}, on columns`, 10, y0 + size - 44);
-    ctx.fillText(`dir ${dir}; N = +Z`, 10, y0 + size - 24);
+    ctx.fillText(`dir ${dir}; N = +Z; ${color}`, 10, y0 + size - 24);
     if (!known) {
       ctx.fillStyle = "#ff8a80";
       ctx.fillText("not in the library", 10, y0 + size - 64);

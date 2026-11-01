@@ -173,6 +173,8 @@ export interface VanillaBlock {
    * generated under an air block (only in exports).
    */
   pillar?: boolean;
+  /** The game's block colour (absent: Default, the block's own look, e.g. wooden road columns). Columns take it too. */
+  color?: ItemColor;
   /**
    * Generated columns only (preview, never saved): the surface modifier of the block they stand under, whose materials
    * they take (concrete walls under grass platforms, ...), as in game.
@@ -491,6 +493,7 @@ export function parseMap(json: string): TrackMap {
       const block: VanillaBlock = { name: b.name, x: Math.round(b.x ?? 0), y: Math.max(0, Math.round(b.y ?? 0)), z: Math.round(b.z ?? 0), dir: (((Math.round(b.dir ?? 0)) % 4) + 4) % 4 };
       if (b.pillars === false) block.pillars = false;
       if (b.pillar && !b.free) block.pillar = true;
+      if (b.color && b.color !== "Default" && (ITEM_COLORS as readonly string[]).includes(b.color)) block.color = b.color;
       if (b.free && Array.isArray(b.position) && b.position.length === 3)
         Object.assign(block, { free: true, position: b.position.map(Number) as Vec3, yaw: b.yaw ?? 0, pitch: b.pitch ?? 0, roll: b.roll ?? 0 });
       return block;

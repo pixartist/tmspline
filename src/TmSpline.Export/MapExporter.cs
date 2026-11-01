@@ -111,6 +111,8 @@ public static class MapExporter
                 free.IsFree = true;
                 free.AbsolutePositionInMap = new Vec3((float)at.X, (float)at.Y, (float)at.Z);
                 free.YawPitchRoll = new Vec3((float)(block.Yaw * Math.PI / 180), (float)(block.Pitch * Math.PI / 180), (float)(block.Roll * Math.PI / 180));
+                if (block.Color != ItemColor.Default)
+                    free.Color = (DifficultyColor)(int)block.Color;
                 log?.Invoke($"Placed free block {block.Name} at {at} (yaw {block.Yaw}°, pitch {block.Pitch}°, roll {block.Roll}°), flags 0x{free.Flags:X8}");
                 continue;
             }
@@ -124,6 +126,8 @@ public static class MapExporter
             // Columns under air blocks are pillar blocks with the pillar flag, as the game's editor saves them.
             if (block.Pillar)
                 placed.IsPillar = true;
+            if (block.Color != ItemColor.Default)
+                placed.Color = (DifficultyColor)(int)block.Color;
             log?.Invoke($"Placed {(block.Pillar ? "pillar" : "block")} {block.Name} at {coord} ({(Direction)(block.Dir & 3)}), flags 0x{placed.Flags:X8}");
         }
 

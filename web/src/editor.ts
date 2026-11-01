@@ -162,7 +162,7 @@ export class Editor {
   /** Place mode: the next click on the road places an object of this kind there. */
   placeMode: TrackObjectKind | null = null;
   /** Block mode: clicks place this vanilla block (dir and level change with R and PgUp/PgDn). */
-  blockPlace: { name: string; dir: number; level: number; free: boolean; yaw: number; lift: number } | null = null;
+  blockPlace: { name: string; dir: number; level: number; free: boolean; yaw: number; lift: number; color: ItemColor } | null = null;
   /**
    * Snap mode: grid step in meters (0 = off). Track points (not their handles) and free blocks snap to it horizontally,
    * and to min(step, 8 m) vertically (8 m = one block level). Ctrl while dragging ignores it.
@@ -473,7 +473,7 @@ export class Editor {
    * Block mode: clicks place the named vanilla block on the grid, at the cell under the cursor on the current level
    * (null or Esc ends it). Keeps the direction and level of the previous block mode.
    */
-  setBlockPlaceMode(name: string | null, like?: { free: boolean; dir?: number; yaw?: number }): void {
+  setBlockPlaceMode(name: string | null, like?: { free: boolean; dir?: number; yaw?: number; color?: ItemColor }): void {
     if (name) {
       this.placeMode = null;
       this.placeTarget = null;
@@ -487,7 +487,7 @@ export class Editor {
     this.blockPlace = name ? {
       name, dir: like?.dir ?? keep?.dir ?? 0, level: keep?.level ?? 0,
       free: !this.library?.isPillar(name) && (like?.free ?? keep?.free ?? false),
-      yaw: like?.yaw ?? keep?.yaw ?? 0, lift: keep?.lift ?? 0,
+      yaw: like?.yaw ?? keep?.yaw ?? 0, lift: keep?.lift ?? 0, color: like?.color ?? keep?.color ?? "Default",
     } : null;
     this.blockTarget = null;
     this.blocks.setGhost(null);
@@ -688,7 +688,7 @@ export class Editor {
       this.label.hidden = true;
       return;
     }
-    const block: VanillaBlock = { name: place.name, x: 0, y: place.level, z: 0, dir: place.dir };
+    const block: VanillaBlock = { name: place.name, x: 0, y: place.level, z: 0, dir: place.dir, ...(place.color !== "Default" ? { color: place.color } : {}) };
     const [fx, , fz] = this.blockFootprint(block);
     block.x = this.clampCell(Math.round(hit.x / BLOCK_CELL - fx / 2), fx);
     block.z = this.clampCell(Math.round(hit.z / BLOCK_CELL - fz / 2), fz);
@@ -709,7 +709,7 @@ export class Editor {
       this.label.hidden = true;
       return;
     }
-    const block: VanillaBlock = { name: place.name, x: 0, y: 0, z: 0, dir: 0, free: true, yaw: place.yaw, pitch: 0, roll: 0 };
+    const block: VanillaBlock = { name: place.name, x: 0, y: 0, z: 0, dir: 0, free: true, yaw: place.yaw, pitch: 0, roll: 0, ...(place.color !== "Default" ? { color: place.color } : {}) };
     const [sx, , sz] = blockSize(this.library, block);
     const center = new THREE.Vector3(sx * BLOCK_CELL / 2, 0, sz * BLOCK_CELL / 2).applyMatrix4(freeRotation(place.yaw));
     const origin = this.snapped(hit.point.clone().sub(center).add(new THREE.Vector3(0, place.lift, 0)));

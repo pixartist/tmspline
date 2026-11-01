@@ -597,9 +597,13 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
           + "Automatic columns of blocks above stop on top of it.");
       selectField(root, "Direction", DIRECTIONS, () => DIRECTIONS[b().dir], (v) => set("Dir", (x) => (x.dir = DIRECTIONS.indexOf(v as typeof DIRECTIONS[number]))));
     }
+    selectField(root, "Color", ITEM_COLORS, () => b().color ?? "Default", (v) => set("Color", (x) => {
+      if (v === "Default") delete x.color;
+      else x.color = v as ItemColor;
+    }));
     buttonRow(root, [
       { label: "Rotate (R)", onClick: () => editor.rotateBlock(1) },
-      { label: "Place another", onClick: () => editor.setBlockPlaceMode(b().name, b().free ? { free: true, yaw: b().yaw ?? 0 } : { free: false, dir: b().dir }) },
+      { label: "Place another", onClick: () => editor.setBlockPlaceMode(b().name, { ...(b().free ? { free: true, yaw: b().yaw ?? 0 } : { free: false, dir: b().dir }), color: b().color ?? "Default" }) },
       { label: "Delete", onClick: removePoint },
     ]);
     if (editor.library && !editor.library.has(b().name))

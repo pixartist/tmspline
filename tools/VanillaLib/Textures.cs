@@ -15,7 +15,9 @@ using SkiaSharp;
 /// <param name="Scale">Texture repeats per UV unit, or per metre for projected materials.</param>
 /// <param name="Alpha">"opaque", "blend" (transparent) or "decal" (an overlay on other geometry).</param>
 /// <param name="Parent">The game's material template (shader family), for reference.</param>
-record TextureInfo(string? Texture, string Projection, float[] Scale, string Alpha, string? Parent);
+/// <param name="Colors">The texture in the game's block/item colours White, Green, Blue, Red, Black (the material's colour
+/// table painted where its hue mask is); null when the material has none. <paramref name="Texture"/> is Default: as is.</param>
+record TextureInfo(string? Texture, string Projection, float[] Scale, string Alpha, string? Parent, string?[]? Colors);
 
 static class Textures
 {
@@ -39,6 +41,7 @@ static class Textures
                 ?? refs.FirstOrDefault(r => Path.GetFileName(r).Contains("_D.", StringComparison.OrdinalIgnoreCase)
                     && r.EndsWith(".Texture.gbx", StringComparison.OrdinalIgnoreCase));
             string? texture = null;
+            string?[]? colors = null;
             var scale = new[] { 1f, 1f };
             if (diffuse is not null && File.Exists(diffuse))
             {
@@ -50,18 +53,22 @@ static class Textures
                 catch { /* keep the default scale */ }
                 var dds = references(diffuse).FirstOrDefault(r => r.EndsWith(".dds", StringComparison.OrdinalIgnoreCase));
                 var keepAlpha = alpha != "opaque";
-                // The game's default colour: the colour table's first entry, painted where the diffuse's hue mask is.
+                // Default is the diffuse as it is (e.g. TrackWall's wood); a block or item colour paints the colour table's
+                // entry (White, Green, Blue, Red, Black) where the diffuse's hue mask is.
                 var hueTexture = refs.FirstOrDefault(r => Path.GetFileName(r).StartsWith(Path.GetFileName(diffuse).Split('.')[0] + "_HueMask", StringComparison.OrdinalIgnoreCase));
                 var hueMask = hueTexture is null ? null : references(hueTexture).FirstOrDefault(r => r.EndsWith(".dds", StringComparison.OrdinalIgnoreCase));
-                var tint = hueMask is null ? null : FirstColour(refs.FirstOrDefault(r => r.EndsWith(".ColorTable.gbx.json", StringComparison.OrdinalIgnoreCase)));
-                if (tint is null) hueMask = null; // same image, same file
+                var table = hueMask is null ? [] : Colours(refs.FirstOrDefault(r => r.EndsWith(".ColorTable.gbx.json", StringComparison.OrdinalIgnoreCase)));
                 if (dds is not null)
-                    texture = images.GetOrAdd($"{dds}|{keepAlpha}|{hueMask}|{tint}", _ => Convert(dds, outDir, keepAlpha, hueMask, tint));
+                {
+                    texture = images.GetOrAdd($"{dds}|{keepAlpha}||", _ => Convert(dds, outDir, keepAlpha));
+                    if (table.Count > 0)
+                        colors = table.Select(tint => images.GetOrAdd($"{dds}|{keepAlpha}|{hueMask}|{tint}", _ => Convert(dds, outDir, keepAlpha, hueMask, tint))).ToArray();
+                }
             }
             // Projected (world-space) materials: the template says so and the texture scale is per metre (below 1).
             var projected = alpha != "decal" && scale[0] < 1 && (p.Contains("Py") || p.Contains("Pxz") || p.Contains(" PDiff"));
             var projection = !projected ? "uv" : p.Contains("Pxz") ? "pypxz" : "py";
-            result[name] = new TextureInfo(texture, projection, scale, alpha, parent);
+            result[name] = new TextureInfo(texture, projection, scale, alpha, parent, colors);
         });
         return result.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value);
     }
@@ -123,18 +130,35 @@ static class Textures
                     }
             }
             static float Lum(ColorRgba32 c) => (0.299f * c.r + 0.587f * c.g + 0.114f * c.b) / 255f;
-            // A hue mask swaps hue and saturation for the colour's, keeping each pixel's brightness.
-            var tintLum = tint is { } tc ? Math.Max(0.05f, (0.299f * tc.R + 0.587f * tc.G + 0.114f * tc.B) / 255f) : 1f;
+            static float Sat(ColorRgba32 c)
+            {
+                float max = Math.Max(c.r, Math.Max(c.g, c.b)), min = Math.Min(c.r, Math.Min(c.g, c.b));
+                return max <= 0 ? 0 : (max - min) / max;
+            }
+            // A hue mask paints the colour on the coloured parts under it (wood, RoadTech's green stripes); greys keep their
+            // look (asphalt has no hue to change). The painted parts take the colour's brightness, with the texture's
+            // light and dark variation: White is white, Black dark.
+            var weight = new float[pixels.Length];
+            double lumSum = 0, lumWeight = 0;
+            if (mask is not null)
+                for (var i = 0; i < pixels.Length; i++)
+                {
+                    var s = Math.Clamp((Sat(pixels[i]) - 0.08f) / 0.17f, 0, 1);
+                    weight[i] = mask[i] * s * s * (3 - 2 * s);
+                    lumSum += Lum(pixels[i]) * weight[i];
+                    lumWeight += weight[i];
+                }
+            var meanLum = lumWeight > 0 ? (float)Math.Max(0.05, lumSum / lumWeight) : 1f;
             var bytes = new byte[pixels.Length * 4];
             for (var i = 0; i < pixels.Length; i++)
             {
                 float r = pixels[i].r, g = pixels[i].g, b = pixels[i].b;
-                if (mask is not null && tint is { } t && mask[i] > 0)
+                if (mask is not null && tint is { } t && weight[i] > 0)
                 {
-                    var k = Lum(pixels[i]) / tintLum;
-                    r += (Math.Min(255, t.R * k) - r) * mask[i];
-                    g += (Math.Min(255, t.G * k) - g) * mask[i];
-                    b += (Math.Min(255, t.B * k) - b) * mask[i];
+                    var k = Lum(pixels[i]) / meanLum;
+                    r += (Math.Min(255, t.R * k) - r) * weight[i];
+                    g += (Math.Min(255, t.G * k) - g) * weight[i];
+                    b += (Math.Min(255, t.B * k) - b) * weight[i];
                 }
                 bytes[i * 4] = (byte)Math.Clamp(r, 0, 255);
                 bytes[i * 4 + 1] = (byte)Math.Clamp(g, 0, 255);
@@ -159,13 +183,18 @@ static class Textures
         }
     }
 
-    /// <summary>The first colour of a colour table (.ColorTable.gbx.json, "Colors": ["#rrggbbaa", ...]).</summary>
-    static (byte, byte, byte)? FirstColour(string? table)
+    /// <summary>
+    /// The colours of a colour table (.ColorTable.gbx.json, "Colors": ["#rrggbbaa", ...]): White, Green, Blue, Red, Black,
+    /// the game's colours after Default.
+    /// </summary>
+    static List<(byte R, byte G, byte B)?> Colours(string? table)
     {
-        if (table is null || !File.Exists(table)) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(table), @"""Colors""\s*:\s*\[\s*""#([0-9a-fA-F]{6})");
-        if (!m.Success) return null;
-        var hex = System.Convert.ToInt32(m.Groups[1].Value, 16);
-        return ((byte)(hex >> 16), (byte)(hex >> 8), (byte)hex);
+        if (table is null || !File.Exists(table)) return [];
+        var list = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(table), @"""Colors""\s*:\s*\[([^\]]*)\]");
+        if (!list.Success) return [];
+        return System.Text.RegularExpressions.Regex.Matches(list.Groups[1].Value, @"#([0-9a-fA-F]{6})")
+            .Select(m => System.Convert.ToInt32(m.Groups[1].Value, 16))
+            .Select(hex => ((byte, byte, byte)?)((byte)(hex >> 16), (byte)(hex >> 8), (byte)hex))
+            .ToList();
     }
 }

@@ -72,6 +72,15 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
                 blockModifiers[name] = modifier;
                 if (!File.Exists(modifier)) missingFiles.TryAdd(modifier, 0);
             }
+            // Other modifiers (Media\Modifier\TrackWallFromParent.Gbx on the DecoWall and WaterWall columns): not extracted
+            // yet, so listed for the plugin. That one makes the columns' TrackWall concrete instead of the material's own
+            // wood (road columns stay wood): drawn with the colour table's first entry by default.
+            string? defaultColor = null;
+            foreach (var r in References(file).Where(r => r.Contains(@"\Media\Modifier\", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!File.Exists(r)) missingFiles.TryAdd(r, 0);
+                if (Path.GetFileName(r).StartsWith("TrackWallFromParent", StringComparison.OrdinalIgnoreCase)) defaultColor = "White";
+            }
             var ground = Variant(info.VariantBaseGround, file, level, true);
             var air = Variant(info.VariantBaseAir, file, level, false);
             // Ground-only blocks ("in ground" U bottoms have an empty air variant): off the ground they are the ground
@@ -102,7 +111,7 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
                 }
                 blocks[name] = new BlockInfo(Path.GetRelativePath(blockDir, Path.GetDirectoryName(file)!).Replace('\\', '/'), ground, air,
                     icon, info.PageName ?? "", info.CatalogPosition, info.IsPillar,
-                    blockModifiers.TryGetValue(name, out var mod) ? Path.GetFileName(mod).Split('.')[0] : null, airPillar, groundPillar);
+                    blockModifiers.TryGetValue(name, out var mod) ? Path.GetFileName(mod).Split('.')[0] : null, airPillar, groundPillar, defaultColor);
             }
         }
     }
@@ -624,7 +633,7 @@ record ClipOption(string Name, MeshRef? Mesh, string[] Connects, MeshRef?[]? Sta
 record VariantInfo(int[] Size, int[][] Units, MeshRef? Mesh, PillarInfo[]? Pillars, ClipInfo[]? Clips);
 /// <param name="AirPillar">The air variant used when a column stands below the block (null: same as Air).</param>
 record BlockInfo(string Folder, VariantInfo? Ground, VariantInfo? Air, string? Icon, string Page, int Catalog, bool Pillar, string? Modifier,
-    VariantInfo? AirPillar, VariantInfo? GroundPillar);
+    VariantInfo? AirPillar, VariantInfo? GroundPillar, string? DefaultColor);
 record Group(int M, int V, int I);
 record MeshInfo(string File, Group[] Groups, float[] Min, float[] Max);
 

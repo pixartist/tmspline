@@ -4,7 +4,7 @@ using GBX.NET.LZO;
 Gbx.LZO = new Lzo();
 if (args[0] == "--waypoints") { foreach (var f in args.Skip(1)) try { WaypointsDump.Run(f); } catch (Exception ex) { Console.WriteLine(f + ": " + ex.Message); } return; }
 if (args[0] == "--colortype") { var t = typeof(GBX.NET.Engines.Game.CGameCtnAnchoredObject).GetProperty("Color")!.PropertyType; Console.WriteLine(t.FullName + ": " + string.Join(", ", Enum.GetNames(t).Zip(Enum.GetValues(t).Cast<object>().Select(Convert.ToInt32), (n, v) => $"{n}={v}"))); return; }
-if (args[0] == "--colors") { var m = GBX.NET.Gbx.ParseNode<GBX.NET.Engines.Game.CGameCtnChallenge>(args[1]); foreach (var g in m.AnchoredObjects!.GroupBy(a => a.Color)) Console.WriteLine($"{g.Key}: {g.Count()} items, e.g. {g.First().ItemModel.Id}"); return; }
+if (args[0] == "--colors") { var m = GBX.NET.Gbx.ParseNode<GBX.NET.Engines.Game.CGameCtnChallenge>(args[1]); foreach (var g in (m.AnchoredObjects ?? []).GroupBy(a => a.Color)) Console.WriteLine($"{g.Key}: {g.Count()} items, e.g. {g.First().ItemModel.Id}"); foreach (var b in m.Blocks ?? []) Console.WriteLine($"block {b.Name} {b.Coord} color={b.Color} pillar={b.IsPillar}"); return; }
 if (args[0] == "--obj") { ObjExport.Run(args[1], args[2]); return; }
 if (args[0] == "--free") { FreeBlocks.Run(args.Skip(1).SelectMany(a => Directory.Exists(a) ? Directory.EnumerateFiles(a, "*.Map.Gbx", SearchOption.AllDirectories) : [a])); return; }
 if (args[0] == "--pillars") { Pillars.Run(args.Skip(1).SelectMany(a => Directory.Exists(a) ? Directory.EnumerateFiles(a, "*.Map.Gbx", SearchOption.AllDirectories) : [a])); return; }

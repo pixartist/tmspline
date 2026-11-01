@@ -5,7 +5,7 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
-import { BLOCK_CELL, BLOCK_LEVEL, type VanillaBlock } from "./track";
+import { BLOCK_CELL, BLOCK_LEVEL, ITEM_COLORS, type ItemColor, type VanillaBlock } from "./track";
 
 /**
  * Vanilla block meshes for the preview. They are the game's own assets, converted locally by tools/VanillaLib from
@@ -63,6 +63,8 @@ interface BlockEntry {
   airPillar?: BlockVariant | null;
   /** The ground variant with the same "column below" adapter, which the game also shows on the ground. */
   groundPillar?: BlockVariant | null;
+  /** The look of Default for this block, when not the materials' own (DecoWall columns: concrete, not wood). */
+  defaultColor?: ItemColor | null;
 }
 
 /** What the palette shows for a block. */
@@ -71,7 +73,11 @@ export interface BlockCatalogEntry { name: string; icon: string | null; page: st
  * A material's diffuse texture (tools/VanillaLib Textures.cs): mapped by the mesh's UV0 ("uv"), or projected in world
  * space from above ("py") or from above and the sides ("pypxz"), with scale = repeats per UV unit or per metre.
  */
-export interface TextureEntry { texture: string | null; projection: "uv" | "py" | "pypxz"; scale: [number, number]; alpha: "opaque" | "blend" | "decal" }
+export interface TextureEntry {
+  texture: string | null; projection: "uv" | "py" | "pypxz"; scale: [number, number]; alpha: "opaque" | "blend" | "decal";
+  /** The texture in the colours White, Green, Blue, Red, Black (`texture` is Default); absent when it has no colour table. */
+  colors?: (string | null)[] | null;
+}
 interface LibraryIndex {
   /** 2: mesh files carry UV0 after the positions. */
   format?: number;
@@ -102,6 +108,9 @@ const MATERIAL_LOOKS: [RegExp, number | null][] = [
   [/Rubber/i, 0x2c2e33],
 ];
 
+/** Materials drawn with a plain look even when they have a texture: helpers, and the "Off" borders (dark in game). */
+const UNTEXTURED = /^(Collision|Trigger|Invisible|Shadow|Occ)|FX|BordersOff/i;
+
 const lookOf = (name: string): number | null | undefined => MATERIAL_LOOKS.find(([re]) => re.test(name))?.[1];
 
 export class VanillaLibrary {
@@ -115,7 +124,7 @@ export class VanillaLibrary {
     this.materials = index.materials.map((name) => {
       const tex = index.textures?.[name];
       // "Off" borders are the unlit look of the light strips: dark in game, whatever their texture's white parts.
-      if (tex?.texture && (index.format ?? 1) >= 2 && !/^(Collision|Trigger|Invisible|Shadow|Occ)|FX|BordersOff/i.test(name))
+      if (tex?.texture && (index.format ?? 1) >= 2 && !UNTEXTURED.test(name))
         return texturedMaterial(name, tex, this.textureCache);
       const look = lookOf(name);
       if (look === null) return hidden;
@@ -154,6 +163,11 @@ export class VanillaLibrary {
   /** The block's surface modifier (e.g. "PlatformGrass"), if it has one. */
   modifierOf(name: string): string | undefined {
     return this.index.blocks[name]?.modifier ?? undefined;
+  }
+
+  /** How Default looks on a block (the colour its materials are drawn in when it has none of its own). */
+  defaultColorOf(name: string): ItemColor {
+    return this.index.blocks[name]?.defaultColor ?? "Default";
   }
 
   /** Pillar blocks are column pieces: placed with the pillar flag, grid only. */
@@ -257,20 +271,25 @@ export class VanillaLibrary {
 
   /**
    * The materials of a block's mesh: the game's surface modifier (PlatformGrass, PlatformDirt, ...) swaps some of them
-   * for its own, the others stay.
+   * for its own, the others stay; a block colour (not Default) paints the materials that have a colour table.
    */
-  materialsOf(name: string, modifierOverride?: string): THREE.Material[] {
+  materialsOf(name: string, modifierOverride?: string, color: ItemColor = "Default"): THREE.Material[] {
     const modifier = modifierOverride ?? this.index.blocks[name]?.modifier;
     const swaps = modifier ? this.index.modifiers?.[modifier] : undefined;
-    if (!modifier || !swaps) return this.materials;
-    let list = this.modifiedMaterials.get(modifier);
+    const shade = ITEM_COLORS.indexOf(color) - 1; // index into TextureEntry.colors; -1 for Default
+    if ((!modifier || !swaps) && shade < 0) return this.materials;
+    const cacheKey = `${swaps ? modifier : ""}|${color}`;
+    let list = this.modifiedMaterials.get(cacheKey);
     if (!list) {
       list = this.index.materials.map((m, i) => {
-        const key = swaps[m];
-        const tex = key ? this.textureOf(key) : null;
-        return tex ? texturedMaterial(key, tex, this.textureCache) : this.materials[i];
+        const key = swaps?.[m] ?? m;
+        const tex = this.textureOf(key);
+        // Not the materials drawn plain on purpose (the dark unlit borders, helpers).
+        const painted = shade >= 0 && !UNTEXTURED.test(m) ? tex?.colors?.[shade] : null;
+        if (painted && tex) return texturedMaterial(key, { ...tex, texture: painted }, this.textureCache);
+        return key !== m && tex ? texturedMaterial(key, tex, this.textureCache) : this.materials[i];
       });
-      this.modifiedMaterials.set(modifier, list);
+      this.modifiedMaterials.set(cacheKey, list);
     }
     return list;
   }
@@ -411,8 +430,8 @@ export function blockMatrix(b: VanillaBlock, size: [number, number, number]): TH
 }
 
 const blockKey = (b: VanillaBlock) => b.free
-  ? `${b.name}|free|${b.position?.join(",")}|${b.yaw}|${b.pitch}|${b.roll}`
-  : `${b.name}|${b.x}|${b.y}|${b.z}|${b.dir}`;
+  ? `${b.name}|free|${b.position?.join(",")}|${b.yaw}|${b.pitch}|${b.roll}|${b.color ?? ""}`
+  : `${b.name}|${b.x}|${b.y}|${b.z}|${b.dir}|${b.color ?? ""}`;
 
 /** Height of ground shadows and the ends of drop lines (just above the ground grid). */
 export const SHADOW_Y = 0.06;
@@ -622,7 +641,7 @@ export function pillarColumns(blocks: VanillaBlock[], lib: VanillaLibrary | null
         if (placed.has(key)) continue;
         placed.add(key);
         const modifier = lib.modifierOf(b.name);
-        columns.push({ name: p.block, x, y: level, z, dir: (b.dir + p.dir) % 4, pillar: true, ...(modifier ? { modifier } : {}) });
+        columns.push({ name: p.block, x, y: level, z, dir: (b.dir + p.dir) % 4, pillar: true, ...(modifier ? { modifier } : {}), ...(b.color ? { color: b.color } : {}) });
       }
     }
   }
@@ -815,7 +834,7 @@ export class BlockLayer {
     ];
     for (const part of parts)
       lib.geometry(part.file).then((geo) => {
-        const materials = lib.materialsOf(b.name, b.modifier);
+        const materials = lib.materialsOf(b.name, b.modifier, b.color ?? lib.defaultColorOf(b.name));
         const mesh = new THREE.Mesh(geo, ghost ? this.ghostMaterial : part.floorless ? lib.floorless(materials) : materials);
         if (part.matrix) {
           mesh.matrixAutoUpdate = false;
