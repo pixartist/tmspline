@@ -59,6 +59,8 @@ public static class TrackJson
         public bool Pillar { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public ItemColor Color { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public int Variant { get; set; }
     }
 
     public sealed class ObjectDto
@@ -130,7 +132,7 @@ public static class TrackJson
                 {
                     Name = b.Name, X = b.X, Y = Math.Max(0, b.Y), Z = b.Z, Dir = ((b.Dir % 4) + 4) % 4,
                     Free = b.Free && b.Position is { Length: 3 }, Position = b.Position is { Length: 3 } p ? V(p) : default,
-                    Yaw = b.Yaw, Pitch = b.Pitch, Roll = b.Roll, Pillar = b.Pillar && !b.Free, Color = b.Color,
+                    Yaw = b.Yaw, Pitch = b.Pitch, Roll = b.Roll, Pillar = b.Pillar && !b.Free, Color = b.Color, Variant = Math.Clamp(b.Variant, 0, 15),
                 });
         foreach (var i in dto.Items ?? new())
             if (!string.IsNullOrWhiteSpace(i.Name) && i.Position is { Length: 3 } p)

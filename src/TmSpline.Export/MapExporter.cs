@@ -127,7 +127,7 @@ public static class MapExporter
                 log?.Invoke($"Skipped block {block.Name} outside the map at {coord}");
                 continue;
             }
-            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: block.Y == 0, variant: 0, subVariant: 0);
+            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: block.Y == 0, variant: (byte)block.Variant, subVariant: 0);
             // Columns under air blocks are pillar blocks with the pillar flag, as the game's editor saves them.
             if (block.Pillar)
                 placed.IsPillar = true;

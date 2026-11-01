@@ -253,6 +253,9 @@ public sealed class VanillaBlock
     /// <summary>A pillar block (column piece under an air block), placed with the game's pillar flag.</summary>
     public bool Pillar { get; set; }
 
+    /// <summary>The block's variant as the game numbers them (0: base, 1..: the additional ones).</summary>
+    public int Variant { get; set; }
+
     /// <summary>The block's colour (Default: the game's own look, e.g. wooden road columns).</summary>
     public ItemColor Color { get; set; }
 }

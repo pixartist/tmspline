@@ -42,6 +42,25 @@ if (args[0] == "--items")
     foreach (var (k, n) in seen.OrderByDescending(x => x.Value).Take(80)) Console.WriteLine($"{n,6}  {k}");
     return;
 }
+if (args[0] == "--variants")
+{
+    // Block variants as the game saves them: name pattern, then maps or folders. Counts per (name, ground, variant).
+    var pattern = new System.Text.RegularExpressions.Regex(args[1]);
+    var counts = new Dictionary<string, int>();
+    foreach (var f in args.Skip(2).SelectMany(a => Directory.Exists(a) ? Directory.EnumerateFiles(a, "*.Map.Gbx", SearchOption.AllDirectories) : [a]))
+        try
+        {
+            foreach (var b in Gbx.ParseNode<CGameCtnChallenge>(f).Blocks ?? [])
+                if (pattern.IsMatch(b.Name))
+                {
+                    var k = $"{b.Name} ground={b.IsGround} pillar={b.IsPillar} variant={b.Variant} sub={b.SubVariant}";
+                    counts[k] = counts.GetValueOrDefault(k) + 1;
+                }
+        }
+        catch (Exception ex) { Console.WriteLine($"{Path.GetFileName(f)}: {ex.Message}"); }
+    foreach (var (k, n) in counts.OrderBy(x => x.Key)) Console.WriteLine($"{n,6}  {k}");
+    return;
+}
 if (args[0] == "--icon") { foreach (var f in args.Skip(1)) Reflect.Icon(f); return; }
 if (args[0] == "--mobils") { foreach (var f in args.Skip(1)) Reflect.Mobils(f); return; }
 if (args[0] == "--clip") { foreach (var f in args.Skip(1)) Reflect.Clip(f); return; }
