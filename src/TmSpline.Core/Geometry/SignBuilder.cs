@@ -48,11 +48,16 @@ public static class SignBuilder
         return signs;
     }
 
-    /// <summary>The signs as the game's items, turned so their local +Z is the sign's facing and +Y its up.</summary>
+    /// <summary>
+    /// The signs as the game's items. The sign model's front is not its +Z: with +Z on the facing it stood turned 90°
+    /// clockwise seen from above (checked in game by the user), so +Z goes 90° counter-clockwise of it
+    /// (up × facing; seen from above +Z is up and +X left).
+    /// </summary>
     public static IEnumerable<VanillaItem> GameItems(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts, RoadMeshSettings settings) =>
         Signs(track, rings, segmentStarts, settings).Select(sign =>
         {
-            var (yaw, pitch, roll) = PillarBuilder.UprightAngles(sign.Facing, sign.Up);
+            var modelZ = Vec3d.Cross(sign.Up, sign.Facing).Normalized();
+            var (yaw, pitch, roll) = PillarBuilder.UprightAngles(modelZ, sign.Up);
             return new VanillaItem { Name = sign.Name, Position = sign.Position, Yaw = yaw, Pitch = pitch, Roll = roll, Color = sign.Color };
         });
 

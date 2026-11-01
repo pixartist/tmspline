@@ -112,7 +112,7 @@ export interface TrackSegment {
   bumpSize: number;
   /** Meters between the cross-sections / columns of the bumpy surface (smaller: finer, more triangles). */
   bumpDetail: number;
-  /** The game's curve signs along the borders (item name; RoadSign green, B yellow, C red), see SignBuilder in C#. */
+  /** The game's curve signs along the borders (item name; RoadSign red, B yellow, C green), see SignBuilder in C#. */
   signs: RoadSignKind;
   signSide: SignSide;
   /** Meters between signs. */
@@ -121,8 +121,8 @@ export interface TrackSegment {
 
 export const ROAD_SIGNS = ["None", "RoadSign", "RoadSignB", "RoadSignC"] as const;
 export type RoadSignKind = (typeof ROAD_SIGNS)[number];
-/** How the game shows them (per the user): RoadSign green, RoadSignB yellow, RoadSignC red. */
-export const ROAD_SIGN_LABELS: Record<RoadSignKind, string> = { None: "None", RoadSign: "Green", RoadSignB: "Yellow", RoadSignC: "Red" };
+/** How the game shows them (checked in game by the user): RoadSign red, RoadSignB yellow, RoadSignC green. */
+export const ROAD_SIGN_LABELS: Record<RoadSignKind, string> = { None: "None", RoadSign: "Red", RoadSignB: "Yellow", RoadSignC: "Green" };
 export const SIGN_SIDES = ["Left", "Right", "Both"] as const;
 export type SignSide = (typeof SIGN_SIDES)[number];
 
