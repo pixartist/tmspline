@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
-import { BlockLayer, blockMatrix, blockSize, freeRotation, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
+import { BlockLayer, blockMatrix, blockSize, freeRotation, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
+import { generateCliffs, roadColumns, type SceneryTheme } from "./scenery";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
@@ -649,6 +650,38 @@ export class Editor {
    */
   exportMap(): TrackMap {
     return { ...this.map, blocks: [...this.map.blocks, ...pillarColumns(this.map.blocks, this.library)] };
+  }
+
+  /**
+   * Replaces the generated scenery with a new one round the tracks and the other blocks (one undo step). Returns the
+   * number of blocks placed, or null when the block library lacks the theme's pieces.
+   */
+  generateScenery(theme: SceneryTheme, gap: number): number | null {
+    const lib = this.library;
+    if (!lib) return null;
+    const own = this.map.blocks.filter((b) => !b.scenery);
+    const roads = roadColumns(this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r));
+    const occupied = occupiedCells([...own, ...pillarColumns(own, lib)], lib);
+    const generated = generateCliffs(lib, { roads, occupied }, { theme, gap });
+    if (!generated) return null;
+    this.editBlocks((blocks) => {
+      const keep = blocks.filter((b) => !b.scenery);
+      blocks.length = 0;
+      blocks.push(...keep, ...generated);
+    });
+    return generated.length;
+  }
+
+  /** Removes the generated scenery (one undo step); returns how many blocks it had. */
+  removeScenery(): number {
+    const count = this.map.blocks.filter((b) => b.scenery).length;
+    if (count)
+      this.editBlocks((blocks) => {
+        const keep = blocks.filter((b) => !b.scenery);
+        blocks.length = 0;
+        blocks.push(...keep);
+      });
+    return count;
   }
 
   /** Road meshes of all tracks, each with a bounds tree for fast raycasts (built on first use after a rebuild). */

@@ -439,7 +439,7 @@ export const SHADOW_Y = 0.06;
 const cellKey = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
 /** Grid cell (x, z) of a point in block-local metres, through a block matrix. */
-function cellOf(m: THREE.Matrix4, x: number, z: number): [number, number] {
+export function cellOf(m: THREE.Matrix4, x: number, z: number): [number, number] {
   const p = new THREE.Vector3(x, 0, z).applyMatrix4(m);
   return [Math.floor(p.x / BLOCK_CELL), Math.floor(p.z / BLOCK_CELL)];
 }

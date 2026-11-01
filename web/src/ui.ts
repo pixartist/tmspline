@@ -1,6 +1,10 @@
 import type { Editor } from "./editor";
 import { showExportDialog } from "./export";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
+import { SCENERY_THEMES } from "./scenery";
+
+/** Scenery panel settings (kept while the page is open). */
+const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
@@ -468,6 +472,27 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   ]);
   if (map.tracks.length > 1)
     hint(root, "Points of the other tracks are grey: click one (or their road) to edit that track.");
+
+  if (!s && editor.library) {
+    section("Scenery");
+    selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => (scenery.theme = v), false,
+      Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
+    numberField(root, "Gap (cells)", () => scenery.gap, (v) => (scenery.gap = Math.max(0, Math.min(8, Math.round(v)))), 1);
+    buttonRow(root, [
+      {
+        label: "Generate", onClick: () => {
+          const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
+          const n = editor.generateScenery(theme, scenery.gap);
+          scenery.note = n === null ? "The block library has no pieces for this theme." : `Placed ${n} blocks.`;
+          editor.onChange();
+        },
+      },
+      { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks.`; editor.onChange(); } },
+    ]);
+    hint(root, (scenery.note ? scenery.note + " " : "")
+      + "Surrounds the tracks with cliffs facing them, the gap away from the roads and blocks (also inside loops). "
+      + "Generating again replaces the generated blocks; they are normal blocks otherwise (jumps may need clearing by hand).");
+  }
 
   if (s?.kind === "point" || s?.kind === "handle") {
     const p = () => editor.track.points[s.index];

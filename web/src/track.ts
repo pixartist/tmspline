@@ -175,6 +175,8 @@ export interface VanillaBlock {
   pillar?: boolean;
   /** The game's block colour (absent: Default, the block's own look, e.g. wooden road columns). Columns take it too. */
   color?: ItemColor;
+  /** Placed by the scenery generator (its theme id): generating again replaces these, "Remove scenery" deletes them. */
+  scenery?: string;
   /**
    * Generated columns only (preview, never saved): the surface modifier of the block they stand under, whose materials
    * they take (concrete walls under grass platforms, ...), as in game.
@@ -494,6 +496,7 @@ export function parseMap(json: string): TrackMap {
       if (b.pillars === false) block.pillars = false;
       if (b.pillar && !b.free) block.pillar = true;
       if (b.color && b.color !== "Default" && (ITEM_COLORS as readonly string[]).includes(b.color)) block.color = b.color;
+      if (typeof b.scenery === "string" && b.scenery) block.scenery = b.scenery;
       if (b.free && Array.isArray(b.position) && b.position.length === 3)
         Object.assign(block, { free: true, position: b.position.map(Number) as Vec3, yaw: b.yaw ?? 0, pitch: b.pitch ?? 0, roll: b.roll ?? 0 });
       return block;
