@@ -238,10 +238,39 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
   const dirFor = (want: (dir: number) => boolean) => [0, 1, 2, 3].find(want) ?? 0;
   const same = (a: Cell, b: Cell) => a[0] === b[0] && a[1] === b[1];
   const at = (name: string, x: number, z: number, level: number, dir: number): VanillaBlock => ({ name, x, y: level, z, dir, scenery: id });
+  // Ridges in narrow pockets (inside small loops of the track): two flat cells side by side with the track on both outer
+  // sides get slopes climbing towards each other, meeting 2 levels up, instead of staying bare.
+  const flatCell = (x: number, z: number) => {
+    const k = key(x, z), v = height.get(k);
+    if (v === undefined || track.has(k) || cliffFront.has(k)) return false;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if ((h(x + dx, z + dz) ?? -1) > v) return false;
+    return true;
+  };
+  const ridge = new Map<string, Cell>();
+  for (const [k, v] of height) {
+    const [x, z] = parse(k);
+    if (ridge.has(k) || !flatCell(x, z)) continue;
+    for (const [ux, uz] of ORTHO) {
+      const n = key(x + ux, z + uz);
+      const sameLevel = height.get(n) === v && flatCell(x + ux, z + uz) && !ridge.has(n);
+      // Road behind both: the slopes start at its edge, so no wall faces it.
+      if (sameLevel && track.has(key(x - ux, z - uz)) && track.has(key(x + 2 * ux, z + 2 * uz))) {
+        ridge.set(k, [ux, uz]);
+        ridge.set(n, [-ux, -uz]);
+        break;
+      }
+    }
+  }
+
   for (const [k, v] of height) {
     // Under a leaning cliff face: nothing (its height still shapes the land round it).
     if (cliff?.leaning && cliffFront.has(k)) continue;
     const [x, z] = parse(k);
+    const towards = ridge.get(k);
+    if (towards) {
+      blocks.push(at(slopes[2].straight, x, z, v, dirFor((d) => same(turn(d, [0, 1]), towards))));
+      continue;
+    }
     // Slopes rise to higher neighbours, 1 or 2 levels (track cells stay flat under the road).
     const up = ORTHO.filter(([dx, dz]) => (h(x + dx, z + dz) ?? -1) > v);
     const rise = up.length ? h(x + up[0][0], z + up[0][1])! - v : 0;
