@@ -7,7 +7,7 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
+  ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -553,6 +553,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         point.sausage = preset.sausage;
       }),
     })));
+    profileFields(root, editor, s.index);
     hint(root, "Drag the point to move it (Shift: keep height, Alt: height only, Ctrl: snap to 1 m). Drag the blue handles to shape the curve. "
       + "Drag the orange ring to bank the road (Ctrl: 5° steps), or use Q / E. The road always rolls the shorter way "
       + "between two points, so a corkscrew is a few points stepping round (e.g. 0° → 120° → -120° → 0°). "
@@ -821,6 +822,89 @@ function buttonRow(root: HTMLElement, buttons: { label: string; onClick: () => v
     row.appendChild(button);
   }
   root.appendChild(row);
+}
+
+// ---- saved point profiles ---------------------------------------------------------------------
+
+/** A point's cross-section settings, saved under a name (not its position, handles, bank or waypoint). */
+type PointProfile = Pick<TrackPoint, "width" | "curve" | "flat" | "sausage" | "borders" | "borderHeight">;
+const PROFILE_FIELDS = ["width", "curve", "flat", "sausage", "borders", "borderHeight"] as const;
+/** Shared by all tracks (per `?session`, like the autosave). */
+const PROFILES_KEY = SESSION ? `tmspline.profiles.${SESSION}` : "tmspline.profiles";
+let profileChoice = "";
+let profileName = "";
+
+function loadProfiles(): Record<string, PointProfile> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const saveProfiles = (profiles: Record<string, PointProfile>) => localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+
+/** Pick a saved profile and apply it to the point, or save the point's settings as one. */
+function profileFields(root: HTMLElement, editor: Editor, index: number) {
+  const profiles = loadProfiles();
+  const names = Object.keys(profiles).sort((a, b) => a.localeCompare(b));
+  if (!names.includes(profileChoice)) profileChoice = names[0] ?? "";
+
+  const pick = row(root, "Profile");
+  const select = document.createElement("select");
+  if (!names.length) select.append(new Option("(none saved)", ""));
+  for (const n of names) select.append(new Option(n, n));
+  select.value = profileChoice;
+  select.disabled = !names.length;
+  select.addEventListener("change", () => (profileChoice = select.value));
+  pick.appendChild(select);
+  if (names.length)
+    buttonRow(root, [
+      {
+        label: "Apply profile",
+        onClick: () => {
+          const profile = loadProfiles()[profileChoice];
+          if (!profile) return;
+          editor.edit((tr) => {
+            const point = tr.points[index] as unknown as Record<string, unknown>;
+            for (const f of PROFILE_FIELDS) if (profile[f] !== undefined) point[f] = profile[f];
+            syncSegments(tr);
+          }, true);
+        },
+      },
+      {
+        label: "Delete profile",
+        onClick: () => {
+          const all = loadProfiles();
+          delete all[profileChoice];
+          saveProfiles(all);
+          profileChoice = "";
+          editor.onChange();
+        },
+      },
+    ]);
+
+  const save = row(root, "Save as");
+  const name = Object.assign(document.createElement("input"), { type: "text", placeholder: "Profile name", value: profileName });
+  name.addEventListener("input", () => (profileName = name.value));
+  const button = Object.assign(document.createElement("button"), { textContent: "Save", type: "button" });
+  const store = () => {
+    const n = name.value.trim();
+    if (!n) return name.focus();
+    const point = editor.track.points[index];
+    const all = loadProfiles();
+    all[n] = Object.fromEntries(PROFILE_FIELDS.map((f) => [f, point[f]])) as PointProfile;
+    saveProfiles(all);
+    profileChoice = n;
+    profileName = "";
+    editor.onChange();
+  };
+  button.addEventListener("click", store);
+  name.addEventListener("keydown", (e) => { if (e.key === "Enter") store(); e.stopPropagation(); });
+  save.append(name, button);
+  hint(root, "Profiles keep a point's width, shape, flat in, sausage and borders (not its position, bank or waypoint), "
+    + "for all tracks. Saving under an existing name replaces that profile.");
 }
 
 function hint(root: HTMLElement, text: string) {
