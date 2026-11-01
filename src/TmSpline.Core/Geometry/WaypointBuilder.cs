@@ -155,7 +155,8 @@ public static class WaypointBuilder
         var borders = segment.Borders;
         // On the border, also where it is still growing (see Ring.BorderScale).
         var baseLift = borders ? ring.BorderHeight * ring.BorderScale : 0;
-        var outward = borders ? settings.BorderThickness * ring.BorderScale / 2 : -BeamWidth / 2;
+        // Posts in the middle of the curb, which reaches from its inset inside the width to its thickness outside.
+        var outward = borders ? (settings.BorderThickness - settings.BorderInset) * ring.BorderScale / 2 : -BeamWidth / 2;
 
         points.Add(Offset(half, baseLift, outward));             // right post foot, on the border
         for (var i = 0; i <= ArchSegments; i++)                   // arch over the road, right to left

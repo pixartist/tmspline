@@ -75,6 +75,12 @@ public sealed class RoadMeshSettings
     /// width of 26.25 m out to x = 1.5 in the cell: 1.375 m).
     /// </summary>
     public double BorderThickness { get; set; } = 1.375;
+
+    /// <summary>
+    /// How far the curbs' inner face stands inside the road width (the game's curbs reach over the road edge; matched in
+    /// game by the user): the driving surface ends there, its texture still spans the full width.
+    /// </summary>
+    public double BorderInset { get; set; } = 0.32;
     /// <summary>Approximate width of one column of the driving surface, in meters.</summary>
     public double ColumnWidth { get; set; } = 4.0;
     /// <summary>Maximum angle between two columns of a bent surface (pipes, sausages), in degrees.</summary>
@@ -114,6 +120,11 @@ public static class RoadMeshBuilder
         double DecalYaw = 0, double DecalStart = 0, double DecalPadLength = 1)
     {
         public SurfaceArc? Arc { get; init; }
+        /// <summary>
+        /// Surface coordinates the road texture spans across (V 0..1), when not the arc's own ends: the top surface ends
+        /// under the curbs' inset, but keeps the texture laid out over the full width.
+        /// </summary>
+        public (double S0, double S1)? TextureSpan { get; init; }
     }
 
     /// <summary>
@@ -370,7 +381,10 @@ public static class RoadMeshBuilder
     private static void AddCap(MeshChunk chunk, Ring ring, TrackSegment segment, bool forward, int topColumns, Vec3d itemOrigin,
         (double U0, double U1) band, RoadMeshSettings s, bool curbsOnly = false)
     {
-        var half = ring.Width * 0.5;
+        // As in Profile: with borders the surfaces end at the curbs' inner face, inset inside the width.
+        var (bh, bt, inset) = segment.Borders ? BorderSize(ring, s) : (0, 0, 0);
+        var half = ring.Width * 0.5 - inset;
+        bt += inset;
         var h = s.Thickness;
         var top = SurfaceArc.For(ring, half, -half, 0, 1, s);
         var bottom = SurfaceArc.For(ring, -half, half, -h, -1, s);
@@ -392,7 +406,6 @@ public static class RoadMeshBuilder
         {
             // Cross-sections of the curbs (as built in Profile): convex pentagons round the surface's end.
             var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
-            var (bh, bt) = BorderSize(ring, s);
             foreach (var sign in new[] { 1, -1 })
             {
                 var (e, t, n) = (arc.Point(sign * half), arc.Tangent(sign * half), arc.Normal(sign * half));
@@ -520,27 +533,33 @@ public static class RoadMeshBuilder
     }
 
     /// <summary>
-    /// Height and thickness of the curbs at a ring: where borders start or end they grow out of the road's edge (see
-    /// Ring.BorderScale), from a sliver (not zero: no degenerate triangles) to full size.
+    /// Height, thickness (outside the road width) and inset (how far the curb's inner face stands inside the width) of the
+    /// curbs at a ring: where borders start or end they grow out of the road's edge (see Ring.BorderScale), from a sliver
+    /// (not zero: no degenerate triangles) to full size.
     /// </summary>
-    private static (double Height, double Thickness) BorderSize(Ring ring, RoadMeshSettings s)
+    private static (double Height, double Thickness, double Inset) BorderSize(Ring ring, RoadMeshSettings s)
     {
         var k = Math.Max(MinBorderScale, ring.BorderScale);
-        return (ring.BorderHeight * k, s.BorderThickness * k);
+        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly.
+        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(ring.BorderScale, 0, 1));
     }
 
     private const double MinBorderScale = 0.02;
 
     private static IEnumerable<Edge> Profile(Ring ring, TrackSegment segment, (double Start, double End, double Width) range, int topColumns, RoadMeshSettings s)
     {
-        var half = ring.Width * 0.5;
+        var width = ring.Width * 0.5;
         var h = s.Thickness;
         var road = Surfaces.Road(segment.Surface, segment.Effect);
+        // With borders the curbs stand `inset` inside the width (as the game's do): the surfaces end at their inner face,
+        // the road texture still spans the full width.
+        var (bh, bt, inset) = segment.Borders ? BorderSize(ring, s) : (0, 0, 0);
+        var half = width - inset;
         // The driving surface goes right to left; its normal is explicit (see SurfaceArc).
         Edge Surface(string key, double lift, double sign, TmMaterial material, double s0, double s1) =>
             new(key, 0, 0, 0, 0, topColumns, material) { Arc = SurfaceArc.For(ring, s0, s1, lift, sign, s) };
 
-        yield return Surface("top", 0, 1, road, half, -half);
+        yield return Surface("top", 0, 1, road, half, -half) with { TextureSpan = (width, -width) };
         if (road.GameplayId is not null && Surfaces.Decal(segment.Effect) is { } decal)
         {
             // Whole pads per segment: about one road width each, stretched slightly to fit exactly.
@@ -566,7 +585,8 @@ public static class RoadMeshBuilder
         if (segment.Borders)
         {
             var border = Surfaces.BorderOf(segment.BorderMaterial);
-            var (bh, bt) = BorderSize(ring, s);
+            // From the inner face (inset inside the width) out to the thickness outside it.
+            bt += inset;
             // Right end: outward = +tangent. Left end: outward = -tangent.
             yield return Line("rb_out", At(er, tr, bt, nr, -h), At(er, tr, bt, nr, bh), border);
             yield return Line("rb_top", At(er, tr, bt, nr, bh), At(er, tr, 0, nr, bh), border);
@@ -624,7 +644,8 @@ public static class RoadMeshBuilder
         var isRoad = edge.Key == "top";
         var u0 = ring.Distance / (isRoad ? s.RoadTextureLength : s.TextureScale);
         // Road texture across: the position on the surface, not the column fraction (columns are spread by need).
-        var acrossFraction = edge.Arc is { } surface && surface.S1 != surface.S0 ? (across - surface.S0) / (surface.S1 - surface.S0) : f;
+        var (t0, t1) = edge.TextureSpan ?? (edge.Arc is { } surface ? (surface.S0, surface.S1) : (0, 0));
+        var acrossFraction = edge.Arc is not null && t1 != t0 ? (across - t0) / (t1 - t0) : f;
         var inset = edge.Material.Link.StartsWith("Road") ? s.RoadTextureInset : 0;
         var v0 = isRoad ? inset + acrossFraction * (1 - 2 * inset) : len * f / s.TextureScale;
         if (edge.Key == "decal")

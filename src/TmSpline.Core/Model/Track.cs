@@ -119,7 +119,7 @@ public sealed class TrackPoint
     /// <summary>Race gate at this point (start, checkpoint, finish).</summary>
     public Waypoint Waypoint { get; set; }
 
-    /// <summary>Border height of new points: the game's road curbs stand 1.0 m above the road (road 2.0, curb top 3.0).</summary>
+    /// <summary>Border height of new points: as the game's road curbs (matched in game by the user).</summary>
     public const double DefaultBorderHeight = 1.0;
 
     /// <summary>Border height of points in files that stored none (the default before it matched the game's curbs).</summary>

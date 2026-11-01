@@ -66,7 +66,7 @@ export interface TrackPoint {
   waypoint: Waypoint;
 }
 
-/** Border height of new points: the game's road curbs stand 1.0 m above the road (RoadTech: road 2.0, curb top 3.0). */
+/** Border height of new points: as the game's road curbs (matched in game by the user). */
 export const DEFAULT_BORDER_HEIGHT = 1.0;
 /** Border height of points in files that stored none (the default before it matched the game's curbs). */
 const LEGACY_BORDER_HEIGHT = 0.8;
