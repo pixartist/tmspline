@@ -191,6 +191,8 @@ export interface VanillaBlock {
   color?: ItemColor;
   /** Placed by the scenery generator (its theme id): generating again replaces these, "Remove scenery" deletes them. */
   scenery?: string;
+  /** Exports only: extra block flag bits for the game (see GROUND_ADAPTER_FLAG). */
+  extraFlags?: number;
   /**
    * Generated columns only (preview, never saved): the surface modifier of the block they stand under, whose materials
    * they take (concrete walls under grass platforms, ...), as in game.

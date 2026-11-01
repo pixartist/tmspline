@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
-import { BlockLayer, blockMatrix, blockSize, freeRotation, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
+import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, roadColumns, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import {
@@ -651,10 +651,14 @@ export class Editor {
 
   /**
    * The map as it is exported: with the columns under air blocks as pillar blocks (computed here, from the local block
-   * library; without one there are no columns).
+   * library; without one there are no columns). Ground blocks with a "column below" version get the game's flag for it,
+   * as the preview shows them (a slope's pillar sides; otherwise the game leaves them open, floating).
    */
   exportMap(): TrackMap {
-    return { ...this.map, blocks: [...this.map.blocks, ...pillarColumns(this.map.blocks, this.library)] };
+    const lib = this.library;
+    const blocks = this.map.blocks.map((b) =>
+      !b.free && !b.pillar && b.y === 0 && lib?.hasGroundAdapter(b.name) ? { ...b, extraFlags: GROUND_ADAPTER_FLAG } : b);
+    return { ...this.map, blocks: [...blocks, ...pillarColumns(this.map.blocks, lib)] };
   }
 
   /**

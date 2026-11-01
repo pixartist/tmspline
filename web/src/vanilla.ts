@@ -88,6 +88,13 @@ interface LibraryIndex {
 
 export const DIRECTIONS = ["North", "East", "South", "West"] as const;
 
+/**
+ * Block flag bit 21 ("hill ground variant" in GBX.NET): on a ground block, the game shows its version with the "column
+ * below" adapter (a slope's pillar sides). Confirmed in game with all the scenery's slopes (2026-11-01); the game sets it
+ * on ground slopes it saves (bit 22 only worked for the straight hill slope).
+ */
+export const GROUND_ADAPTER_FLAG = 0x200000;
+
 /** Simplified looks per game material name (first match wins); null hides the material (decals, collision helpers). */
 const MATERIAL_LOOKS: [RegExp, number | null][] = [
   [/^(Collision|Trigger|Invisible|Shadow|Occ)|FX/i, null],
@@ -232,6 +239,11 @@ export class VanillaLibrary {
       this.floorlessLists.set(list, out);
     }
     return out;
+  }
+
+  /** Whether a block has a ground version with the "column below" adapter (a slope's pillar sides), see GROUND_ADAPTER_FLAG. */
+  hasGroundAdapter(name: string): boolean {
+    return !!this.index.blocks[name]?.groundPillar;
   }
 
   /** Whether a block has an adapter for a column below (which encloses the column's top). */
