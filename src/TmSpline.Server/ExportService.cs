@@ -213,8 +213,8 @@ public sealed partial class ExportService
                 throw new ExportRejectedException("Points must stay inside the map");
             if (p.Width is { } w && (!double.IsFinite(w) || w < 2 || w > 128))
                 throw new ExportRejectedException("Road width must be between 2 and 128 m");
-            if (!double.IsFinite(p.Curve) || p.Curve < -180 || p.Curve > 360)
-                throw new ExportRejectedException("Road shape must be between -180° (sausage) and 360° (pipe)");
+            if (!double.IsFinite(p.Curve) || p.Curve < -360 || p.Curve > 360)
+                throw new ExportRejectedException("Road shape must be between -360° (tube) and 360° (pipe)");
             if (p.BorderHeight is { } bh && (!double.IsFinite(bh) || bh < 0.1 || bh > 10))
                 throw new ExportRejectedException("Border height must be between 0.1 and 10 m");
             if (!double.IsFinite(p.Flat) || p.Flat < 0 || p.Flat > 0.9)
