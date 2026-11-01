@@ -207,6 +207,11 @@ export class VanillaLibrary {
     return !!b && b[1][1] - b[0][1] <= 1.5;
   }
 
+  /** A mesh's bounds in block-local metres ([min xyz], [max xyz]), or null when the library does not have it. */
+  meshBounds(file: string): [number[], number[]] | null {
+    return this.index.meshes[file]?.bounds ?? null;
+  }
+
   /** Whether a mesh lies within one cell's footprint (x and z within 0..32), as single-cell trims do. */
   inOneCell(file: string): boolean {
     const b = this.index.meshes[file]?.bounds;

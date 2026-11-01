@@ -138,10 +138,12 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     const walls = cliffWalls(lib, options.theme, dist, options.cliffs);
     if (!walls) return null;
     blocks.push(...walls.blocks);
-    // Vertical faces (the 64 m cliffs stay within their wall cell) take land right up to them; faces that lean out over
-    // the next row (80 m) keep it free.
+    // Vertical faces (the 64 m cliffs: a few metres past their wall cell at most) take land right up to them; faces that
+    // lean out over the next row (80 m: 64 m deep) keep it free.
     const small = lib.variant(`${options.theme.prefix}StraightSmall`, true)?.mesh?.file;
-    cliff = { high: walls.high, front: walls.front, top: walls.top, leaning: !small || !lib.inOneCell(small) };
+    const depth = small ? lib.meshBounds(small)?.[1][2] ?? Infinity : Infinity;
+    // The land meets the face where it is still vertical: 3 levels below the top (64 m: level 5, per the user).
+    cliff = { high: walls.high, front: walls.front, top: walls.top - CLIFF_LAND_BELOW_TOP, leaning: depth > BLOCK_CELL * 1.25 };
   }
   if (options.hills) {
     const land = hills(lib, track, dist, base, cliff, options);
@@ -150,6 +152,9 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   }
   return blocks;
 }
+
+/** Levels between a cliff's top and the land against it: above that the face is no longer vertical. */
+const CLIFF_LAND_BELOW_TOP = 3;
 
 /** The cliff walls as the land sees them: behind them, the cells in front of their faces, the top level, leaning faces. */
 interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: boolean }
