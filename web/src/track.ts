@@ -146,6 +146,8 @@ export interface TrackObject {
   width: number;
   /** Pillars: how far they stand up from the road; bumps: how high the hump is (negative: a dip), in meters. */
   height: number;
+  /** Pillars: the game item's colour (absent: Default). */
+  color?: ItemColor;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {

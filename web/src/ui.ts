@@ -698,6 +698,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         x.width = x.length = +v;
       }), false, { 2: "2 m", 4: "4 m", 8: "8 m", 16: "16 m" });
       rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
+      selectField(root, "Color", ITEM_COLORS, () => o().color ?? "Default", (v) => editor.edit((tr) => {
+        const x = tr.objects[s.index];
+        if (v === "Default") delete x.color;
+        else x.color = v as ItemColor;
+      }));
     } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
         false, { Rect: "Rectangle" });

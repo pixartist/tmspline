@@ -150,6 +150,8 @@ public static class MapExporter
             var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
                 new Vec3((float)at.X, (float)at.Y, (float)at.Z),
                 new Vec3((float)(item.Yaw * Math.PI / 180), (float)(item.Pitch * Math.PI / 180), (float)(item.Roll * Math.PI / 180)), Vec3.Zero);
+            if (item.Color != ItemColor.Default)
+                placed.Color = (DifficultyColor)(int)item.Color;
             placed.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
                 (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + 8, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }

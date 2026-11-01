@@ -231,6 +231,8 @@ public sealed class TrackObject
     public double Width { get; set; } = 4;
     /// <summary>Pillars: how far they stand up from the road, in meters.</summary>
     public double Height { get; set; } = 4;
+    /// <summary>Pillars: the game item's colour.</summary>
+    public ItemColor Color { get; set; }
 }
 
 /// <summary>
@@ -270,6 +272,8 @@ public sealed class VanillaItem
     /// <summary>Tilt (degrees) for items standing upright on sloped or banked road: pitch about X, roll about Z.</summary>
     public double Pitch { get; set; }
     public double Roll { get; set; }
+    /// <summary>The item's colour (Default: its own look).</summary>
+    public ItemColor Color { get; set; }
 }
 
 public sealed class VanillaBlock

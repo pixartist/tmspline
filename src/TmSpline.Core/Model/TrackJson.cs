@@ -75,6 +75,8 @@ public static class TrackJson
         public double Length { get; set; } = 4;
         public double Width { get; set; } = 4;
         public double Height { get; set; } = 4;
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public ItemColor Color { get; set; }
     }
 
     public sealed class PointDto
@@ -176,7 +178,9 @@ public static class TrackJson
             track.Objects.Add(new TrackObject
             {
                 Kind = o.Kind, Segment = o.Segment, At = Math.Clamp(o.At, 0, 1), Offset = o.Offset, Shape = o.Shape,
-                Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width), Height = Math.Max(0.1, o.Height),
+                Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width),
+                // Bumps may be dips (negative height).
+                Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -8, 8) : Math.Max(0.1, o.Height), Color = o.Color,
             });
         track.SyncSegments();
         return track;
@@ -198,7 +202,7 @@ public static class TrackJson
         }).ToList(),
         Objects = track.Objects.Select(o => new ObjectDto
         {
-            Kind = o.Kind, Segment = o.Segment, At = o.At, Offset = o.Offset, Shape = o.Shape, Length = o.Length, Width = o.Width, Height = o.Height,
+            Kind = o.Kind, Segment = o.Segment, At = o.At, Offset = o.Offset, Shape = o.Shape, Length = o.Length, Width = o.Width, Height = o.Height, Color = o.Color,
         }).ToList(),
     };
 

@@ -469,7 +469,10 @@ public static class PillarBuilder
             var w = new Vec3d(t.X, cp * t.Y + sp * t.Z, -sp * t.Y + cp * t.Z);
             var roll = Math.Atan2(-w.X, w.Y);
             const double deg = 180 / Math.PI;
-            yield return new VanillaItem { Name = GameItemName(GameSize(o.Width)), Position = point, Yaw = yaw * deg, Pitch = pitch * deg, Roll = roll * deg };
+            yield return new VanillaItem
+            {
+                Name = GameItemName(GameSize(o.Width)), Position = point, Yaw = yaw * deg, Pitch = pitch * deg, Roll = roll * deg, Color = o.Color,
+            };
         }
     }
 
