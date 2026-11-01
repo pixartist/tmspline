@@ -200,17 +200,32 @@ public static class RoadMeshBuilder
         /// </summary>
         public double At(double f)
         {
-            var linear = S0 + (S1 - S0) * f;
             if (Half <= 0)
-                return linear;
-            var side = linear < 0 ? -1 : 1;
+                return S0 + (S1 - S0) * f;
+            // Spread by need in "column space" between the ends' own column coordinates, so the ends land exactly on S0
+            // and S1 also when the surface stops short of the full width (under the curbs' inset).
             var (wf, wa, ws) = Weights();
-            var t = Math.Abs(linear) / Half * (wf + wa + ws);
-            double s;
-            if (t <= wf) s = wf > 0 ? t / wf * A : 0;
-            else if (t <= wf + wa) s = A + (wa > 0 ? (t - wf) / wa : 0) * (B - A);
-            else s = B + (ws > 0 ? (t - wf - wa) / ws : 0) * (Half - B);
-            return side * Math.Min(s, Half);
+            var (fa, fb, fh) = (A, B, Half);
+            double ToT(double s)
+            {
+                var a = Math.Min(Math.Abs(s), fh);
+                var t = a <= fa ? (fa > 0 ? a / fa * wf : 0)
+                    : a <= fb ? wf + (fb > fa ? (a - fa) / (fb - fa) * wa : 0)
+                    : wf + wa + (fh > fb ? (a - fb) / (fh - fb) * ws : 0);
+                return s < 0 ? -t : t;
+            }
+            double FromT(double t)
+            {
+                var a = Math.Abs(t);
+                var s = a <= wf ? (wf > 0 ? a / wf * fa : 0)
+                    : a <= wf + wa ? fa + (wa > 0 ? (a - wf) / wa : 0) * (fb - fa)
+                    : fb + (ws > 0 ? (a - wf - wa) / ws : 0) * (fh - fb);
+                return (t < 0 ? -1 : 1) * Math.Min(s, fh);
+            }
+            if (f <= 0) return S0;
+            if (f >= 1) return S1;
+            var (t0, t1) = (ToT(S0), ToT(S1));
+            return FromT(t0 + (t1 - t0) * f);
         }
     }
 
