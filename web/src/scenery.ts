@@ -193,11 +193,17 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       // The shoulder: `gap` cells beside the track at its height, the outermost already sloping up (the land starts
       // right next to the track with the default of 1).
       if (d <= options.gap) height.set(k, b);
-      else if (cliff && toCliff) {
-        // Cells in front of the faces are 1 away; the top terrace is `step` cells deep, then 2 lower every `step`.
-        const c = toCliff.get(k) ?? Infinity;
-        height.set(k, Math.max(b, cliff.top - 2 * Math.floor((c - 1) / step)));
-      } else height.set(k, b + Math.min(2 * (Math.floor((d - options.gap - 1) / step) + 1), even2(options.hillRise)));
+      else {
+        // Rising away from the track by 2 every `step` cells...
+        const rise = 2 * (Math.floor((d - options.gap - 1) / step) + 1);
+        if (cliff && toCliff) {
+          // ...and up to the cliffs: the cells in front of the faces are 1 away, the top terrace `step` cells deep, then
+          // 2 lower every `step`. Whichever is higher, never above the cliff's land (so loops far from the cliffs get
+          // hills too).
+          const c = toCliff.get(k) ?? Infinity;
+          height.set(k, Math.min(cliff.top, Math.max(b + rise, cliff.top - 2 * Math.floor((c - 1) / step))));
+        } else height.set(k, b + Math.min(rise, even2(options.hillRise)));
+      }
     }
   const h = (x: number, z: number) => height.get(key(x, z));
   const fixed = (k: string) => track.has(k) || cliffFront.has(k);
