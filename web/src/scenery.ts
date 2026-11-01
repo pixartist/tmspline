@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, type VanillaBlock } from "./track";
+import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, type VanillaBlock, type VanillaItem } from "./track";
 import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
 
 /**
@@ -113,13 +113,71 @@ export interface SceneryLandOptions extends SceneryOptions {
   hillRise: number;
   /** Cliff walls this many cells away from the track (0: none). */
   cliffs: number;
+  /** Trees on the flat land (a FORESTS id, or "none"). */
+  forest: string;
+  /** Share of the flat cells that get trees, 0..1 (busier cells get more of them). */
+  density: number;
+}
+
+/**
+ * Forests: the game's tree items by kind, smallest first. The SpringTree names are confirmed from maps saved by the
+ * game; the others follow the game's files (VegetTreeModel) and still need a check in game.
+ */
+export const FORESTS: { id: string; label: string; trees: string[] }[] = [
+  { id: "spring", label: "Spring trees", trees: ["SpringTreeVerySmall", "SpringTreeSmall", "SpringTreeMedium", "SpringTreeBig", "SpringTreeTall"] },
+  { id: "fall", label: "Fall trees", trees: ["FallTreeVerySmall", "FallTreeSmall", "FallTreeMedium", "FallTreeBig", "FallTreeTall"] },
+  { id: "fir", label: "Firs", trees: ["FirMedium", "FirTall"] },
+  { id: "firsnow", label: "Snowy firs", trees: ["FirSnowMedium", "FirSnowTall"] },
+  { id: "palm", label: "Palms", trees: ["PalmTreeSmall", "PalmTreeMedium"] },
+  { id: "frozen", label: "Frozen trees", trees: ["FrozenTreeVerySmall", "FrozenTreeSmall", "FrozenTreeMedium", "FrozenTreeBig", "FrozenTreeTall"] },
+  { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
+];
+
+/** Small deterministic random numbers (mulberry32), seeded per cell so regenerating gives the same forest. */
+function random(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Trees on flat cells (level → its surface): a share `density` of them get 1..4 trees at random spots, kept 7 m apart
+ * and 3 m from the cell's edges, random sizes and turns.
+ */
+function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string): VanillaItem[] {
+  const kind = FORESTS.find((f) => f.id === forest);
+  if (!kind || density <= 0) return [];
+  const items: VanillaItem[] = [];
+  for (const [k, level] of surfaces) {
+    const [x, z] = parse(k);
+    const rnd = random((x * 73856093) ^ (z * 19349663) ^ 0x5eed);
+    if (rnd() > density) continue;
+    const count = 1 + Math.floor(rnd() * 4 * Math.min(1, density + 0.25));
+    const spots: [number, number][] = [];
+    for (let tries = 0; spots.length < count && tries < 20; tries++) {
+      const px = x * BLOCK_CELL + 3 + rnd() * (BLOCK_CELL - 6), pz = z * BLOCK_CELL + 3 + rnd() * (BLOCK_CELL - 6);
+      if (spots.some(([sx, sz]) => Math.hypot(sx - px, sz - pz) < 7)) continue;
+      spots.push([px, pz]);
+    }
+    // On the ground (level 0) the item stands on the terrain; on land on the platform's top, 2 m above its level.
+    const y = level > 0 ? level * BLOCK_LEVEL + 2 : 0;
+    for (const [px, pz] of spots)
+      items.push({ name: kind.trees[Math.floor(rnd() * kind.trees.length)], position: [px, y, pz], yaw: Math.round(rnd() * 360), scenery: theme });
+  }
+  return items;
 }
 
 /**
  * Generates the scenery blocks: land under and round the tracks with hills rising away from them, and cliff walls further
  * out as a backdrop. Null when the library lacks a piece the options need.
  */
-export function generateScenery(lib: VanillaLibrary, input: SceneryInput, options: SceneryLandOptions): VanillaBlock[] | null {
+export function generateScenery(lib: VanillaLibrary, input: SceneryInput, options: SceneryLandOptions):
+  { blocks: VanillaBlock[]; items: VanillaItem[] } | null {
   // The track: roads (land up to just below their underside: the platform's top is 2 m above its level) and blocks (land
   // up to the level below them), in levels.
   const track = new Map<string, number>();
@@ -129,7 +187,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     const [x, y, z] = k.split(",").map(Number);
     lower(key(x, z), y - 1);
   }
-  if (track.size === 0) return [];
+  if (track.size === 0) return { blocks: [], items: [] };
   const { dist, base } = spread(track);
 
   const blocks: VanillaBlock[] = [];
@@ -145,12 +203,19 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     // The land meets the face where it is still vertical: 3 levels below the top (64 m: level 5, per the user).
     cliff = { high: walls.high, front: walls.front, top: walls.top - CLIFF_LAND_BELOW_TOP, leaning: depth > BLOCK_CELL * 1.25 };
   }
+  // Where trees may stand: flat land (or the ground) at least 2 cells from the track, away from the cliffs.
+  let surfaces = new Map<string, number>();
   if (options.hills) {
     const land = hills(lib, track, dist, base, cliff, options);
     if (!land) return null;
-    blocks.push(...land);
-  }
-  return blocks;
+    blocks.push(...land.blocks);
+    surfaces = land.flat;
+  } else
+    for (let x = -HALF; x < HALF; x++)
+      for (let z = -HALF; z < HALF; z++)
+        if (!cliff?.high.has(key(x, z)) && !cliff?.front.has(key(x, z))) surfaces.set(key(x, z), 0);
+  for (const k of [...surfaces.keys()]) if ((dist.get(k) ?? Infinity) < 2) surfaces.delete(k);
+  return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id) };
 }
 
 /** Levels between a cliff's top and the land against it: above that the face is no longer vertical. */
@@ -168,7 +233,8 @@ interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: 
  * inner and outer corners the curved ones.
  */
 function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string, number>, base: Map<string, number>,
-  cliff: Cliffs | null, options: SceneryLandOptions): VanillaBlock[] | null {
+  cliff: Cliffs | null, options: SceneryLandOptions): { blocks: VanillaBlock[]; flat: Map<string, number> } | null {
+  const flatCells = new Map<string, number>();
   const cliffHigh = cliff?.high ?? new Set<string>(), cliffFront = cliff?.front ?? new Set<string>();
   const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
   // Slopes by the height they climb: DecoHill for 2 levels, the deco platform's own for 1 (as modelled: straight up to
@@ -286,10 +352,14 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
           .find((o) => o.d === 1 || o.d === 2) : undefined;
       // The outer corner is modelled high at its (-X, +Z) corner.
       if (corner) blocks.push(at(slopes[corner.d].outer, x, z, v, dirFor((d) => same(turn(d, [-1, 1]), corner.c))));
-      else if (v > 0) blocks.push(at(flat, x, z, v, 0));
+      else {
+        if (v > 0) blocks.push(at(flat, x, z, v, 0));
+        // Flat land or ground, not under the road: room for trees.
+        if (!track.has(k)) flatCells.set(k, v);
+      }
     }
   }
-  return blocks;
+  return { blocks, flat: flatCells };
 }
 
 const even2 = (n: number) => Math.max(0, 2 * Math.floor(n / 2));

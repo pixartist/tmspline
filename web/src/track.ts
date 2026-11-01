@@ -144,6 +144,20 @@ export interface TrackMap {
   tracks: Track[];
   /** Vanilla game blocks on the map grid (exported by name; their meshes come from the game). */
   blocks: VanillaBlock[];
+  /** Vanilla game items (trees, ...), exported by name; the editor draws stand-ins (their models are not converted). */
+  items?: VanillaItem[];
+}
+
+/**
+ * A vanilla item of the game's Stadium collection (e.g. "SpringTreeTall") standing at `position` (metres, its base),
+ * turned by `yaw` degrees.
+ */
+export interface VanillaItem {
+  name: string;
+  position: Vec3;
+  yaw: number;
+  /** Placed by the scenery generator (its theme id), see VanillaBlock.scenery. */
+  scenery?: string;
 }
 
 /**
@@ -501,7 +515,13 @@ export function parseMap(json: string): TrackMap {
         Object.assign(block, { free: true, position: b.position.map(Number) as Vec3, yaw: b.yaw ?? 0, pitch: b.pitch ?? 0, roll: b.roll ?? 0 });
       return block;
     });
-  return { version: 2, name, laps, tracks, blocks };
+  const items = (Array.isArray(doc.items) ? doc.items : [])
+    .filter((i) => typeof i?.name === "string" && i.name.length > 0 && Array.isArray(i.position) && i.position.length === 3)
+    .map((i): VanillaItem => ({
+      name: i.name, position: i.position.map(Number) as Vec3, yaw: Number(i.yaw) || 0,
+      ...(typeof i.scenery === "string" && i.scenery ? { scenery: i.scenery } : {}),
+    }));
+  return { version: 2, name, laps, tracks, blocks, ...(items.length ? { items } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

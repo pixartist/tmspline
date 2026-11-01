@@ -24,6 +24,9 @@ public sealed class MapExportOptions
     public string? AuthorNickname { get; init; }
     /// <summary>Vanilla blocks to place (by name; the game supplies their meshes).</summary>
     public IReadOnlyList<VanillaBlock> Blocks { get; init; } = [];
+
+    /// <summary>Vanilla items to place (by name, from the game's Stadium collection).</summary>
+    public IReadOnlyList<VanillaItem> Items { get; init; } = [];
 }
 
 public static class MapExporter
@@ -130,6 +133,19 @@ public static class MapExporter
                 placed.Color = (DifficultyColor)(int)block.Color;
             log?.Invoke($"Placed {(block.Pillar ? "pillar" : "block")} {block.Name} at {coord} ({(Direction)(block.Dir & 3)}), flags 0x{placed.Flags:X8}");
         }
+
+        // Vanilla items (trees): by name from the game's own collection, as the game's editor saves them (seen in maps:
+        // "SpringTreeTall", collection Stadium2020, author Nadeo; the position is the item's base, yaw in radians).
+        foreach (var item in options.Items)
+        {
+            var at = origin + item.Position;
+            if (at.X < 0 || at.Z < 0 || at.X > map.Size.X * 32 || at.Z > map.Size.Z * 32)
+                continue;
+            map.PlaceAnchoredObject(new Ident(item.Name, "Stadium2020", "Nadeo"), new Vec3((float)at.X, (float)at.Y, (float)at.Z),
+                new Vec3((float)(item.Yaw * Math.PI / 180), 0, 0), Vec3.Zero);
+        }
+        if (options.Items.Count > 0)
+            log?.Invoke($"Placed {options.Items.Count} vanilla items");
 
         // Multilap: a start/finish gate makes it a lap race.
         var laps = items.Any(i => i.Waypoint == Waypoint.StartFinish);

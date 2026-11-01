@@ -15,6 +15,26 @@ if (args[0] == "--pivot") { foreach (var f in args.Skip(1)) Pivot.Run(f); return
 if (args[0] == "--item") { ItemShape.Run(args[1]); return; }
 if (args[0] == "--chunks") { ChunkInfo.Run(args[1]); return; }
 if (args[0] == "--reflect") { Reflect.Run(args[1]); return; }
+if (args[0] == "--items")
+{
+    // Item models used by maps (id, collection, author) with counts, e.g. to see how vanilla items are referenced.
+    var seen = new Dictionary<string, int>();
+    foreach (var f in args.Skip(1).SelectMany(a => Directory.Exists(a) ? Directory.EnumerateFiles(a, "*.Map.Gbx", SearchOption.AllDirectories) : [a]))
+        try
+        {
+            var m = Gbx.ParseNode<CGameCtnChallenge>(f);
+            foreach (var o in m.AnchoredObjects ?? [])
+            {
+                var k = $"{o.ItemModel.Id} | {o.ItemModel.Collection} | {o.ItemModel.Author}";
+                if (!seen.ContainsKey(k) && args.Contains("--where") is var _ && o.ItemModel.Author == "Nadeo")
+                    Console.WriteLine($"  e.g. {o.ItemModel.Id}: pos {o.AbsolutePositionInMap} ypr {o.YawPitchRoll} pivot {o.PivotPosition} in {Path.GetFileName(f)}");
+                seen[k] = seen.GetValueOrDefault(k) + 1;
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"{Path.GetFileName(f)}: {ex.Message}"); }
+    foreach (var (k, n) in seen.OrderByDescending(x => x.Value).Take(80)) Console.WriteLine($"{n,6}  {k}");
+    return;
+}
 if (args[0] == "--icon") { foreach (var f in args.Skip(1)) Reflect.Icon(f); return; }
 if (args[0] == "--mobils") { foreach (var f in args.Skip(1)) Reflect.Mobils(f); return; }
 if (args[0] == "--clip") { foreach (var f in args.Skip(1)) Reflect.Clip(f); return; }

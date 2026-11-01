@@ -156,7 +156,9 @@ public sealed partial class ExportService
 
     /// <summary>Most tracks one map may have.</summary>
     private const int MaxTracks = 64;
-    private const int MaxBlocks = 5000;
+    // Generated scenery (land, hills and their columns, trees) runs into thousands.
+    private const int MaxBlocks = 20000;
+    private const int MaxItems = 20000;
 
     private (TrackMap Map, string Name) Validate(ExportRequestDto request)
     {
@@ -178,6 +180,17 @@ public sealed partial class ExportService
                 throw new ExportRejectedException($"Free block {block.Name} is outside the map");
             if (!block.Free && (Math.Abs(block.X) > 24 || Math.Abs(block.Z) > 24 || block.Y is < 0 or > 30))
                 throw new ExportRejectedException($"Block {block.Name} is outside the map");
+        }
+        var vanillaItems = dto.Items ?? new();
+        if (vanillaItems.Count > MaxItems)
+            throw new ExportRejectedException($"Too many items ({vanillaItems.Count}, max {MaxItems})");
+        foreach (var item in vanillaItems)
+        {
+            if (item.Name is not { Length: > 0 and <= 100 } || !item.Name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+                throw new ExportRejectedException("Item names may only contain letters, digits and _");
+            if (item.Position is not { Length: 3 } ip || !ip.All(double.IsFinite) || Math.Abs(ip[0]) > 768 || Math.Abs(ip[2]) > 768
+                || ip[1] is < -16 or > 320 || !double.IsFinite(item.Yaw))
+                throw new ExportRejectedException($"Item {item.Name} is outside the map");
         }
         var pointCount = parts.Sum(t => t.Points.Count);
         if (pointCount > _settings.MaxPoints)

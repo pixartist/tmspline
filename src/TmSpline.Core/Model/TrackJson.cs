@@ -29,6 +29,16 @@ public static class TrackJson
         /// <summary>Vanilla blocks of the map (version 2 maps only).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<BlockDto>? Blocks { get; set; }
+        /// <summary>Vanilla items of the map (trees, ...; version 2 maps only).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<ItemDto>? Items { get; set; }
+    }
+
+    public sealed class ItemDto
+    {
+        public string Name { get; set; } = "";
+        public double[]? Position { get; set; }
+        public double Yaw { get; set; }
     }
 
     public sealed class BlockDto
@@ -122,6 +132,9 @@ public static class TrackJson
                     Free = b.Free && b.Position is { Length: 3 }, Position = b.Position is { Length: 3 } p ? V(p) : default,
                     Yaw = b.Yaw, Pitch = b.Pitch, Roll = b.Roll, Pillar = b.Pillar && !b.Free, Color = b.Color,
                 });
+        foreach (var i in dto.Items ?? new())
+            if (!string.IsNullOrWhiteSpace(i.Name) && i.Position is { Length: 3 } p)
+                map.Items.Add(new VanillaItem { Name = i.Name, Position = V(p), Yaw = i.Yaw });
         return map;
     }
 

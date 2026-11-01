@@ -1,10 +1,10 @@
 import type { Editor } from "./editor";
 import { showExportDialog } from "./export";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
-import { SCENERY_THEMES } from "./scenery";
+import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, note: "" };
+const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
@@ -488,21 +488,27 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (scenery.cliffs > 0)
       selectField(root, "Cliff type", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => (scenery.theme = v), false,
         Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
+    selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => (scenery.forest = v), false,
+      { none: "None", ...Object.fromEntries(FORESTS.map((f) => [f.id, f.label])) });
+    if (scenery.forest !== "none")
+      numberField(root, "Forest density (%)", () => Math.round(scenery.density * 100), (v) => (scenery.density = int(v, 0, 100) / 100), 10);
     buttonRow(root, [
       {
         label: "Generate", onClick: () => {
           const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
           const n = editor.generateScenery({ ...scenery, theme });
-          scenery.note = n === null ? "The block library lacks pieces for these settings." : `Placed ${n} blocks.`;
+          scenery.note = n === null ? "The block library lacks pieces for these settings."
+            : `Placed ${n.blocks} blocks${n.items ? ` and ${n.items} trees` : ""}.`;
           editor.onChange();
         },
       },
-      { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks.`; editor.onChange(); } },
+      { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks and trees.`; editor.onChange(); } },
     ]);
     hint(root, (scenery.note ? scenery.note + " " : "")
       + "Builds land round the tracks: up to just below the roads (they run on it instead of columns), a flat shoulder "
       + "beside them, then hills rising by 2 levels every hill step, and cliff walls further out as a backdrop (also "
-      + "inside loops). Generating again replaces the generated blocks; they are normal blocks otherwise (clear jumps by hand).");
+      + "inside loops), with trees on the flat land (shown as simple stand-ins; the game has the real ones). Generating "
+      + "again replaces what was generated; it is normal blocks and items otherwise (clear jumps by hand).");
   }
 
   if (s?.kind === "point" || s?.kind === "handle") {

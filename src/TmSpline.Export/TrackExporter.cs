@@ -40,6 +40,7 @@ public static class TrackExporter
             AuthorNickname = request.AuthorNickname,
             Laps = request.Map.Laps,
             Blocks = request.Map.Blocks,
+            Items = request.Map.Items,
         }, log);
 
         return new TrackExportResult(items.Count, meshes.Sum(m => m.Triangles.Count), length, itemFolder);

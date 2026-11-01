@@ -4,6 +4,7 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, roadColumns, type SceneryLandOptions } from "./scenery";
+import { ItemLayer } from "./items";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
@@ -173,6 +174,8 @@ export class Editor {
   /** Vanilla block meshes (development server only; null: blocks show as boxes). */
   library: VanillaLibrary | null = null;
   private readonly blocks = new BlockLayer();
+  /** Stand-ins for the map's vanilla items (trees). */
+  private readonly items = new ItemLayer();
   /** Vertical lines from every track point down to the ground, with a small cross where they land. */
   private readonly dropLines = new THREE.LineSegments(new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: 0x1c2228, transparent: true, opacity: 0.55 }));
@@ -259,6 +262,7 @@ export class Editor {
     this.scene.add(this.controls);
     this.scene.add(this.objectMarkers);
     this.scene.add(this.blocks.group);
+    this.scene.add(this.items.group);
     this.dropLines.raycast = () => {};
     this.dropLines.frustumCulled = false;
     this.scene.add(this.dropLines);
@@ -642,6 +646,7 @@ export class Editor {
     this.blocks.setNeighbours([...this.map.blocks, ...pillars]);
     this.blocks.sync(this.map.blocks, s?.kind === "block" ? s.index : null, h?.kind === "block" ? h.index : null);
     this.blocks.syncPillars(pillars);
+    this.items.sync(this.map.items);
   }
 
   /**
@@ -653,10 +658,10 @@ export class Editor {
   }
 
   /**
-   * Replaces the generated scenery with a new one round the tracks and the other blocks (one undo step). Returns the
-   * number of blocks placed, or null when the block library lacks the theme's pieces.
+   * Replaces the generated scenery (blocks and trees) with a new one round the tracks and the other blocks (one undo
+   * step). Returns how many blocks and items it placed, or null when the block library lacks the theme's pieces.
    */
-  generateScenery(options: SceneryLandOptions): number | null {
+  generateScenery(options: SceneryLandOptions): { blocks: number; items: number } | null {
     const lib = this.library;
     if (!lib) return null;
     const own = this.map.blocks.filter((b) => !b.scenery);
@@ -668,19 +673,25 @@ export class Editor {
     this.editBlocks((blocks) => {
       const keep = blocks.filter((b) => !b.scenery);
       blocks.length = 0;
-      blocks.push(...keep, ...generated);
+      blocks.push(...keep, ...generated.blocks);
+      const items = [...(this.map.items ?? []).filter((i) => !i.scenery), ...generated.items];
+      if (items.length) this.map.items = items;
+      else delete this.map.items;
     });
-    return generated.length;
+    return { blocks: generated.blocks.length, items: generated.items.length };
   }
 
-  /** Removes the generated scenery (one undo step); returns how many blocks it had. */
+  /** Removes the generated scenery, blocks and trees (one undo step); returns how many there were. */
   removeScenery(): number {
-    const count = this.map.blocks.filter((b) => b.scenery).length;
+    const count = this.map.blocks.filter((b) => b.scenery).length + (this.map.items ?? []).filter((i) => i.scenery).length;
     if (count)
       this.editBlocks((blocks) => {
         const keep = blocks.filter((b) => !b.scenery);
         blocks.length = 0;
         blocks.push(...keep);
+        const items = (this.map.items ?? []).filter((i) => !i.scenery);
+        if (items.length) this.map.items = items;
+        else delete this.map.items;
       });
     return count;
   }

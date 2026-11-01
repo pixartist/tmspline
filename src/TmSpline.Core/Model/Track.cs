@@ -210,6 +210,9 @@ public sealed class TrackMap
     /// <summary>Vanilla game blocks placed on the map grid (written into the map by name, not as custom items).</summary>
     public List<VanillaBlock> Blocks { get; } = new();
 
+    /// <summary>Vanilla game items (trees, ...), written into the map by name (the game has their models).</summary>
+    public List<VanillaItem> Items { get; } = new();
+
     public static TrackMap Single(Track track, string name = "Untitled") => new() { Name = name, Tracks = { track } };
 }
 
@@ -218,6 +221,17 @@ public sealed class TrackMap
 /// levels above the ground (0 = on the ground, which uses the block's ground variant). Dir is the game's block
 /// direction (0 North, 1 East, 2 South, 3 West).
 /// </summary>
+/// <summary>
+/// A vanilla item of the game's Stadium collection (e.g. "SpringTreeTall"), standing at <see cref="Position"/> (meters,
+/// track coordinates; the item's base) turned by <see cref="Yaw"/> degrees about the vertical.
+/// </summary>
+public sealed class VanillaItem
+{
+    public string Name { get; set; } = "";
+    public Vec3d Position { get; set; }
+    public double Yaw { get; set; }
+}
+
 public sealed class VanillaBlock
 {
     public string Name { get; set; } = "";
