@@ -264,12 +264,17 @@ public static class TrackSampler
     }
 
     /// <summary>
-    /// Catmull-Rom interpolation (C1 across vertices) of per-point banks in radians that have already been unwrapped
-    /// along the track (see <see cref="UnwrapBanks"/>). On closed tracks every lap continues the total of one lap.
+    /// Catmull-Rom interpolation (C1 across vertices, in roll per metre) of per-point banks in radians that have already
+    /// been unwrapped along the track (see <see cref="UnwrapBanks"/>). On closed tracks every lap continues the total of
+    /// one lap. The slope at a point is the bank change across its neighbours over the distance between them, and each
+    /// segment scales it by its own length: segments of different lengths then meet at the same roll rate (with slopes
+    /// per segment, a short segment next to a long one rolled several times faster on its side and overshot).
     /// </summary>
-    private static double BankAt(Track track, double[] unwrapped, int s, double u)
+    /// <param name="lengths">Arc length of each segment.</param>
+    private static double BankAt(Track track, double[] unwrapped, double[] lengths, int s, double u)
     {
         var count = track.Points.Count;
+        var segments = lengths.Length;
         var lapRoll = unwrapped[count] - unwrapped[0];
         double B(int i)
         {
@@ -278,10 +283,13 @@ public static class TrackSampler
             var laps = (int)Math.Floor((double)i / count);
             return unwrapped[((i % count) + count) % count] + laps * lapRoll;
         }
+        // Open ends mirror the first and last segment (as the clamped banks do), so the ends keep their old slope.
+        double L(int seg) => Math.Max(1e-6, track.Closed ? lengths[((seg % segments) + segments) % segments] : lengths[Math.Clamp(seg, 0, segments - 1)]);
+        double Slope(int i) => (B(i + 1) - B(i - 1)) / (L(i - 1) + L(i));
 
-        double p0 = B(s - 1), p1 = B(s), p2 = B(s + 1), p3 = B(s + 2);
-        var m1 = (p2 - p0) * 0.5;
-        var m2 = (p3 - p1) * 0.5;
+        double p1 = B(s), p2 = B(s + 1);
+        var m1 = Slope(s) * L(s);
+        var m2 = Slope(s + 1) * L(s);
         double u2 = u * u, u3 = u2 * u;
         return (2 * u3 - 3 * u2 + 1) * p1 + (u3 - 2 * u2 + u) * m1 + (-2 * u3 + 3 * u2) * p2 + (u3 - u2) * m2;
     }
@@ -494,11 +502,13 @@ public static class TrackSampler
         if (!track.Closed)
             corrections[pointCount - 1] = corrections[pointCount];
         var banks = UnwrapBanks(track, corrections);
+        var starts = SegmentStarts(track);
+        var lengths = Enumerable.Range(0, track.SegmentCount).Select(s => starts[s + 1] - starts[s]).ToArray();
 
         for (var i = 0; i < count; i++)
         {
             var ring = rings[i];
-            var bank = BankAt(track, banks, ring.Segment, ring.SegmentU);
+            var bank = BankAt(track, banks, lengths, ring.Segment, ring.SegmentU);
             var right = Vec3d.Rotate(rights[i], ring.Tangent, bank).Normalized();
             ring.Right = right;
             ring.Up = Vec3d.Cross(right, ring.Tangent).Normalized();
