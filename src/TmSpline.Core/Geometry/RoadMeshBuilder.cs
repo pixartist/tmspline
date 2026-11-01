@@ -540,8 +540,10 @@ public static class RoadMeshBuilder
     private static (double Height, double Thickness, double Inset) BorderSize(Ring ring, RoadMeshSettings s)
     {
         var k = Math.Max(MinBorderScale, ring.BorderScale);
-        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly.
-        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(ring.BorderScale, 0, 1));
+        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly. It
+        // also fades out as the cross-section closes (full up to 270° of bend, none at 360°): a pipe's edges must meet.
+        var open = Math.Clamp((2 * Math.PI - Math.Abs(ring.Curve)) / (Math.PI / 2), 0, 1);
+        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(ring.BorderScale, 0, 1) * open);
     }
 
     private const double MinBorderScale = 0.02;
