@@ -437,7 +437,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
-    + `:${(s?.kind === "point" || s?.kind === "handle") ? t.points[s.index]?.borders : ""}`
+    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}`;
   if (key === lastInspectorKey) {
