@@ -35,6 +35,8 @@ public static class MapExporter
     public const double GroundY = 8;
     /// <summary>Block Y of the ground level.</summary>
     public const int GroundBlockY = 9;
+    /// <summary>The game's collection number of Stadium (2020), as its maps store it for vanilla items.</summary>
+    public const int StadiumCollection = 26;
 
     static MapExporter()
     {
@@ -135,14 +137,18 @@ public static class MapExporter
         }
 
         // Vanilla items (trees): by name from the game's own collection, as the game's editor saves them (seen in maps:
-        // "SpringTreeTall", collection Stadium2020, author Nadeo; the position is the item's base, yaw in radians).
+        // "SpringTreeTall", author Nadeo, collection stored as the NUMBER 26 (Stadium2020; the string form is not found:
+        // "Missing items"), the cell it stands in as BlockUnitCoord (x/32, y/8 + 8, z/32); the position is the item's base,
+        // yaw in radians).
         foreach (var item in options.Items)
         {
             var at = origin + item.Position;
             if (at.X < 0 || at.Z < 0 || at.X > map.Size.X * 32 || at.Z > map.Size.Z * 32)
                 continue;
-            map.PlaceAnchoredObject(new Ident(item.Name, "Stadium2020", "Nadeo"), new Vec3((float)at.X, (float)at.Y, (float)at.Z),
-                new Vec3((float)(item.Yaw * Math.PI / 180), 0, 0), Vec3.Zero);
+            var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
+                new Vec3((float)at.X, (float)at.Y, (float)at.Z), new Vec3((float)(item.Yaw * Math.PI / 180), 0, 0), Vec3.Zero);
+            placed.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
+                (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + 8, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }
         if (options.Items.Count > 0)
             log?.Invoke($"Placed {options.Items.Count} vanilla items");

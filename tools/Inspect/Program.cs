@@ -28,7 +28,13 @@ if (args[0] == "--items")
                 var k = $"{o.ItemModel.Id} | {o.ItemModel.Collection} | {o.ItemModel.Author}";
                 // One example placement per vanilla item: where the game puts its base, and its turn.
                 if (!seen.ContainsKey(k) && o.ItemModel.Author == "Nadeo")
+                {
                     Console.WriteLine($"  e.g. {o.ItemModel.Id}: pos {o.AbsolutePositionInMap} ypr {o.YawPitchRoll} pivot {o.PivotPosition} in {Path.GetFileName(f)}");
+                    // How the ident is stored (collection as a number or a string), and the object's other fields.
+                    var c = o.ItemModel.Collection;
+                    Console.WriteLine($"    collection: {string.Join(", ", c.GetType().GetProperties().Where(p => p.GetIndexParameters().Length == 0).Select(p => $"{p.Name}={p.GetValue(c)}"))}");
+                    Console.WriteLine($"    object: {string.Join(", ", o.GetType().GetProperties().Where(p => p.GetIndexParameters().Length == 0 && (p.PropertyType.IsValueType || p.PropertyType == typeof(string))).Select(p => { try { return $"{p.Name}={p.GetValue(o)}"; } catch { return p.Name + "=?"; } }))}");
+                }
                 seen[k] = seen.GetValueOrDefault(k) + 1;
             }
         }
