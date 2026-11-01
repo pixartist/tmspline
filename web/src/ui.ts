@@ -4,7 +4,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, note: "" };
+const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
@@ -475,23 +475,32 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
 
   if (!s && editor.library) {
     section("Scenery");
-    selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => (scenery.theme = v), false,
-      Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
-    numberField(root, "Gap (cells)", () => scenery.gap, (v) => (scenery.gap = Math.max(0, Math.min(8, Math.round(v)))), 1);
+    const int = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
+    checkbox(root, "Hills", () => scenery.hills, (v) => (scenery.hills = v));
+    numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
+    if (scenery.hills) {
+      numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
+      numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
+    }
+    numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => (scenery.cliffs = int(v, 0, 24)), 1);
+    if (scenery.cliffs > 0)
+      selectField(root, "Cliff type", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => (scenery.theme = v), false,
+        Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
     buttonRow(root, [
       {
         label: "Generate", onClick: () => {
           const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
-          const n = editor.generateScenery(theme, scenery.gap);
-          scenery.note = n === null ? "The block library has no pieces for this theme." : `Placed ${n} blocks.`;
+          const n = editor.generateScenery({ ...scenery, theme });
+          scenery.note = n === null ? "The block library lacks pieces for these settings." : `Placed ${n} blocks.`;
           editor.onChange();
         },
       },
       { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks.`; editor.onChange(); } },
     ]);
     hint(root, (scenery.note ? scenery.note + " " : "")
-      + "Surrounds the tracks with cliffs facing them, the gap away from the roads and blocks (also inside loops). "
-      + "Generating again replaces the generated blocks; they are normal blocks otherwise (jumps may need clearing by hand).");
+      + "Builds land round the tracks: up to just below the roads (they run on it instead of columns), a flat shoulder "
+      + "beside them, then hills rising by 2 levels every hill step, and cliff walls further out as a backdrop (also "
+      + "inside loops). Generating again replaces the generated blocks; they are normal blocks otherwise (clear jumps by hand).");
   }
 
   if (s?.kind === "point" || s?.kind === "handle") {
