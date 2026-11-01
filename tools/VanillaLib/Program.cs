@@ -50,6 +50,9 @@ var materialFiles = new ConcurrentDictionary<string, string>();
 var blockModifiers = new ConcurrentDictionary<string, string>();
 var meshVertices = new ConcurrentDictionary<string, Vector3[]>();
 var meshSamples = new ConcurrentDictionary<string, Lazy<Vector3[]>>();
+// The same without floor plates (Grass, plain TrackWallClips lids): a plate's trims, which decide how it turns.
+var trimSamples = new ConcurrentDictionary<string, Lazy<Vector3[]>>();
+bool IsFloorMaterial(int id) => materials.Any(m => m.Value == id && m.Key is "Grass" or "TrackWallClips");
 var clipMeshes = new ConcurrentDictionary<string, Lazy<MeshRef?>>(StringComparer.OrdinalIgnoreCase);
 string[] ClipFaces = ["ClipsNorth", "ClipsEast", "ClipsSouth", "ClipsWest", "ClipsTop", "ClipsBottom"];
 var nodeCache = new ConcurrentDictionary<string, Lazy<(object?, int)>>(StringComparer.OrdinalIgnoreCase);
@@ -71,6 +74,10 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
             }
             var ground = Variant(info.VariantBaseGround, file, level, true);
             var air = Variant(info.VariantBaseAir, file, level, false);
+            // Ground-only blocks ("in ground" U bottoms have an empty air variant): off the ground they are the ground
+            // variant as is, without sinking into the terrain.
+            if (air is { Mesh: null, Clips: null, Units.Length: 0 } && info.VariantBaseGround is not null)
+                air = Variant(info.VariantBaseGround, file, level, false);
             // The air variant the game uses with a column below (e.g. a slope with the column's wedge walls), when the
             // base one is the "no pillar below" variant.
             var withPillar = info.VariantBaseAir is { IsNoPillarBelowVariant: true }
@@ -191,10 +198,13 @@ VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, 
 {
     if (variant is null) return null;
     var unitInfos = (variant.BlockUnitModels ?? []).Where(u => u is not null).Select(u => u!).ToList();
-    var units = unitInfos.Select(u => u.RelativeOffset).ToList();
+    // "In ground" blocks (the bottom of a U slope) sink this many levels into the terrain when placed on the ground:
+    // their units, mesh and clips are stored that much lower, so level 0 is the one at the terrain surface.
+    var sink = ground && variant is CGameCtnBlockInfoVariantGround { AutoTerrainHeightOffset: > 0 } g ? (int)g.AutoTerrainHeightOffset : 0;
+    var units = unitInfos.Select(u => u.RelativeOffset - new Int3(0, sink, 0)).ToList();
     var size = units.Count == 0 ? new[] { 1, 1, 1 } : new[] { units.Max(u => u.X) + 1, units.Max(u => u.Y) + 1, units.Max(u => u.Z) + 1 };
-    var mesh = MeshOf(variant, file, level);
-    Int3 Cell(Int3 u) => u;
+    var mesh = MeshOf(variant, file, level, 0, -8 * sink);
+    Int3 Cell(Int3 u) => u - new Int3(0, sink, 0);
     // The pieces the game adds on free faces of each unit (sides, caps, walls of columns): one "free clip" per face.
     // A free clip is hidden when the neighbouring face offers a clip group it connects to (its symmetrical group).
     var clips = new List<ClipInfo>();
@@ -203,12 +213,12 @@ VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, 
         {
             // The ground version of a clip only on the bottom level; the levels above use the air one (otherwise
             // walls get a base trim on every level).
-            var (clipMesh, connects, offers, stack, stackGroup, options) = FaceClips(u, ClipFaces[face], file, level, ground && u.RelativeOffset.Y == 0);
+            var (clipMesh, connects, offers, stack, stackGroup, options) = FaceClips(u, ClipFaces[face], file, level, ground && u.RelativeOffset.Y == sink);
             var cell = Cell(u.RelativeOffset);
             if (clipMesh is not null || offers.Length > 0)
                 clips.Add(new ClipInfo([cell.X, cell.Y, cell.Z], face, clipMesh,
                     connects.Length > 0 ? connects : null, offers.Length > 0 ? offers : null,
-                    face >= 4 && clipMesh is not null && mesh is not null ? CapTurn(clipMesh, mesh, cell, face == 4) : 0,
+                    face >= 4 && clipMesh is not null && mesh is not null ? CapTurn(clipMesh, mesh, cell, face == 4, units) : 0,
                     stack, stackGroup, options.Length > 1 ? options : null));
         }
     // The columns the game's editor puts under this variant: pillar block, unit (offset in cells) and direction.
@@ -285,17 +295,21 @@ VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, 
     return (found, connects.Distinct().ToArray(), offers.Order().ToArray(), stack, stackGroup, options.ToArray());
 }
 
-MeshRef? MeshOf(CGameCtnBlockInfoVariant? variant, string file, int level, int set = 0)
+MeshRef? MeshOf(CGameCtnBlockInfoVariant? variant, string file, int level, int set = 0, float dy = 0)
 {
     if (variant is null) return null;
     var builder = new MeshBuilder();
     foreach (var mobil in variant.Mobils?.ElementAtOrDefault(set) ?? [])
     {
         if (mobil is null) continue;
+        // GeomRotation is in degrees, applied X, then Z, then Y: a wall checkpoint is the floor one stood up (-90 about X),
+        // then turned in the wall's plane (Z: 90 Right, -90 Left, 180 Down).
+        const float deg = MathF.PI / 180;
         var m = mobil.HasGeomTransformation
-            ? Matrix4x4.CreateFromYawPitchRoll(mobil.GeomRotation.Y, mobil.GeomRotation.X, mobil.GeomRotation.Z)
+            ? Matrix4x4.CreateRotationX(mobil.GeomRotation.X * deg) * Matrix4x4.CreateRotationZ(mobil.GeomRotation.Z * deg) * Matrix4x4.CreateRotationY(mobil.GeomRotation.Y * deg)
               * Matrix4x4.CreateTranslation(mobil.GeomTranslation.X, mobil.GeomTranslation.Y, mobil.GeomTranslation.Z)
             : Matrix4x4.Identity;
+        if (dy != 0) m *= Matrix4x4.CreateTranslation(0, dy, 0);
         AddModel(builder, mobil.PrefabFid, RefPath(mobil, "PrefabFid", file, level), file, level, m, 0);
     }
     return builder.IsEmpty ? null : Save(builder);
@@ -443,14 +457,16 @@ static string MaterialName(string? path)
 /// the block. Picked as the turn whose height profile matches the block's own mesh over the unit's cell best; flat clips
 /// keep 0.
 /// </summary>
-int CapTurn(MeshRef clip, MeshRef block, Int3 unit, bool topFace)
+int CapTurn(MeshRef clip, MeshRef block, Int3 unit, bool topFace, IReadOnlyList<Int3> units)
 {
     if (!meshVertices.TryGetValue(clip.File, out var cv) || !meshVertices.TryGetValue(block.File, out var bv)) return 0;
     if (cv.Length == 0) return 0;
-    // Flat caps (edge trims, plates): turned to lie where the block's own mesh meets that face. Caps over several cells
-    // (a curve's column top) are modelled in place in the block's frame and keep 0.
+    // Caps over several cells (a curve's column top, a loop end's curved trim) span the block's footprint from the unit
+    // they hang on: turned so they lie within it (a trim hung on the far corner unit needs a half turn).
     var multiCell = cv.Min(v => Math.Min(v.X, v.Z)) < -1 || cv.Max(v => Math.Max(v.X, v.Z)) > 33;
-    if (cv.Max(v => v.Y) - cv.Min(v => v.Y) < 2) return multiCell ? 0 : FootprintTurn(clip, block, unit, topFace);
+    if (multiCell) return InFootprintTurn(clip, unit, units);
+    // Flat caps (edge trims, plates): turned to lie where the block's own mesh meets that face.
+    if (cv.Max(v => v.Y) - cv.Min(v => v.Y) < 2) return FootprintTurn(clip, block, unit, topFace);
     // Uphill directions: of the clip's top profile (highest point per bin, so walls hanging below do not count) and of
     // the block's mesh over the unit's cell.
     const int n = 8;
@@ -490,7 +506,7 @@ int FootprintTurn(MeshRef clip, MeshRef block, Int3 unit, bool top)
 {
     if (!meshSamples.TryGetValue(clip.File, out var cs) || !meshSamples.TryGetValue(block.File, out var bs)) return 0;
     var height = unit.Y * 8f + (top ? 8 : 0);
-    const float reach = 2.5f;
+    const float reach = 1.25f;
     var near = bs.Value
         .Select(v => (X: v.X - unit.X * 32f, Z: v.Z - unit.Z * 32f, v.Y))
         .Where(v => v.X >= -0.5f && v.X <= 32.5f && v.Z >= -0.5f && v.Z <= 32.5f && Math.Abs(v.Y - height) <= 2f)
@@ -506,7 +522,8 @@ int FootprintTurn(MeshRef clip, MeshRef block, Int3 unit, bool top)
                 if (grid.Contains((gx + a, gz + b))) return true;
         return false;
     }
-    var points = cs.Value;
+    // A plate with trims turns by its trims: its floor overlaps the block alike in several turns.
+    var points = trimSamples.TryGetValue(clip.File, out var ts) && ts.Value.Length > 0 ? ts.Value : cs.Value;
     var scores = new double[4];
     for (var k = 0; k < 4; k++)
     {
@@ -522,7 +539,37 @@ int FootprintTurn(MeshRef clip, MeshRef block, Int3 unit, bool top)
     var best = 0;
     for (var k = 1; k < 4; k++) if (scores[k] > scores[best]) best = k;
     // Plates count mostly by their large flat part, which overlaps alike in every turn; the edge decides.
-    return scores[best] - scores[0] > 0.02 && scores[best] > scores[0] * 1.25 ? best : 0;
+    // A clear margin wins on its own: a quarter-disc underside under a quarter-disc platform overlaps the wrong way round
+    // by ~80 % (the coverage test is a few metres coarse), the right way by ~100 %.
+    var margin = scores[best] - scores[0];
+    if (Environment.GetEnvironmentVariable("TURN_DEBUG") is { } dbg && block.File.Contains(dbg)) Console.WriteLine($"turn {clip.File} on {block.File}: {string.Join(" ", scores.Select(s => s.ToString("0.00")))}");
+    return margin > 0.1 || margin > 0.02 && scores[best] > scores[0] * 1.25 ? best : 0;
+}
+
+/// <summary>
+/// Quarter turn (about the unit cell's centre, as placed) that puts most of a multi-cell cap over the block's own units
+/// (on X/Z); 0 unless another turn is clearly better.
+/// </summary>
+int InFootprintTurn(MeshRef clip, Int3 unit, IReadOnlyList<Int3> units)
+{
+    if (!meshSamples.TryGetValue(clip.File, out var cs) || cs.Value.Length == 0) return 0;
+    var cells = units.Select(u => (u.X, u.Z)).ToHashSet();
+    var scores = new double[4];
+    for (var k = 0; k < 4; k++)
+    {
+        double cos = Math.Round(Math.Cos(k * Math.PI / 2)), sin = Math.Round(Math.Sin(k * Math.PI / 2));
+        var hit = 0;
+        foreach (var p in cs.Value)
+        {
+            double x = p.X - 16, z = p.Z - 16;
+            double bx = unit.X * 32 + 16 + x * cos + z * sin, bz = unit.Z * 32 + 16 - x * sin + z * cos;
+            if (cells.Contains(((int)Math.Floor(bx / 32), (int)Math.Floor(bz / 32)))) hit++;
+        }
+        scores[k] = hit / (double)cs.Value.Length;
+    }
+    var best = 0;
+    for (var k = 1; k < 4; k++) if (scores[k] > scores[best] + 1e-9) best = k;
+    return scores[best] - scores[0] > 0.1 ? best : 0;
 }
 
 /// <summary>Least-squares plane y = a·x + b·z + c through points: its uphill gradient (a, b).</summary>
@@ -550,6 +597,7 @@ MeshRef Save(MeshBuilder b)
         File.WriteAllBytes(Path.Combine(outDir, file), bytes);
     meshVertices.TryAdd(file, b.Vertices.ToArray());
     meshSamples.TryAdd(file, new Lazy<Vector3[]>(() => b.Samples().ToArray()));
+    trimSamples.TryAdd(file, new Lazy<Vector3[]>(() => b.Samples(m => !IsFloorMaterial(m)).ToArray()));
     return new MeshRef(file);
 }
 
@@ -587,15 +635,16 @@ sealed class MeshBuilder
     public bool IsEmpty => groups.Count == 0;
     public IEnumerable<Vector3> Vertices => groups.Values.SelectMany(g => g.V);
 
-    /// <summary>Points spread over the triangles (about every 2 m), so large faces count where their vertices are few.</summary>
-    public IEnumerable<Vector3> Samples()
+    /// <summary>Points spread over the triangles (about every metre), so large faces count where their vertices are few.</summary>
+    public IEnumerable<Vector3> Samples(Func<int, bool>? keep = null)
     {
-        foreach (var g in groups.Values)
+        foreach (var (material, g) in groups)
+            if (keep is null || keep(material))
             for (var i = 0; i + 2 < g.I.Count; i += 3)
             {
                 Vector3 a = g.V[g.I[i]], b = g.V[g.I[i + 1]], c = g.V[g.I[i + 2]];
                 var longest = Math.Max(Vector3.Distance(a, b), Math.Max(Vector3.Distance(b, c), Vector3.Distance(c, a)));
-                var n = Math.Clamp((int)Math.Ceiling(longest / 2f), 1, 24);
+                var n = Math.Clamp((int)Math.Ceiling(longest / 1f), 1, 48);
                 for (var p = 0; p <= n; p++)
                     for (var q = 0; p + q <= n; q++)
                         yield return a + (b - a) * (p / (float)n) + (c - a) * (q / (float)n);

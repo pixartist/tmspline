@@ -27,6 +27,35 @@ static class Reflect
         }
     }
 
+    /// <summary>The mobils of each variant: their geometry transforms and prefab references.</summary>
+    public static void Mobils(string file)
+    {
+        var info = (CGameCtnBlockInfo)Gbx.Parse(file).Node!;
+        void Dump(string name, CGameCtnBlockInfoVariant? v)
+        {
+            if (v is null) return;
+            var set = 0;
+            foreach (var mobils in v.Mobils ?? [])
+            {
+                foreach (var m in mobils ?? [])
+                    if (m is not null)
+                        Console.WriteLine($"{name}[{set}] geom={m.HasGeomTransformation} t={m.GeomTranslation} r={m.GeomRotation} prefab={(m.GetType().GetProperty("PrefabFid")?.GetValue(m) as GBX.NET.Components.GbxRefTableFile)?.FilePath ?? m.PrefabFid?.GetType().Name}");
+                set++;
+            }
+        }
+        Dump("ground", info.VariantBaseGround);
+        Dump("air", info.VariantBaseAir);
+        // Scalar properties of the block and its ground variant (to compare blocks that differ in placement).
+        foreach (var o in new object?[] { info, info.VariantBaseGround })
+            foreach (var p in o?.GetType().GetProperties() ?? [])
+            {
+                if (p.GetIndexParameters().Length > 0) continue;
+                object? v; try { v = p.GetValue(o); } catch { continue; }
+                if (v is null || v is System.Collections.IEnumerable and not string || v.GetType().IsClass && v is not string) continue;
+                Console.WriteLine($"  {o!.GetType().Name}.{p.Name} = {v}");
+            }
+    }
+
     /// <summary>A clip's type, groups and its variants' mobil counts.</summary>
     public static void Clip(string file)
     {
