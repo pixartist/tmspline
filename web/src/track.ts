@@ -104,12 +104,25 @@ export interface TrackSegment {
   effectYaw: number;
   /** Boost tilt out of the road plane, degrees: positive = up. */
   effectPitch: number;
+  /** Bumpiness of the driving surface (real geometry, mirrors BumpPattern in C#). */
+  bumps: BumpPattern;
+  /** Bump height in meters (negative: dips). */
+  bumpHeight: number;
+  /** Wavelength (waves along, ridges across) or feature size (noise) in meters. */
+  bumpSize: number;
+  /** Meters between the cross-sections / columns of the bumpy surface (smaller: finer, more triangles). */
+  bumpDetail: number;
 }
 
-export const defaultSegment = (): TrackSegment =>
-  ({ surface: "RoadTech", borders: true, borderMaterial: "Rubber", underside: true, color: "Default", effect: "None", effectYaw: 0, effectPitch: 0 });
+export const BUMP_PATTERNS = ["None", "Waves", "Noise", "Ridges"] as const;
+export type BumpPattern = (typeof BUMP_PATTERNS)[number];
 
-export const OBJECT_KINDS = ["Pillar", "Hole", "Gap"] as const;
+export const defaultSegment = (): TrackSegment => ({
+  surface: "RoadTech", borders: true, borderMaterial: "Rubber", underside: true, color: "Default", effect: "None", effectYaw: 0, effectPitch: 0,
+  bumps: "None", bumpHeight: 0.5, bumpSize: 8, bumpDetail: 2,
+});
+
+export const OBJECT_KINDS = ["Pillar", "Hole", "Gap", "Bump"] as const;
 export type TrackObjectKind = (typeof OBJECT_KINDS)[number];
 export const OBJECT_SHAPES = ["Round", "Rect"] as const;
 export type ObjectShape = (typeof OBJECT_SHAPES)[number];
@@ -131,11 +144,12 @@ export interface TrackObject {
   length: number;
   /** Size across the road in meters (holes, pillars). */
   width: number;
-  /** Pillars: how far they stand up from the road, in meters. */
+  /** Pillars: how far they stand up from the road; bumps: how high the hump is (negative: a dip), in meters. */
   height: number;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {
+  if (kind === "Bump") return { kind, segment, at, offset, shape: "Round", length: 10, width: 8, height: 1 };
   const size = kind === "Pillar" ? 2 : kind === "Hole" ? 6 : 16;
   return { kind, segment, at, offset: kind === "Gap" ? 0 : offset, shape: "Round", length: size, width: kind === "Gap" ? 0 : size, height: 4 };
 }

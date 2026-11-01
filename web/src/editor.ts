@@ -96,7 +96,7 @@ const EFFECT_COLORS: Record<string, number> = {
 };
 
 /** Marker colors of track objects; markers of objects that cannot be built where they are turn red. */
-const OBJECT_COLORS: Record<TrackObjectKind, number> = { Pillar: 0xd8dce4, Hole: 0xff5fa0, Gap: 0xff9f1c };
+const OBJECT_COLORS: Record<TrackObjectKind, number> = { Pillar: 0xd8dce4, Hole: 0xff5fa0, Gap: 0xff9f1c, Bump: 0x6fd36f };
 const OBJECT_BLOCKED = 0xff2020;
 
 const GATE_COLORS: Record<string, number> = { Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020 };

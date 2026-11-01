@@ -235,12 +235,14 @@ public static class RoadMeshBuilder
             return chunks;
 
         var segmentRanges = SegmentRanges(rings);
-        var ringColumns = RingColumns(track, rings, settings);
+        var segmentStarts = TrackSampler.SegmentStarts(track);
+        var roadBumps = new RoadBumps(track, segmentStarts);
+        var bumps = roadBumps.Any ? roadBumps : null;
+        var ringColumns = RingColumns(track, rings, settings, bumps);
         var bands = BuildBands();
         // Small integer ids for edge keys make the per-chunk vertex cache cheap to hash.
         var keyIds = LightmapBands.Select((b, i) => (b.Key, i)).ToDictionary(x => x.Key, x => x.i);
 
-        var segmentStarts = TrackSampler.SegmentStarts(track);
         var cutter = new HoleCutter(TrackObjects.Holes(track, rings, segmentStarts));
         var gaps = TrackObjects.GapRanges(track, segmentStarts);
         var intervals = rings.Count - 1;
@@ -289,9 +291,10 @@ public static class RoadMeshBuilder
                     var cut = edge.Arc is not null && edgeNext.Arc is not null && cutter.Any;
                     var ringIndex = k;
                     // Corners are (ring offset 0 or 1, column).
+                    var bumpSegment = rings[ringIndex].Segment;
                     int V((int R, int C) v) => v.R == 0
-                        ? Vertex(chunk, vertexCache, rings[ringIndex], edge, keyId, ringIndex, v.C, itemOrigin, band, chunkStart, chunkLength, settings)
-                        : Vertex(chunk, vertexCache, rings[ringIndex + 1], edgeNext, keyId, ringIndex + 1, v.C, itemOrigin, band, chunkStart, chunkLength, settings);
+                        ? Vertex(chunk, vertexCache, rings[ringIndex], edge, keyId, ringIndex, v.C, itemOrigin, band, chunkStart, chunkLength, settings, bumps, bumpSegment)
+                        : Vertex(chunk, vertexCache, rings[ringIndex + 1], edgeNext, keyId, ringIndex + 1, v.C, itemOrigin, band, chunkStart, chunkLength, settings, bumps, bumpSegment);
                     // Holes are cut in (distance, across) coordinates of the surface.
                     (double, double) P((int R, int C) v) => v.R == 0
                         ? (rings[ringIndex].Distance, edge.Arc!.Value.At((double)v.C / edge.Columns))
@@ -348,14 +351,17 @@ public static class RoadMeshBuilder
     /// single pipe does not make the whole track heavy. A ring has one count, that of the segment arriving at it; the
     /// first interval of a segment with a different count is zipped (see Build), so the mesh stays closed.
     /// </summary>
-    private static int[] RingColumns(Track track, IReadOnlyList<Ring> rings, RoadMeshSettings settings)
+    private static int[] RingColumns(Track track, IReadOnlyList<Ring> rings, RoadMeshSettings settings, RoadBumps? bumps = null)
     {
-        int Needed(Ring r)
+        int Needed(Ring r, int segment)
         {
             // With a flat middle the same bend happens over a shorter part of the width, so it needs more columns.
             var (flat, arc, straight) = SurfaceArc.For(r, 0, 0, 0, 1, settings).Weights();
             // Even, so there is always a column on the road's center line (the crown of a sausage).
             var columns = Math.Max(2, Math.Max((int)Math.Ceiling(r.Width / settings.ColumnWidth - 1e-9), 2 * (int)Math.Ceiling(flat + arc + straight - 1e-9)));
+            // Bumps across (noise, ridges, bump objects): a column every `detail` meters.
+            if (bumps?.Detail(segment, alongOnly: false) is { } detail)
+                columns = Math.Max(columns, (int)Math.Ceiling(r.Width / detail - 1e-9));
             return columns + columns % 2;
         }
 
@@ -363,7 +369,7 @@ public static class RoadMeshBuilder
         for (var k = 0; k + 1 < rings.Count; k++)
         {
             var s = rings[k].Segment;
-            perSegment[s] = Math.Max(perSegment[s], Math.Max(Needed(rings[k]), Needed(rings[k + 1])));
+            perSegment[s] = Math.Max(perSegment[s], Math.Max(Needed(rings[k], s), Needed(rings[k + 1], s)));
         }
         var result = new int[rings.Count];
         for (var k = 1; k < rings.Count; k++)
@@ -563,6 +569,9 @@ public static class RoadMeshBuilder
 
     private const double MinBorderScale = 0.02;
 
+    /// <summary>Step of the finite differences that tilt the normals of a bumpy surface, meters.</summary>
+    private const double BumpStep = 0.2;
+
     private static IEnumerable<Edge> Profile(Ring ring, TrackSegment segment, (double Start, double End, double Width) range, int topColumns, RoadMeshSettings s)
     {
         var width = ring.Width * 0.5;
@@ -624,7 +633,8 @@ public static class RoadMeshBuilder
     }
 
     private static int Vertex(MeshChunk chunk, Dictionary<long, int> cache, Ring ring, Edge edge, int keyId, int ringIndex, int col,
-        Vec3d itemOrigin, (double U0, double U1) band, double chunkStart, double chunkLength, RoadMeshSettings s)
+        Vec3d itemOrigin, (double U0, double U1) band, double chunkStart, double chunkLength, RoadMeshSettings s,
+        RoadBumps? bumps = null, int segment = -1)
     {
         var cacheKey = ((long)keyId << 48) | ((long)ringIndex << 16) | (uint)col;
         if (cache.TryGetValue(cacheKey, out var existing))
@@ -632,6 +642,7 @@ public static class RoadMeshBuilder
 
         var f = (double)col / edge.Columns;
         double x, y, nx, ny, across, len;
+        Vec3d? bumpNormal = null;
         if (edge.Arc is { } arc)
         {
             var sAt = arc.At(f);
@@ -640,6 +651,24 @@ public static class RoadMeshBuilder
             (nx, ny) = (nx * arc.NormalSign, ny * arc.NormalSign);
             across = sAt;
             len = Math.Abs(arc.S1 - arc.S0);
+            // Bumps lift the driving surface (and the boost decal on it) along its normal; the normal tilts with their
+            // slope (finite differences along and across).
+            if (bumps is not null && edge.Key is "top" or "decal")
+            {
+                var half = Math.Max(Math.Abs(arc.S0), Math.Abs(arc.S1));
+                double D(double d, double a) => bumps.At(segment, d, a, half);
+                var lift = D(ring.Distance, sAt);
+                if (lift != 0 || D(ring.Distance + BumpStep, sAt) != 0 || D(ring.Distance, sAt + BumpStep) != 0)
+                {
+                    var slopeAcross = (D(ring.Distance, sAt + BumpStep) - D(ring.Distance, sAt - BumpStep)) / (2 * BumpStep);
+                    var slopeAlong = (D(ring.Distance + BumpStep, sAt) - D(ring.Distance - BumpStep, sAt)) / (2 * BumpStep);
+                    var (tx, ty) = arc.Tangent(sAt);
+                    var n = ring.Right * nx + ring.Up * ny;
+                    var acrossDir = ring.Right * tx + ring.Up * ty;
+                    bumpNormal = (n - acrossDir * slopeAcross - ring.Tangent * slopeAlong).Normalized();
+                    (x, y) = (x + nx * lift, y + ny * lift);
+                }
+            }
         }
         else
         {
@@ -654,7 +683,7 @@ public static class RoadMeshBuilder
 
         var world = ring.Position + ring.Right * x + ring.Up * y;
         var local = chunk.Frame.ToLocal(world - itemOrigin);
-        var normal = chunk.Frame.ToLocal((ring.Right * nx + ring.Up * ny).Normalized());
+        var normal = chunk.Frame.ToLocal(bumpNormal ?? (ring.Right * nx + ring.Up * ny).Normalized());
 
         // Trackmania road textures run along U, so U follows the track and V goes across it.
         // Road textures are authored for exactly one road width (V 0..1).

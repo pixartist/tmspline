@@ -169,6 +169,27 @@ public sealed class TrackSegment
 
     /// <summary>Effects that push along the item's local Z axis, so their pieces are aimed (see RoadMeshBuilder).</summary>
     public bool IsDirectional => Effect is Effect.Turbo or Effect.Turbo2 or Effect.ReactorBoost or Effect.ReactorBoost2;
+
+    /// <summary>Bumpiness of the driving surface (real geometry, so cars feel it); see RoadBumps.</summary>
+    public BumpPattern Bumps { get; set; }
+    /// <summary>Height of the bumps in meters (negative: dips).</summary>
+    public double BumpHeight { get; set; } = 0.5;
+    /// <summary>Wavelength (waves along, ridges across) or feature size (noise) in meters.</summary>
+    public double BumpSize { get; set; } = 8;
+    /// <summary>How finely the bumpy surface is cut, in meters between cross-sections and columns (smaller: more triangles).</summary>
+    public double BumpDetail { get; set; } = 2;
+}
+
+/// <summary>Bump patterns of a segment's driving surface.</summary>
+public enum BumpPattern
+{
+    None,
+    /// <summary>Rolling bumps across the full width, one every BumpSize along the road (washboard).</summary>
+    Waves,
+    /// <summary>Uneven ground: smooth random bumps about BumpSize across.</summary>
+    Noise,
+    /// <summary>Ridges running along the road, one every BumpSize across it (rumble lanes).</summary>
+    Ridges,
 }
 
 /// <summary>Kinds of things the mapper places on the track.</summary>
@@ -180,6 +201,8 @@ public enum TrackObjectKind
     Hole,
     /// <summary>The whole road left out over a stretch, with closed ends (a jump).</summary>
     Gap,
+    /// <summary>A smooth hump (or dip, with a negative height) in the driving surface.</summary>
+    Bump,
 }
 
 public enum ObjectShape
@@ -319,5 +342,6 @@ public sealed class Track
     {
         Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
         Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
+        Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail,
     };
 }

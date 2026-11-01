@@ -79,6 +79,10 @@ public static class TrackSampler
         // Border ramps need rings along them, or they would be one long wedge.
         var ramps = BorderRuns(track, starts, settings);
         cuts.AddRange(ramps.SelectMany(r => r.RingDistances(starts[^1], track.Closed)));
+        // Bump objects: cross-sections over their length, a few per bump (segment patterns raise the ring count instead).
+        foreach (var (from, to, detail) in new RoadBumps(track, starts).ObjectSpans())
+            for (var d = from; d <= to + 1e-6; d += detail)
+                if (d > 0 && d < starts[^1]) cuts.Add(d);
 
         var rings = new List<Ring>();
         var distance = 0.0;
@@ -227,6 +231,8 @@ public static class TrackSampler
             Blend(p => p.Flat, settings.MaxShareStep),
             Blend(p => p.Sausage, settings.MaxShareStep),
             Blend(p => p.BorderHeight, settings.MaxBorderStep),
+            // Bumps along the road (waves, noise): a cross-section every `detail` meters.
+            track.Segments[segment] is { Bumps: BumpPattern.Waves or BumpPattern.Noise } bumpy ? table.Length / Math.Max(0.25, bumpy.BumpDetail) : 0,
         };
         return Math.Max(1, (int)Math.Ceiling(needed.Max() - 1e-9));
     }

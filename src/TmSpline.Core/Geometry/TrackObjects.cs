@@ -148,6 +148,10 @@ public static class TrackObjects
                 case TrackObjectKind.Pillar:
                     (across, placed) = PillarBuilder.Footing(o, rings, d, gaps);
                     break;
+                case TrackObjectKind.Bump:
+                    across = o.Offset;
+                    placed = !gaps.Any(g => d > g.Start && d < g.End);
+                    break;
             }
             var ring = RingAt(rings, d);
             var (point, normal) = SurfacePoint(ring, across);

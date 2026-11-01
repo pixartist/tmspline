@@ -112,6 +112,11 @@ public static class TrackJson
         public Effect Effect { get; set; } = Effect.None;
         public double EffectYaw { get; set; }
         public double EffectPitch { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public BumpPattern Bumps { get; set; }
+        public double BumpHeight { get; set; } = 0.5;
+        public double BumpSize { get; set; } = 8;
+        public double BumpDetail { get; set; } = 2;
     }
 
     public static TrackDto ParseDto(string json) =>
@@ -164,6 +169,8 @@ public static class TrackJson
             {
                 Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
                 Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
+                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -8, 8), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
+                BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16),
             });
         foreach (var o in dto.Objects ?? new())
             track.Objects.Add(new TrackObject
@@ -187,6 +194,7 @@ public static class TrackJson
         {
             Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
             Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
+            Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail,
         }).ToList(),
         Objects = track.Objects.Select(o => new ObjectDto
         {
