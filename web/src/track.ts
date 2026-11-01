@@ -296,7 +296,7 @@ export function newTrack(center: Vec3 = [0, 16, 0], direction: Vec3 = [0, 0, 1])
 }
 
 export function newMap(): TrackMap {
-  return { version: 2, name: "My Track", laps: 3, tracks: [newTrack()], blocks: [] };
+  return { version: 2, name: "My Track", laps: 3, tracks: [newTrack()], blocks: [], items: [] };
 }
 
 export const cloneMap = (m: TrackMap): TrackMap => structuredClone(m);
