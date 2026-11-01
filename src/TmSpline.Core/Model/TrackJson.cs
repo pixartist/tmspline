@@ -154,7 +154,7 @@ public static class TrackJson
             var width = p.Width ?? LegacyPointWidth(dto, i);
             track.Points.Add(new TrackPoint(V(p.Position), V(p.HandleOut), p.Bank, width) { HandleIn = V(p.HandleIn), Curve = p.Curve, Flat = Math.Clamp(p.Flat, 0, 0.9),
                 Sausage = Math.Clamp(p.Sausage, 0, 1),
-                BorderHeight = p.BorderHeight ?? TrackPoint.DefaultBorderHeight, Waypoint = p.Waypoint });
+                BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Waypoint = p.Waypoint });
         }
         foreach (var s in dto.Segments)
             track.Segments.Add(new TrackSegment

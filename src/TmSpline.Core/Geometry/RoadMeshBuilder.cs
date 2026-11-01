@@ -70,7 +70,11 @@ public sealed class MeshChunk
 public sealed class RoadMeshSettings
 {
     public double Thickness { get; set; } = 0.5;
-    public double BorderThickness { get; set; } = 0.6;
+    /// <summary>
+    /// Curb thickness outside the road width: as the game's road blocks (RoadTech curb from the road's edge at the matching
+    /// width of 26.25 m out to x = 1.5 in the cell: 1.375 m).
+    /// </summary>
+    public double BorderThickness { get; set; } = 1.375;
     /// <summary>Approximate width of one column of the driving surface, in meters.</summary>
     public double ColumnWidth { get; set; } = 4.0;
     /// <summary>Maximum angle between two columns of a bent surface (pipes, sausages), in degrees.</summary>

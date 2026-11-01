@@ -66,7 +66,10 @@ export interface TrackPoint {
   waypoint: Waypoint;
 }
 
-export const DEFAULT_BORDER_HEIGHT = 0.8;
+/** Border height of new points: the game's road curbs stand 1.0 m above the road (RoadTech: road 2.0, curb top 3.0). */
+export const DEFAULT_BORDER_HEIGHT = 1.0;
+/** Border height of points in files that stored none (the default before it matched the game's curbs). */
+const LEGACY_BORDER_HEIGHT = 0.8;
 /**
  * Road width of new tracks: where the road texture matches the game's road blocks exactly (26.25 m, checked in game by
  * the user; their surface mesh spans 26.6 m, x 2.7..29.3, partly under the curbs). Our borders sit outside the width.
@@ -552,7 +555,7 @@ function normalizeTrack(t: Track, label: string): Track {
     p.flat ??= 0;
     p.sausage ??= 0;
     delete (p as { flatOuter?: number }).flatOuter; // short-lived predecessor of "sausage"
-    p.borderHeight ??= DEFAULT_BORDER_HEIGHT;
+    p.borderHeight ??= LEGACY_BORDER_HEIGHT;
     p.waypoint ??= "None";
   }
   // Files from before gameplay effects existed.
