@@ -140,6 +140,11 @@ const SCREEN_SIZE = 0.011;
 const OBJECT_MARKER = new THREE.OctahedronGeometry(1.1);
 const DRAG_THRESHOLD_PX = 3;
 const Y_MIN = -8, Y_MAX = 1000;
+/**
+ * Height of the game's block roads and platform tops above their level (RoadTech, PlatformTech: 2 m): snapped track
+ * points sit there, so the spline road meets blocks flush.
+ */
+const ROAD_SURFACE = 2;
 /** Highest block level above the ground (the 48² template is 40 levels high, the ground is level 9 of them). */
 const MAX_BLOCK_LEVEL = 30;
 const DIRECTION_NAMES = ["North", "East", "South", "West"];
@@ -166,8 +171,9 @@ export class Editor {
   /** Block mode: clicks place this vanilla block (dir and level change with R and PgUp/PgDn). */
   blockPlace: { name: string; dir: number; level: number; free: boolean; yaw: number; lift: number; color: ItemColor } | null = null;
   /**
-   * Snap mode: grid step in meters (0 = off). Track points (not their handles) and free blocks snap to it horizontally,
-   * and to min(step, 8 m) vertically (8 m = one block level). Ctrl while dragging ignores it.
+   * Snap mode: grid step in meters (0 = off). Track points, their handles (by grid steps) and free blocks snap to it
+   * horizontally, and to min(step, 8 m) vertically (8 m = one block level); points at the heights of block roads (see
+   * ROAD_SURFACE). Ctrl while dragging ignores it.
    */
   snapStep = 0;
   private snapGrid: THREE.GridHelper | null = null;
@@ -577,6 +583,26 @@ export class Editor {
     const h = this.snapStep, y = this.snapVertical;
     if (h <= 0) return v;
     return v.set(Math.round(v.x / h) * h, Math.round(v.y / y) * y, Math.round(v.z / h) * h);
+  }
+
+  /**
+   * A track point snapped to the grid (snap mode): on the grid horizontally, and at the heights of the game's block roads
+   * and platforms (2 m above each level, then every vertical step), so the road meets blocks flush.
+   */
+  private snappedPoint(v: THREE.Vector3): THREE.Vector3 {
+    this.snapped(v);
+    if (this.snapStep > 0) {
+      const y = this.snapVertical;
+      v.y = Math.round((v.y - ROAD_SURFACE) / y) * y + ROAD_SURFACE;
+    }
+    return v;
+  }
+
+  /** A handle (relative to its point) snapped to the grid steps (snap mode), or as is. */
+  private snappedHandle(h: Vec3): Vec3 {
+    const s = this.snapStep, y = this.snapVertical;
+    if (s <= 0) return h;
+    return [Math.round(h[0] / s) * s, Math.round(h[1] / y) * y, Math.round(h[2] / s) * s];
   }
 
   /** Tab: switches block mode between grid and free placement, or turns the selected block into the other kind in place. */
@@ -1431,7 +1457,7 @@ export class Editor {
       const g = this.rayFrom(e).intersectObject(this.ground, false)[0];
       if (g) {
         const last = this.track.points[this.track.points.length - 1];
-        const p = this.snapStep > 0 ? this.snapped(new THREE.Vector3(g.point.x, last.position[1], g.point.z)) : g.point.clone().setY(last.position[1]);
+        const p = this.snapStep > 0 ? this.snappedPoint(new THREE.Vector3(g.point.x, last.position[1], g.point.z)) : g.point.clone().setY(last.position[1]);
         const at: Vec3 = [clampMap(p.x), p.y, clampMap(p.z)];
         let index = 0;
         this.edit((t) => (index = appendPoint(t, at)), true);
@@ -1580,10 +1606,12 @@ export class Editor {
     if (moved.distanceTo(target) > this.camera.position.distanceTo(target) * 3) return;
     if (drag.mode === "vertical") moved.set(target.x, moved.y, target.z);
     else if (drag.mode === "horizontal") moved.y = target.y;
-    // Snap mode moves points (not handles) on the grid; Ctrl ignores it. Without snap mode Ctrl snaps to 1 m.
-    if (drag.pick.kind === "point" && this.snapStep > 0 && !e.ctrlKey) {
+    // Snap mode moves points on the grid (at block road heights) and handles by grid steps; Ctrl ignores it. Without
+    // snap mode Ctrl snaps to 1 m.
+    const snap = this.snapStep > 0 && !e.ctrlKey;
+    if (drag.pick.kind === "point" && snap) {
       const keepY = drag.mode === "horizontal" ? moved.y : null;
-      this.snapped(moved);
+      this.snappedPoint(moved);
       if (keepY !== null) moved.y = keepY;
       if (drag.mode === "vertical") moved.set(target.x, moved.y, target.z);
     } else if (e.ctrlKey && this.snapStep === 0) moved.set(Math.round(moved.x), Math.round(moved.y), Math.round(moved.z));
@@ -1593,8 +1621,17 @@ export class Editor {
       p.position = pos;
       this.showLabel(e, drag.mode === "horizontal" ? `Height locked ${pos[1].toFixed(1)} m` : `Height ${pos[1].toFixed(1)} m`);
     } else if (drag.pick.kind === "handle") {
-      setHandle(p, drag.pick.which, sub(pos, p.position));
-      this.label.hidden = true;
+      let handle = sub(pos, p.position);
+      if (snap) {
+        // Locked axes keep the handle's current value on them.
+        const before = drag.pick.which === "in" ? p.handleIn : p.handleOut;
+        handle = this.snappedHandle(handle);
+        if (drag.mode === "horizontal") handle[1] = before[1];
+        if (drag.mode === "vertical") [handle[0], handle[2]] = [before[0], before[2]];
+      }
+      setHandle(p, drag.pick.which, handle);
+      if (snap) this.showLabel(e, `Handle ${handle.map((v) => v.toFixed(1)).join(", ")} m`);
+      else this.label.hidden = true;
     }
     this.changed(false);
   }
@@ -1711,11 +1748,11 @@ export class Editor {
     const obj = this.axisGizmo.object;
     if (!obj) return;
     const pick = obj.userData as Pick;
-    if (pick.kind === "point" && this.snapStep > 0) this.snapped(obj.position);
+    if (pick.kind === "point" && this.snapStep > 0) this.snappedPoint(obj.position);
     const pos: Vec3 = [obj.position.x, obj.position.y, obj.position.z];
     const p = this.track.points[pick.index];
     if (pick.kind === "point") p.position = pos;
-    else if (pick.kind === "handle") setHandle(p, pick.which, sub(pos, p.position));
+    else if (pick.kind === "handle") setHandle(p, pick.which, this.snappedHandle(sub(pos, p.position)));
     this.changed(false);
   }
 

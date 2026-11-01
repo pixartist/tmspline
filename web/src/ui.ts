@@ -127,7 +127,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   separator();
   const palette = createBlockPalette(editor);
   const blocksButton = button("Blocks", "Place vanilla game blocks on the map grid or freely (B; Tab switches grid / free)", () => palette.toggle(blocksButton));
-  const snapButton = button("Snap", "Snap track points and free blocks to the grid (X); Ctrl while dragging ignores it", () => toggleSnap());
+  const snapButton = button("Snap", "Snap track points, their handles and free blocks to the grid (X); points snap to the heights of block roads (2 m above each level). Ctrl while dragging ignores it", () => toggleSnap());
   const snapSelect = document.createElement("select");
   snapSelect.title = "Grid step (vertical: the same, at most 8 m = one block level)";
   for (const step of SNAP_STEPS) snapSelect.append(new Option(step === 32 ? "32 m (cells)" : `${step} m`, String(step)));
