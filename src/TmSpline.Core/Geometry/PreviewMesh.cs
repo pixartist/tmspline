@@ -42,6 +42,9 @@ public static class PreviewMesh
             chunks.AddRange(WaypointBuilder.Build(track, rings, Vec3d.Zero, settings));
             if (PillarBuilder.Build(track, rings, segmentStarts, Vec3d.Zero, settings) is { } pillars)
                 chunks.Add(pillars);
+            // Stand-ins for the game's curve signs the export places.
+            if (SignBuilder.Preview(track, rings, segmentStarts, settings) is { } signs)
+                chunks.Add(signs);
         }
         var mesh = Merge(chunks);
 

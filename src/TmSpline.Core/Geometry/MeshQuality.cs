@@ -99,16 +99,21 @@ public static class MeshQualities
         return (rings, meshes);
     }
 
-    /// <summary>The placed pillars of all tracks as the game's obstacle pillar items.</summary>
+    /// <summary>The game's items the tracks place: obstacle pillars (placed pillars) and curve signs (segment signs).</summary>
     public static List<VanillaItem> GamePillars(TrackMap map, MeshQuality quality)
     {
         var items = new List<VanillaItem>();
         foreach (var track in map.Tracks)
         {
-            if (!track.Objects.Any(o => o.Kind == TrackObjectKind.Pillar)) continue;
+            track.SyncSegments();
+            var pillars = track.Objects.Any(o => o.Kind == TrackObjectKind.Pillar);
+            var signs = track.Segments.Any(s => s.Signs != RoadSignKind.None);
+            if (!pillars && !signs) continue;
             var rings = TrackSampler.Sample(track, Sampler(quality));
-            if (rings.Count >= 2)
-                items.AddRange(PillarBuilder.GameItems(track, rings, TrackSampler.SegmentStarts(track)));
+            if (rings.Count < 2) continue;
+            var starts = TrackSampler.SegmentStarts(track);
+            if (pillars) items.AddRange(PillarBuilder.GameItems(track, rings, starts));
+            if (signs) items.AddRange(SignBuilder.GameItems(track, rings, starts, new RoadMeshSettings()));
         }
         return items;
     }

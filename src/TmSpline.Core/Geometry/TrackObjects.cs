@@ -460,20 +460,30 @@ public static class PillarBuilder
             var ring = TrackObjects.RingAt(rings, distance);
             var (point, up) = TrackObjects.SurfacePoint(ring, across);
             var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
-            // R = Ry(yaw)·Rx(pitch)·Rz(roll): R·Z = forward gives yaw and pitch, then roll from where Y has to go.
-            var yaw = Math.Atan2(forward.X, forward.Z);
-            var pitch = -Math.Asin(Math.Clamp(forward.Y, -1, 1));
-            // w = Rx(-pitch)·Ry(-yaw)·up = Rz(roll)·Y = (-sin roll, cos roll, 0)
-            double cy = Math.Cos(yaw), sy = Math.Sin(yaw), cp = Math.Cos(pitch), sp = Math.Sin(pitch);
-            var t = new Vec3d(cy * up.X - sy * up.Z, up.Y, sy * up.X + cy * up.Z);
-            var w = new Vec3d(t.X, cp * t.Y + sp * t.Z, -sp * t.Y + cp * t.Z);
-            var roll = Math.Atan2(-w.X, w.Y);
-            const double deg = 180 / Math.PI;
+            var (yaw, pitch, roll) = UprightAngles(forward, up);
             yield return new VanillaItem
             {
-                Name = GameItemName(GameSize(o.Width)), Position = point, Yaw = yaw * deg, Pitch = pitch * deg, Roll = roll * deg, Color = o.Color,
+                Name = GameItemName(GameSize(o.Width)), Position = point, Yaw = yaw, Pitch = pitch, Roll = roll, Color = o.Color,
             };
         }
+    }
+
+    /// <summary>
+    /// An item's (yaw, pitch, roll) in degrees for the anchored-object convention, R = Ry(yaw)·Rx(pitch)·Rz(roll), so that
+    /// its local +Z points along `forward` and +Y along `up` (orthogonal unit vectors).
+    /// </summary>
+    public static (double Yaw, double Pitch, double Roll) UprightAngles(Vec3d forward, Vec3d up)
+    {
+        // R·Z = forward gives yaw and pitch, then roll from where Y has to go.
+        var yaw = Math.Atan2(forward.X, forward.Z);
+        var pitch = -Math.Asin(Math.Clamp(forward.Y, -1, 1));
+        // w = Rx(-pitch)·Ry(-yaw)·up = Rz(roll)·Y = (-sin roll, cos roll, 0)
+        double cy = Math.Cos(yaw), sy = Math.Sin(yaw), cp = Math.Cos(pitch), sp = Math.Sin(pitch);
+        var t = new Vec3d(cy * up.X - sy * up.Z, up.Y, sy * up.X + cy * up.Z);
+        var w = new Vec3d(t.X, cp * t.Y + sp * t.Z, -sp * t.Y + cp * t.Z);
+        var roll = Math.Atan2(-w.X, w.Y);
+        const double deg = 180 / Math.PI;
+        return (yaw * deg, pitch * deg, roll * deg);
     }
 
     /// <summary>Where a pillar stands: its center across the surface (kept inside the road) and whether it can be built.</summary>

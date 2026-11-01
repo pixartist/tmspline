@@ -6,8 +6,8 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 /** Scenery panel settings (kept while the page is open). */
 const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
 import {
-  appendPoint, BORDER_MATERIALS, BUMP_PATTERNS, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
+  appendPoint, BORDER_MATERIALS, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type Waypoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -436,7 +436,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   // Rebuild the DOM only when the selection changes; otherwise just refresh values so inputs keep focus.
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
-  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}`
+  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? t.points[s.index]?.borders : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}`;
@@ -591,6 +591,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "Real geometry the car feels; it fades in and out at the segment's ends and towards the edges. Detail is how "
         + "finely the surface is cut: about half the spacing looks smooth; smaller costs more triangles (see the export "
         + "size estimate).");
+    }
+    selectField(root, "Signs", ROAD_SIGNS, () => seg().signs, (v) => editor.edit((tr) => (tr.segments[s.index].signs = v as RoadSignKind)),
+      false, ROAD_SIGN_LABELS);
+    if (seg().signs !== "None") {
+      selectField(root, "Sign side", SIGN_SIDES, () => seg().signSide, (v) => editor.edit((tr) => (tr.segments[s.index].signSide = v as SignSide)));
+      rangeField(root, "Sign spacing m", 4, 64, 1, () => seg().signSpacing,
+        (v) => editor.edit((tr) => (tr.segments[s.index].signSpacing = Math.max(2, v)), false, `signSpacing:${s.index}`), 256);
+      hint(root, "The game's curve signs (chevrons) on top of the borders (at the road's edge without them), facing the "
+        + "oncoming cars; exported as the game's items, shown here as simple panels.");
     }
     checkbox(root, "Underside", () => seg().underside, (v) => editor.edit((tr) => (tr.segments[s.index].underside = v)));
     if (!seg().underside)

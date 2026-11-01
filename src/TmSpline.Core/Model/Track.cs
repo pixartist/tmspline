@@ -178,7 +178,20 @@ public sealed class TrackSegment
     public double BumpSize { get; set; } = 8;
     /// <summary>How finely the bumpy surface is cut, in meters between cross-sections and columns (smaller: more triangles).</summary>
     public double BumpDetail { get; set; } = 2;
+
+    /// <summary>The game's curve signs (chevrons) along this segment's borders; see SignBuilder.</summary>
+    public RoadSignKind Signs { get; set; }
+    public SignSide SignSide { get; set; } = SignSide.Both;
+    /// <summary>Meters between signs along the segment.</summary>
+    public double SignSpacing { get; set; } = 16;
+    /// <summary>The sign items' colour.</summary>
+    public ItemColor SignColor { get; set; }
 }
+
+/// <summary>The game's road sign items (curve chevrons), by item name.</summary>
+public enum RoadSignKind { None, RoadSign, RoadSignB, RoadSignC }
+
+public enum SignSide { Left, Right, Both }
 
 /// <summary>Bump patterns of a segment's driving surface.</summary>
 public enum BumpPattern
@@ -350,5 +363,6 @@ public sealed class Track
         Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
         Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
         Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail,
+        Signs = s.Signs, SignSide = s.SignSide, SignSpacing = s.SignSpacing, SignColor = s.SignColor,
     };
 }
