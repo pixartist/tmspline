@@ -539,11 +539,26 @@ public static class RoadMeshBuilder
     /// </summary>
     private static (double Height, double Thickness, double Inset) BorderSize(Ring ring, RoadMeshSettings s)
     {
-        var k = Math.Max(MinBorderScale, ring.BorderScale);
-        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly. It
-        // also fades out as the cross-section closes (full up to 270° of bend, none at 360°): a pipe's edges must meet.
-        var open = Math.Clamp((2 * Math.PI - Math.Abs(ring.Curve)) / (Math.PI / 2), 0, 1);
-        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(ring.BorderScale, 0, 1) * open);
+        // Where the cross-section closes (a road folding into a pipe), the two curbs face each other: they shrink with the
+        // gap between the road's edges, so they never run into each other or the far wall (and a pipe's edges meet).
+        var room = BorderRoom(ring, s);
+        var k = Math.Max(MinBorderScale, Math.Min(ring.BorderScale, room));
+        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly.
+        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(Math.Min(ring.BorderScale, room), 0, 1));
+    }
+
+    /// <summary>
+    /// How much of the curbs fits (0..1): 1 while the road's edges are at least two curb thicknesses (plus a metre) apart
+    /// or open away from each other (bends up to 180°), less as a closing cross-section brings them together.
+    /// </summary>
+    private static double BorderRoom(Ring ring, RoadMeshSettings s)
+    {
+        if (Math.Abs(ring.Curve) <= Math.PI) return 1;
+        var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
+        var half = ring.Width * 0.5;
+        var (a, b) = (arc.Point(half), arc.Point(-half));
+        var gap = Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+        return Math.Clamp(gap / (2 * s.BorderThickness + 1), 0, 1);
     }
 
     private const double MinBorderScale = 0.02;
