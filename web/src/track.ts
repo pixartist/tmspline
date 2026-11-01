@@ -68,10 +68,10 @@ export interface TrackPoint {
 
 export const DEFAULT_BORDER_HEIGHT = 0.8;
 /**
- * Road width of new tracks: the driving surface of the game's road blocks between the inner faces of their curbs
- * (RoadTech/Dirt/Bump: x 2.7..29.3 in their 32 m cell). Our borders sit outside the width, as theirs do.
+ * Road width of new tracks: where the road texture matches the game's road blocks exactly (26.25 m, checked in game by
+ * the user; their surface mesh spans 26.6 m, x 2.7..29.3, partly under the curbs). Our borders sit outside the width.
  */
-export const DEFAULT_ROAD_WIDTH = 26.6;
+export const DEFAULT_ROAD_WIDTH = 26.25;
 
 /** Named cross-section shapes for the inspector. */
 export const SHAPE_PRESETS: { label: string; curve: number; flat: number; sausage: number }[] = [

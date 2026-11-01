@@ -121,8 +121,8 @@ public sealed class TrackPoint
 
     public const double DefaultBorderHeight = 0.8;
 
-    /// <summary>Width of new roads: the driving surface of the game's road blocks between their curbs (x 2.7..29.3).</summary>
-    public const double DefaultWidth = 26.6;
+    /// <summary>Width of new roads: where the road texture matches the game's road blocks (user, checked in game).</summary>
+    public const double DefaultWidth = 26.25;
 
     public TrackPoint(Vec3d position, Vec3d handleOut, double bankDegrees = 0, double width = DefaultWidth)
     {
