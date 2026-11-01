@@ -190,12 +190,13 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       if (cliff && cliffFront.has(k)) { height.set(k, cliff.top); continue; }
       const d = dist.get(k) ?? Infinity, b = base.get(k) ?? 0;
       const step = Math.max(1, options.hillStep);
-      if (d <= options.gap + 1) height.set(k, b);
+      // The shoulder: gap flat cells beside the track, then the first slope.
+      if (d <= options.gap) height.set(k, b);
       else if (cliff && toCliff) {
         // Cells in front of the faces are 1 away; the top terrace is `step` cells deep, then 2 lower every `step`.
         const c = toCliff.get(k) ?? Infinity;
         height.set(k, Math.max(b, cliff.top - 2 * Math.floor((c - 1) / step)));
-      } else height.set(k, b + Math.min(2 * (Math.floor((d - options.gap - 2) / step) + 1), even2(options.hillRise)));
+      } else height.set(k, b + Math.min(2 * (Math.floor((d - options.gap - 1) / step) + 1), even2(options.hillRise)));
     }
   const h = (x: number, z: number) => height.get(key(x, z));
   const fixed = (k: string) => track.has(k) || cliffFront.has(k);
