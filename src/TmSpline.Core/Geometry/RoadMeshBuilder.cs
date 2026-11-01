@@ -221,8 +221,6 @@ public static class RoadMeshBuilder
 
         var segmentRanges = SegmentRanges(rings);
         var ringColumns = RingColumns(track, rings, settings);
-        var sausage = Enumerable.Range(0, track.SegmentCount)
-            .Select(s => Math.Max(track.SegmentStart(s).Sausage, track.SegmentEnd(s).Sausage) >= Surfaces.SausageTextureFrom).ToArray();
         var bands = BuildBands();
         // Small integer ids for edge keys make the per-chunk vertex cache cheap to hash.
         var keyIds = LightmapBands.Select((b, i) => (b.Key, i)).ToDictionary(x => x.Key, x => x.i);
@@ -246,21 +244,24 @@ public static class RoadMeshBuilder
             var vertexCache = new Dictionary<long, int>();
             var chunkStart = rings[start].Distance;
             var chunkLength = Math.Max(1e-6, rings[end].Distance - chunkStart);
-            // Ends of the road at gaps: (ring, segment, facing forward).
-            var caps = new List<(int Ring, TrackSegment Segment, bool Forward)>();
+            // Ends of the road at gaps: (ring, segment, facing forward, only the curbs' end faces: where borders start or
+            // end, grown down to a sliver).
+            var caps = new List<(int Ring, TrackSegment Segment, bool Forward, bool CurbsOnly)>();
 
             for (var k = start; k < end; k++)
             {
                 if (inGap[k])
                     continue;
                 var segment = track.Segments[rings[k].Segment];
-                if (GapBefore(k)) caps.Add((k, segment, false));
-                if (GapAfter(k)) caps.Add((k + 1, segment, true));
+                if (GapBefore(k)) caps.Add((k, segment, false, false));
+                else if (segment.Borders && rings[k].BorderScale <= 0) caps.Add((k, segment, false, true));
+                if (GapAfter(k)) caps.Add((k + 1, segment, true, false));
+                else if (segment.Borders && rings[k + 1].BorderScale <= 0) caps.Add((k + 1, segment, true, true));
                 var range = segmentRanges[rings[k].Segment];
                 // Both rings of the interval use the interval's segment, so per-segment shape changes (borders) never
                 // tear a strip mid-interval; with the same segment both profiles list the same edges in the same order.
-                var edges = Profile(rings[k], segment, sausage[rings[k].Segment], range, ringColumns[k], settings).ToArray();
-                var edgesNext = Profile(rings[k + 1], segment, sausage[rings[k].Segment], range, ringColumns[k + 1], settings).ToArray();
+                var edges = Profile(rings[k], segment, range, ringColumns[k], settings).ToArray();
+                var edgesNext = Profile(rings[k + 1], segment, range, ringColumns[k + 1], settings).ToArray();
                 for (var e = 0; e < edges.Length; e++)
                 {
                     var edge = edges[e];
@@ -315,7 +316,7 @@ public static class RoadMeshBuilder
                 var band = bands["cap"];
                 var slice = (band.U1 - band.U0) / caps.Count;
                 AddCap(chunk, rings[caps[i].Ring], caps[i].Segment, caps[i].Forward, ringColumns[caps[i].Ring], itemOrigin,
-                    (band.U0 + slice * i, band.U0 + slice * (i + 1)), settings);
+                    (band.U0 + slice * i, band.U0 + slice * (i + 1)), settings, caps[i].CurbsOnly);
             }
             chunks.Add(chunk);
         }
@@ -359,10 +360,11 @@ public static class RoadMeshBuilder
 
     /// <summary>
     /// Closes the road slab where it ends at a gap: the strip between driving surface and underside, plus the curbs'
-    /// cross-sections, all in the plane of the ring and facing out of the road.
+    /// cross-sections, all in the plane of the ring and facing out of the road. With <paramref name="curbsOnly"/> just the
+    /// curbs' cross-sections (where borders start or end on running road).
     /// </summary>
     private static void AddCap(MeshChunk chunk, Ring ring, TrackSegment segment, bool forward, int topColumns, Vec3d itemOrigin,
-        (double U0, double U1) band, RoadMeshSettings s)
+        (double U0, double U1) band, RoadMeshSettings s, bool curbsOnly = false)
     {
         var half = ring.Width * 0.5;
         var h = s.Thickness;
@@ -370,7 +372,7 @@ public static class RoadMeshBuilder
         var bottom = SurfaceArc.For(ring, -half, half, -h, -1, s);
         var points = new List<(double X, double Y)>();
         var triangles = new List<(int, int, int)>();
-        for (var c = 0; c <= topColumns; c++)
+        for (var c = 0; c <= topColumns && !curbsOnly; c++)
         {
             var across = top.At((double)c / topColumns);
             points.Add(top.Point(across));
@@ -386,7 +388,7 @@ public static class RoadMeshBuilder
         {
             // Cross-sections of the curbs (as built in Profile): convex pentagons round the surface's end.
             var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
-            var (bh, bt) = (ring.BorderHeight, s.BorderThickness);
+            var (bh, bt) = BorderSize(ring, s);
             foreach (var sign in new[] { 1, -1 })
             {
                 var (e, t, n) = (arc.Point(sign * half), arc.Tangent(sign * half), arc.Normal(sign * half));
@@ -513,11 +515,23 @@ public static class RoadMeshBuilder
         return (x, y, nx, ny, tx, ty, arc.K);
     }
 
-    private static IEnumerable<Edge> Profile(Ring ring, TrackSegment segment, bool sausage, (double Start, double End, double Width) range, int topColumns, RoadMeshSettings s)
+    /// <summary>
+    /// Height and thickness of the curbs at a ring: where borders start or end they grow out of the road's edge (see
+    /// Ring.BorderScale), from a sliver (not zero: no degenerate triangles) to full size.
+    /// </summary>
+    private static (double Height, double Thickness) BorderSize(Ring ring, RoadMeshSettings s)
+    {
+        var k = Math.Max(MinBorderScale, ring.BorderScale);
+        return (ring.BorderHeight * k, s.BorderThickness * k);
+    }
+
+    private const double MinBorderScale = 0.02;
+
+    private static IEnumerable<Edge> Profile(Ring ring, TrackSegment segment, (double Start, double End, double Width) range, int topColumns, RoadMeshSettings s)
     {
         var half = ring.Width * 0.5;
         var h = s.Thickness;
-        var road = Surfaces.Road(segment.Surface, segment.Effect, sausage);
+        var road = Surfaces.Road(segment.Surface, segment.Effect);
         // The driving surface goes right to left; its normal is explicit (see SurfaceArc).
         Edge Surface(string key, double lift, double sign, TmMaterial material, double s0, double s1) =>
             new(key, 0, 0, 0, 0, topColumns, material) { Arc = SurfaceArc.For(ring, s0, s1, lift, sign, s) };
@@ -548,8 +562,7 @@ public static class RoadMeshBuilder
         if (segment.Borders)
         {
             var border = Surfaces.BorderOf(segment.BorderMaterial);
-            var bh = ring.BorderHeight;
-            var bt = s.BorderThickness;
+            var (bh, bt) = BorderSize(ring, s);
             // Right end: outward = +tangent. Left end: outward = -tangent.
             yield return Line("rb_out", At(er, tr, bt, nr, -h), At(er, tr, bt, nr, bh), border);
             yield return Line("rb_top", At(er, tr, bt, nr, bh), At(er, tr, 0, nr, bh), border);

@@ -73,6 +73,7 @@ public static class TrackObjects
         r.Flat = a.Flat + (b.Flat - a.Flat) * t;
         r.Sausage = a.Sausage + (b.Sausage - a.Sausage) * t;
         r.BorderHeight = a.BorderHeight + (b.BorderHeight - a.BorderHeight) * t;
+        r.BorderScale = a.BorderScale + (b.BorderScale - a.BorderScale) * t;
         r.IsVertex = false;
         return r;
     }

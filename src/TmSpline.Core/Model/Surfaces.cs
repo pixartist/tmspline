@@ -73,26 +73,16 @@ public static class Surfaces
     };
 
     /// <summary>
-    /// Tech road on a sausage cross-section: the native sausage road's texture (RoadBump, per the texture mod list on
-    /// doc.trackmania.com) with Tech road physics.
+    /// The driving surface material, with the segment's gameplay effect if the surface supports one. The sausage road
+    /// is its own surface (RoadBump), picked like the others, whatever the cross-section.
     /// </summary>
-    private static readonly TmMaterial TechSausage = new("RoadTech_Sausage", "RoadBump", "Asphalt");
-
-    /// <summary>Segments whose cross-section is at least this much sausage get the sausage road texture (Tech road only).</summary>
-    public const double SausageTextureFrom = 0.1;
-
-    /// <summary>
-    /// The driving surface material, with the segment's gameplay effect if the surface supports one. Tech road on a
-    /// sausage cross-section (<paramref name="sausage"/>) uses the sausage road texture.
-    /// </summary>
-    public static TmMaterial Road(Surface surface, Effect effect, bool sausage = false)
+    public static TmMaterial Road(Surface surface, Effect effect)
     {
-        var road = sausage && surface == Surface.RoadTech ? TechSausage : Road(surface);
+        var road = Road(surface);
         if (effect == Effect.None || !EffectLinks.Contains(road.Link))
             return road;
-        // The editor reads "surface_effect" from the name; the sausage tag goes last.
-        var name = road == TechSausage ? $"RoadTech_{effect}_Sausage" : $"{road.Name}_{effect}";
-        return road with { Name = name, GameplayId = GameplayId(effect) };
+        // The editor reads "surface_effect" from the name.
+        return road with { Name = $"{road.Name}_{effect}", GameplayId = GameplayId(effect) };
     }
 
     /// <summary>

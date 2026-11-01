@@ -15,6 +15,7 @@ if (args[0] == "--pivot") { foreach (var f in args.Skip(1)) Pivot.Run(f); return
 if (args[0] == "--item") { ItemShape.Run(args[1]); return; }
 if (args[0] == "--chunks") { ChunkInfo.Run(args[1]); return; }
 if (args[0] == "--reflect") { Reflect.Run(args[1]); return; }
+if (args[0] == "--icon") { foreach (var f in args.Skip(1)) Reflect.Icon(f); return; }
 if (args[0] == "--mobils") { foreach (var f in args.Skip(1)) Reflect.Mobils(f); return; }
 if (args[0] == "--clip") { foreach (var f in args.Skip(1)) Reflect.Clip(f); return; }
 if (args[0] == "--template") { Template.Run(args[1], args[2]); return; }

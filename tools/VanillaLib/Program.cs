@@ -107,7 +107,7 @@ Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = Environme
                 if (info.IconWebP is { Length: > 0 } webp)
                 {
                     icon = $"icon/{name}.webp";
-                    File.WriteAllBytes(Path.Combine(outDir, icon), webp);
+                    File.WriteAllBytes(Path.Combine(outDir, icon), FlipIcon(webp));
                 }
                 blocks[name] = new BlockInfo(Path.GetRelativePath(blockDir, Path.GetDirectoryName(file)!).Replace('\\', '/'), ground, air,
                     icon, info.PageName ?? "", info.CatalogPosition, info.IsPillar,
@@ -202,6 +202,25 @@ File.WriteAllLines(Path.Combine(pluginStorage, "missing.txt"),
     missingFiles.Keys.Select(f => Path.GetRelativePath(extract, f).Replace('\\', '/')).Order());
 Console.WriteLine($"  {missingFiles.Count} referenced files are missing (missing-files.txt)");
 foreach (var (type, n) in skipped.OrderByDescending(x => x.Value).Take(15)) Console.WriteLine($"  skipped: {n} x {type}");
+
+/// <summary>
+/// The game stores catalog icons bottom-up (like its raw icons): upright, checkpoint gates hung below the road and walls
+/// seen from underneath. Flipped vertically; the original bytes if the image cannot be decoded.
+/// </summary>
+static byte[] FlipIcon(byte[] webp)
+{
+    using var source = SkiaSharp.SKBitmap.Decode(webp);
+    if (source is null) return webp;
+    using var flipped = new SkiaSharp.SKBitmap(source.Info);
+    using (var canvas = new SkiaSharp.SKCanvas(flipped))
+    {
+        canvas.Clear(SkiaSharp.SKColors.Transparent);
+        canvas.Scale(1, -1, 0, source.Height / 2f);
+        canvas.DrawBitmap(source, 0, 0);
+    }
+    using var data = flipped.Encode(SkiaSharp.SKEncodedImageFormat.Webp, 90);
+    return data?.ToArray() ?? webp;
+}
 
 VariantInfo? Variant(CGameCtnBlockInfoVariant? variant, string file, int level, bool ground)
 {

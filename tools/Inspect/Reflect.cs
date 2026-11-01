@@ -56,6 +56,26 @@ static class Reflect
             }
     }
 
+    /// <summary>The icon of a block or item: its chunk's fields and the collector's icon properties.</summary>
+    public static void Icon(string file)
+    {
+        var node = Gbx.Parse(file).Node!;
+        Console.Write($"{Path.GetFileName(file).Split('.')[0]}:");
+        foreach (var p in node.GetType().GetProperties().Where(p => p.Name.Contains("Icon") && p.GetIndexParameters().Length == 0))
+        {
+            var v = p.GetValue(node);
+            Console.Write($" {p.Name}={(v is byte[] b ? $"{b.Length} bytes" : v)}");
+        }
+        foreach (var c in node.Chunks.Where(c => c.Id == 0x2E001004))
+            foreach (var f in c.GetType().GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .Cast<System.Reflection.MemberInfo>().Concat(c.GetType().GetProperties()))
+            {
+                var v = f is System.Reflection.FieldInfo fi ? fi.GetValue(c) : ((System.Reflection.PropertyInfo)f).GetValue(c);
+                if (v is not byte[]) Console.Write($" chunk.{f.Name}={v}");
+            }
+        Console.WriteLine();
+    }
+
     /// <summary>A clip's type, groups and its variants' mobil counts.</summary>
     public static void Clip(string file)
     {

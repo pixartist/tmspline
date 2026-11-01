@@ -153,8 +153,9 @@ public static class WaypointBuilder
         var curvature = RoadMeshBuilder.SurfaceSample(ring, half).Curvature;
         var clearance = curvature > 1e-6 ? Math.Min(ClearanceAbove, 0.6 / curvature) : ClearanceAbove;
         var borders = segment.Borders;
-        var baseLift = borders ? ring.BorderHeight : 0;
-        var outward = borders ? settings.BorderThickness / 2 : -BeamWidth / 2;
+        // On the border, also where it is still growing (see Ring.BorderScale).
+        var baseLift = borders ? ring.BorderHeight * ring.BorderScale : 0;
+        var outward = borders ? settings.BorderThickness * ring.BorderScale / 2 : -BeamWidth / 2;
 
         points.Add(Offset(half, baseLift, outward));             // right post foot, on the border
         for (var i = 0; i <= ArchSegments; i++)                   // arch over the road, right to left

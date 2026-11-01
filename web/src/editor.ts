@@ -1851,7 +1851,7 @@ export class Editor {
       // Parts the game's item color tints take their color from the vertices (see segmentTints).
       const tinted = isTinted(surface);
       // With the local block library: the game's texture of the item's material (see GAME_MATERIALS), tinted for effects.
-      const texture = this.library?.textureOf(GAME_MATERIALS[name.endsWith("_Sausage") ? "RoadBump" : surface] ?? "");
+      const texture = this.library?.textureOf(GAME_MATERIALS[surface] ?? "");
       const road = new THREE.MeshStandardMaterial({ color: tinted ? 0xffffff : color, vertexColors: tinted, roughness: 0.85, side: THREE.DoubleSide });
       if (texture) {
         road.map = this.library!.textureImage(texture);

@@ -25,6 +25,11 @@ public sealed class Ring
     public double Sausage;
     /// <summary>Border height at this ring in meters.</summary>
     public double BorderHeight;
+    /// <summary>
+    /// How far the borders have grown here (0..1): they rise out of the road's edge where they start and sink back where
+    /// they end (see <see cref="SamplerSettings.BorderRampLength"/>), so they never end in an open cross-section.
+    /// </summary>
+    public double BorderScale = 1;
     /// <summary>True if this ring lies exactly on a spline vertex.</summary>
     public bool IsVertex;
     /// <summary>Arc-length fraction of this ring within its segment (0..1).</summary>
@@ -50,6 +55,8 @@ public sealed class SamplerSettings
     public double MaxShareStep { get; set; } = 0.1;
     /// <summary>Maximum change of the border height between rings, in meters.</summary>
     public double MaxBorderStep { get; set; } = 0.25;
+    /// <summary>Length over which borders grow from nothing where they start (and shrink where they end), in meters.</summary>
+    public double BorderRampLength { get; set; } = 12.0;
 }
 
 public static class TrackSampler
@@ -69,6 +76,9 @@ public static class TrackSampler
         var starts = Starts(tables);
         // Gaps need rings exactly at their ends, so the road stops and starts where the mapper put them.
         var cuts = TrackObjects.GapRanges(track, starts).SelectMany(g => new[] { g.Start, g.End }).ToList();
+        // Border ramps need rings along them, or they would be one long wedge.
+        var ramps = BorderRuns(track, starts, settings);
+        cuts.AddRange(ramps.SelectMany(r => r.RingDistances(starts[^1], track.Closed)));
 
         var rings = new List<Ring>();
         var distance = 0.0;
@@ -91,7 +101,77 @@ public static class TrackSampler
         }
 
         ComputeFrames(track, rings);
+        foreach (var ring in rings)
+            ring.BorderScale = ramps.Select(r => r.ScaleAt(ring.Distance, starts[^1], track.Closed)).DefaultIfEmpty(1).Min();
         return rings;
+    }
+
+    /// <summary>
+    /// A stretch of consecutive segments with borders. Where it starts after (or ends before) a segment without borders, the
+    /// borders grow (shrink) over <see cref="Ramp"/> meters; at an open track's own start or end they stay full height.
+    /// </summary>
+    private sealed record BorderRun(double From, double Length, bool RampStart, bool RampEnd, double Ramp)
+    {
+        private const int Steps = 6;
+
+        /// <summary>Position in the run (0..Length), or null outside it; on closed tracks runs wrap round.</summary>
+        private double? Along(double d, double total, bool closed)
+        {
+            var rel = d - From;
+            if (closed) rel = ((rel % total) + total) % total;
+            return rel >= -1e-6 && rel <= Length + 1e-6 ? rel : null;
+        }
+
+        public double ScaleAt(double d, double total, bool closed)
+        {
+            if (Along(d, total, closed) is not { } rel) return 1;
+            var f = 1.0;
+            if (RampStart) f = Math.Min(f, SmoothStep(Math.Clamp(rel / Ramp, 0, 1)));
+            if (RampEnd) f = Math.Min(f, SmoothStep(Math.Clamp((Length - rel) / Ramp, 0, 1)));
+            return f;
+        }
+
+        public IEnumerable<double> RingDistances(double total, bool closed)
+        {
+            double Wrap(double d) => closed ? ((d % total) + total) % total : d;
+            for (var i = 1; i <= Steps; i++)
+            {
+                if (RampStart) yield return Wrap(From + Ramp * i / Steps);
+                if (RampEnd) yield return Wrap(From + Length - Ramp * i / Steps);
+            }
+        }
+    }
+
+    /// <summary>The stretches of the track with borders (see <see cref="BorderRun"/>).</summary>
+    private static List<BorderRun> BorderRuns(Track track, double[] starts, SamplerSettings settings)
+    {
+        var n = track.SegmentCount;
+        var runs = new List<BorderRun>();
+        bool Borders(int s) => track.Segments[((s % n) + n) % n].Borders;
+        // All with or all without borders: nothing starts or ends.
+        var without = Enumerable.Range(0, n).Where(s => !Borders(s)).ToList();
+        if (without.Count == 0 || without.Count == n) return runs;
+        // Closed tracks: scan from just after a segment without borders, so no run is split at the seam.
+        var first = track.Closed ? without[0] + 1 : 0;
+        for (var i = 0; i < n; )
+        {
+            if (!Borders(first + i)) { i++; continue; }
+            var j = i;
+            while (j < n && Borders(first + j)) j++;
+            var length = 0.0;
+            for (var k = i; k < j; k++)
+            {
+                var seg = (first + k) % n;
+                length += starts[seg + 1] - starts[seg];
+            }
+            var (a, b) = ((first + i) % n, (first + j - 1) % n);
+            var rampStart = track.Closed || a > 0;
+            var rampEnd = track.Closed || b < n - 1;
+            var ramp = Math.Min(settings.BorderRampLength, rampStart && rampEnd ? length / 2 : length);
+            if (ramp > 1e-6) runs.Add(new BorderRun(starts[a], length, rampStart, rampEnd, ramp));
+            i = j;
+        }
+        return runs;
     }
 
     /// <summary>Distance from the track start to the start of each segment; the last entry is the total length.</summary>
