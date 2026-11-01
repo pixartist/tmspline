@@ -485,9 +485,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
     }
     numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => (scenery.cliffs = int(v, 0, 24)), 1);
-    if (scenery.cliffs > 0)
-      selectField(root, "Cliff type", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => (scenery.theme = v), false,
-        Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
+    // The theme sets the land's surface and the cliffs, and picks its forest (which can still be changed).
+    selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => {
+      scenery.theme = v;
+      scenery.forest = SCENERY_THEMES.find((th) => th.id === v)?.forest ?? scenery.forest;
+    }, false, Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
     selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => (scenery.forest = v), false,
       { none: "None", ...Object.fromEntries(FORESTS.map((f) => [f.id, f.label])) });
     if (scenery.forest !== "none")

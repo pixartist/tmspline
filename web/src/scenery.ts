@@ -12,15 +12,19 @@ import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
  * columns are the wall, the others the space its face leans into (towards the track).
  */
 
-export interface SceneryTheme { id: string; label: string; prefix: string }
+/**
+ * A scenery theme: its cliff pieces (prefix), the land's surface (the infix of the hill and platform pieces: "" grass,
+ * "Dirt", "Ice") and the forest that suits it (FORESTS id).
+ */
+export interface SceneryTheme { id: string; label: string; prefix: string; land: "" | "Dirt" | "Ice"; forest: string }
 
 export const SCENERY_THEMES: SceneryTheme[] = [
-  { id: "cliff8", label: "Cliffs (64 m)", prefix: "DecoCliff8NoHill" },
-  { id: "cliff8dirt", label: "Cliffs, dirt (64 m)", prefix: "DecoCliff8DirtNoHill" },
-  { id: "cliff8ice", label: "Cliffs, ice (64 m)", prefix: "DecoCliff8IceNoHill" },
-  { id: "cliff10", label: "Cliffs (80 m)", prefix: "DecoCliff10" },
-  { id: "cliff10dirt", label: "Cliffs, dirt (80 m)", prefix: "DecoCliff10Dirt" },
-  { id: "cliff10ice", label: "Cliffs, ice (80 m)", prefix: "DecoCliff10Ice" },
+  { id: "cliff8", label: "Grass, cliffs 64 m", prefix: "DecoCliff8NoHill", land: "", forest: "spring" },
+  { id: "cliff8dirt", label: "Dirt, cliffs 64 m", prefix: "DecoCliff8DirtNoHill", land: "Dirt", forest: "cacti" },
+  { id: "cliff8ice", label: "Ice, cliffs 64 m", prefix: "DecoCliff8IceNoHill", land: "Ice", forest: "firsnow" },
+  { id: "cliff10", label: "Grass, cliffs 80 m", prefix: "DecoCliff10", land: "", forest: "spring" },
+  { id: "cliff10dirt", label: "Dirt, cliffs 80 m", prefix: "DecoCliff10Dirt", land: "Dirt", forest: "cacti" },
+  { id: "cliff10ice", label: "Ice, cliffs 80 m", prefix: "DecoCliff10Ice", land: "Ice", forest: "firsnow" },
 ];
 
 export interface SceneryInput {
@@ -130,6 +134,8 @@ export const FORESTS: { id: string; label: string; trees: string[] }[] = [
   { id: "firsnow", label: "Snowy firs", trees: ["FirSnowMedium", "FirSnowTall"] },
   { id: "palm", label: "Palms", trees: ["PalmTreeSmall", "PalmTreeMedium"] },
   { id: "frozen", label: "Frozen trees", trees: ["FrozenTreeVerySmall", "FrozenTreeSmall", "FrozenTreeMedium", "FrozenTreeBig", "FrozenTreeTall"] },
+  // Names from the game's files (Static\Vegetation\Cactus..E); not yet checked in game.
+  { id: "cacti", label: "Cacti", trees: ["Cactus", "CactusB", "CactusC", "CactusD", "CactusE"] },
   { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
 ];
 
@@ -239,10 +245,12 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
   const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
   // Slopes by the height they climb: DecoHill for 2 levels, the deco platform's own for 1 (as modelled: straight up to
   // +Z, the inner corner high but at (-X, +Z), the outer corner high only there).
-  const flat = "DecoPlatformBase";
+  // The theme's surface: grass, dirt or ice versions of the same pieces (DecoHillDirt..., DecoPlatformDirt...).
+  const s = options.theme.land;
+  const flat = `DecoPlatform${s}Base`;
   const slopes: Record<number, { straight: string; inner: string; outer: string }> = {
-    2: { straight: "DecoHillSlope2Straight", inner: "DecoHillSlope2Curve1In", outer: "DecoHillSlope2Curve1Out" },
-    1: { straight: "DecoPlatformSlopeBase", inner: "DecoPlatformSlopeBaseCurve1InFull", outer: "DecoPlatformSlopeBaseCurve1OutFull" },
+    2: { straight: `DecoHill${s}Slope2Straight`, inner: `DecoHill${s}Slope2Curve1In`, outer: `DecoHill${s}Slope2Curve1Out` },
+    1: { straight: `DecoPlatform${s}SlopeBase`, inner: `DecoPlatform${s}SlopeBaseCurve1InFull`, outer: `DecoPlatform${s}SlopeBaseCurve1OutFull` },
   };
   if ([flat, ...Object.values(slopes).flatMap((s) => Object.values(s))].some((n) => !lib.has(n))) return null;
   const id = options.theme.id;
