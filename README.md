@@ -76,7 +76,7 @@ Controls:
 - **Snap** (`X`, step next to the button: 32 … 1 m) snaps track points (not their handles) and free blocks to the grid,
   vertically to the same step up to 8 m (one block level). `Ctrl` while dragging ignores it.
 - `W`/`S` fly along the view, `A`/`D` sideways, `Space`/`Shift` up/down (speed follows the distance to the road);
-  the scroll wheel zooms towards the cursor; `N` add point, `T` new track, `I` insert mode (click the road to insert a point there, with preview), `Del` delete point, `M` smooth selection (`Shift+M` or **Smooth** button: whole track; strength slider next to the button), `G` axis gizmo, `F` frame, `Ctrl+Z`/`Ctrl+Y` undo/redo.
+  the scroll wheel zooms towards the cursor; `N` add point, `T` new track, `I` insert mode (click the road to insert a point there, with preview), `Del` delete point, `M` smooth selection (`Shift+M` or **Smooth** button: whole track; strength slider next to the button), `G` axis gizmo (points, handles and the selected blocks; grid blocks by cells and levels), `F` frame, `Ctrl+Z`/`Ctrl+Y` undo/redo.
 - The same overview is in the collapsible **Controls** box in the editor's bottom-right corner.
 The track autosaves in the browser (`?session=name` in the URL keeps a separate track; if another tab saves the same track, autosave pauses and asks which version to keep). **Save** downloads a `.track.json`.
 

@@ -61,6 +61,9 @@ const emptyView = (): TrackView => ({
 
 type MoveMode = "screen" | "horizontal" | "vertical";
 
+/** A block being moved (mouse drag or axis gizmo) as it was when the move started; position only for free blocks. */
+interface MovedBlock { index: number; x: number; y: number; z: number; position?: Vec3 }
+
 interface Drag {
   pick: Pick;
   pointerId: number;
@@ -74,7 +77,7 @@ interface Drag {
   /** Move drags: grabbed position minus the plane hit, so the object does not jump to the cursor. */
   offset: THREE.Vector3;
   /** Block drags: where the drag plane was first hit, and the moved blocks (the selected ones) as they were then. */
-  blockStart?: { hit: THREE.Vector3; blocks: { index: number; x: number; z: number; position?: Vec3 }[] };
+  blockStart?: { hit: THREE.Vector3; blocks: MovedBlock[] };
   /** Bank drags: last ring-plane direction and the unsnapped bank. */
   lastDir?: THREE.Vector3;
   rawBank?: number;
@@ -195,6 +198,10 @@ export class Editor {
   readonly orbit: OrbitControls;
   private readonly scene = new THREE.Scene();
   private readonly axisGizmo: TransformControls;
+  /** What the axis gizmo moves when blocks are selected: sits on the first selected block's bottom centre. */
+  private readonly blockAnchor = new THREE.Object3D();
+  /** Axis gizmo moves of blocks: the anchor and the selected blocks when the move started. */
+  private gizmoBlocks: { anchor: THREE.Vector3; blocks: MovedBlock[] } | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly ground: THREE.Mesh;
   private readonly label: HTMLDivElement;
@@ -308,7 +315,13 @@ export class Editor {
     this.axisGizmo.addEventListener("dragging-changed", (e) => {
       this.orbit.enabled = !e.value;
       if (e.value) this.onBeforeEdit(structuredClone(this.map));
+      this.gizmoBlocks = e.value && this.axisGizmo.object === this.blockAnchor
+        ? { anchor: this.blockAnchor.position.clone(), blocks: this.movedBlocks(this.selectedBlocks()) }
+        : null;
+      if (!e.value) this.placeBlockAnchor();
     });
+    this.blockAnchor.userData = { kind: "blockAnchor" };
+    this.scene.add(this.blockAnchor);
     this.axisGizmo.addEventListener("objectChange", () => this.onAxisGizmoMoved());
     this.scene.add(this.axisGizmo.getHelper());
 
@@ -708,6 +721,7 @@ export class Editor {
     this.blocks.setNeighbours([...this.map.blocks, ...pillars]);
     this.blocks.sync(this.map.blocks, new Set(this.selectedBlocks()), h?.kind === "block" ? h.index : null);
     this.blocks.syncPillars(pillars);
+    this.placeBlockAnchor();
     this.items.sync(this.map.items);
   }
 
@@ -1126,7 +1140,9 @@ export class Editor {
     const target = !this.axisGizmoEnabled ? undefined
       : s?.kind === "point" ? this.pointMeshes[s.index]
       : s?.kind === "handle" ? this.handleMeshes.find((m) => m.userData.which === s.which)
+      : this.selectedBlocks().length > 0 ? this.blockAnchor
       : undefined;
+    this.placeBlockAnchor();
     if (target) this.axisGizmo.attach(target);
     else this.axisGizmo.detach();
   }
@@ -1621,10 +1637,7 @@ export class Editor {
       const indices = this.selectedBlocks().includes(drag.pick.index) ? this.selectedBlocks() : [drag.pick.index];
       drag.blockStart = hit ? {
         hit,
-        blocks: indices.map((index) => {
-          const b = this.map.blocks[index];
-          return { index, x: b.x, z: b.z, position: b.free && b.position ? [...b.position] as Vec3 : undefined };
-        }),
+        blocks: this.movedBlocks(indices),
       } : undefined;
       return;
     }
@@ -1726,52 +1739,82 @@ export class Editor {
     const start = drag.blockStart;
     const hit = this.rayFrom(e).ray.intersectPlane(drag.plane, new THREE.Vector3());
     if (!start || !hit || hit.distanceTo(this.camera.position) > 6000) return;
-    const moving = start.blocks.filter((m) => this.map.blocks[m.index]);
-    const grabbed = moving.find((m) => m.index === drag.pick.index);
-    if (!grabbed) return;
-    let dx = hit.x - start.hit.x, dz = hit.z - start.hit.z;
+    const { dx, dz, count, cells } = this.moveBlocks(start.blocks, drag.pick.index, hit.x - start.hit.x, 0, hit.z - start.hit.z,
+      !e.ctrlKey && this.snapStep > 0);
+    const b = this.map.blocks[drag.pick.index];
+    if (!b) return;
+    const where = b.free && b.position
+      ? `${b.position[0].toFixed(1)}, ${b.position[1].toFixed(1)}, ${b.position[2].toFixed(1)} m`
+      : `cell ${b.x}, ${b.z} · level ${b.y}`;
+    this.showLabel(e, count > 1 ? `${count} blocks · moved ${dx.toFixed(cells ? 0 : 1)}, ${dz.toFixed(cells ? 0 : 1)} m` : `${b.name} · ${where}`);
+    this.syncBlocks();
+    this.onChange();
+  }
+
+  /** The given blocks as they are now, to move them from there. */
+  private movedBlocks(indices: number[]): MovedBlock[] {
+    return indices.filter((i) => this.map.blocks[i]).map((index) => {
+      const b = this.map.blocks[index];
+      return { index, x: b.x, y: b.y, z: b.z, position: b.free && b.position ? [...b.position] as Vec3 : undefined };
+    });
+  }
+
+  /**
+   * Moves blocks from where they were (`moving`) by a step in meters. With only free blocks the step is free (`snap`:
+   * the reference block's origin lands on the grid); as soon as a grid block moves, everything moves by whole cells
+   * and levels. The step is limited so that no block leaves the map or goes below the ground. Returns the step taken.
+   */
+  private moveBlocks(moving: MovedBlock[], ref: number, dx: number, dy: number, dz: number, snap: boolean):
+    { dx: number; dy: number; dz: number; count: number; cells: boolean } {
+    moving = moving.filter((m) => this.map.blocks[m.index]);
     const cells = moving.some((m) => !m.position);
     if (cells) {
-      dx = Math.round(dx / BLOCK_CELL) * BLOCK_CELL;
-      dz = Math.round(dz / BLOCK_CELL) * BLOCK_CELL;
-    } else if (!e.ctrlKey && this.snapStep > 0) {
-      const p = grabbed.position!;
-      const moved = this.snapped(new THREE.Vector3(p[0] + dx, p[1], p[2] + dz));
-      dx = moved.x - p[0];
-      dz = moved.z - p[2];
+      [dx, dy, dz] = [Math.round(dx / BLOCK_CELL) * BLOCK_CELL, Math.round(dy / BLOCK_LEVEL) * BLOCK_LEVEL, Math.round(dz / BLOCK_CELL) * BLOCK_CELL];
+    } else if (snap) {
+      const p = (moving.find((m) => m.index === ref) ?? moving[0])?.position;
+      if (p) {
+        const moved = this.snapped(new THREE.Vector3(p[0] + dx, p[1] + dy, p[2] + dz));
+        [dx, dy, dz] = [moved.x - p[0], dy === 0 ? 0 : moved.y - p[1], moved.z - p[2]];
+      }
     }
     // The largest step (towards the cursor) that keeps every block inside the map.
-    const half = MAP_HALF_EXTENT;
-    let [minX, maxX, minZ, maxZ] = [-Infinity, Infinity, -Infinity, Infinity];
+    const half = MAP_HALF_EXTENT, top = MAX_BLOCK_LEVEL * BLOCK_LEVEL;
+    let [minX, maxX, minY, maxY, minZ, maxZ] = [-Infinity, Infinity, -Infinity, Infinity, -Infinity, Infinity];
     for (const m of moving) {
-      const b = this.map.blocks[m.index];
       if (m.position) {
         [minX, maxX] = [Math.max(minX, -half - m.position[0]), Math.min(maxX, half - m.position[0])];
+        [minY, maxY] = [Math.max(minY, Y_MIN - m.position[1]), Math.min(maxY, top - m.position[1])];
         [minZ, maxZ] = [Math.max(minZ, -half - m.position[2]), Math.min(maxZ, half - m.position[2])];
       } else {
-        const [fx, , fz] = this.blockFootprint(b);
+        const [fx, , fz] = this.blockFootprint(this.map.blocks[m.index]);
         [minX, maxX] = [Math.max(minX, -half - m.x * BLOCK_CELL), Math.min(maxX, half - (m.x + fx) * BLOCK_CELL)];
+        [minY, maxY] = [Math.max(minY, -m.y * BLOCK_LEVEL), Math.min(maxY, top - m.y * BLOCK_LEVEL)];
         [minZ, maxZ] = [Math.max(minZ, -half - m.z * BLOCK_CELL), Math.min(maxZ, half - (m.z + fz) * BLOCK_CELL)];
       }
     }
     dx = clamp(dx, Math.min(minX, 0), Math.max(maxX, 0));
+    dy = clamp(dy, Math.min(minY, 0), Math.max(maxY, 0));
     dz = clamp(dz, Math.min(minZ, 0), Math.max(maxZ, 0));
-    if (cells) [dx, dz] = [Math.trunc(dx / BLOCK_CELL) * BLOCK_CELL, Math.trunc(dz / BLOCK_CELL) * BLOCK_CELL];
+    if (cells) [dx, dy, dz] = [Math.trunc(dx / BLOCK_CELL) * BLOCK_CELL, Math.trunc(dy / BLOCK_LEVEL) * BLOCK_LEVEL, Math.trunc(dz / BLOCK_CELL) * BLOCK_CELL];
     for (const m of moving) {
       const b = this.map.blocks[m.index];
-      if (m.position) b.position = [m.position[0] + dx, m.position[1], m.position[2] + dz];
+      if (m.position) b.position = [m.position[0] + dx, m.position[1] + dy, m.position[2] + dz];
       else {
         b.x = m.x + Math.round(dx / BLOCK_CELL);
+        b.y = m.y + Math.round(dy / BLOCK_LEVEL);
         b.z = m.z + Math.round(dz / BLOCK_CELL);
       }
     }
-    const b = this.map.blocks[grabbed.index];
-    const where = b.free && b.position
-      ? `${b.position[0].toFixed(1)}, ${b.position[1].toFixed(1)}, ${b.position[2].toFixed(1)} m`
-      : `cell ${b.x}, ${b.z} · level ${b.y}`;
-    this.showLabel(e, moving.length > 1 ? `${moving.length} blocks · moved ${dx.toFixed(cells ? 0 : 1)}, ${dz.toFixed(cells ? 0 : 1)} m` : `${b.name} · ${where}`);
-    this.syncBlocks();
-    this.onChange();
+    return { dx, dy, dz, count: moving.length, cells };
+  }
+
+  /** Puts the gizmo's block anchor on the first selected block's bottom centre (not while the gizmo moves it). */
+  private placeBlockAnchor(): void {
+    if (this.gizmoBlocks) return;
+    const b = this.map.blocks[this.selectedBlocks()[0]];
+    if (!b) return;
+    const size = blockSize(this.library, b);
+    this.blockAnchor.position.set(size[0] * BLOCK_CELL / 2, 0, size[2] * BLOCK_CELL / 2).applyMatrix4(blockMatrix(b, size));
   }
 
   /**
@@ -1885,6 +1928,18 @@ export class Editor {
   private onAxisGizmoMoved(): void {
     const obj = this.axisGizmo.object;
     if (!obj) return;
+    if (obj === this.blockAnchor) {
+      const start = this.gizmoBlocks;
+      if (!start) return;
+      const d = obj.position.clone().sub(start.anchor);
+      const ref = this.selectedBlocks()[0];
+      const moved = this.moveBlocks(start.blocks, ref, d.x, d.y, d.z, this.snapStep > 0);
+      // The gizmo shows where the blocks went (whole cells, levels, snapped), not where the cursor is.
+      obj.position.copy(start.anchor).add(new THREE.Vector3(moved.dx, moved.dy, moved.dz));
+      this.syncBlocks();
+      this.onChange();
+      return;
+    }
     const pick = obj.userData as Pick;
     if (pick.kind === "point" && this.snapStep > 0) this.snappedPoint(obj.position);
     const pos: Vec3 = [obj.position.x, obj.position.y, obj.position.z];

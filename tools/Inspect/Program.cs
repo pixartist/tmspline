@@ -15,6 +15,21 @@ if (args[0] == "--pivot") { foreach (var f in args.Skip(1)) Pivot.Run(f); return
 if (args[0] == "--item") { ItemShape.Run(args[1]); return; }
 if (args[0] == "--chunks") { ChunkInfo.Run(args[1]); return; }
 if (args[0] == "--reflect") { Reflect.Run(args[1]); return; }
+if (args[0] == "--decorations")
+{
+    // Map decorations (mood / stadium) in use, with the size and an example map each.
+    var found = new Dictionary<string, (int Count, string Example)>();
+    foreach (var f in args.Skip(1).SelectMany(a => Directory.Exists(a) ? Directory.EnumerateFiles(a, "*.Map.Gbx", SearchOption.AllDirectories) : [a]))
+        try
+        {
+            var m = Gbx.ParseNode<CGameCtnChallenge>(f);
+            var k = $"{m.Decoration?.Id} | {m.Decoration?.Collection} | {m.Decoration?.Author} | size {m.Size} | blocks e.g. {string.Join(",", (m.Blocks ?? []).Select(b => b.Name).Distinct().Take(4))}";
+            found[k] = found.TryGetValue(k, out var v) ? (v.Count + 1, v.Example) : (1, f);
+        }
+        catch (Exception ex) { Console.WriteLine($"{f}: {ex.Message}"); }
+    foreach (var (k, v) in found.OrderBy(x => x.Key)) Console.WriteLine($"{k} — {v.Count} maps, e.g. {v.Example}");
+    return;
+}
 if (args[0] == "--items")
 {
     // Item models used by maps (id, collection, author) with counts, e.g. to see how vanilla items are referenced.

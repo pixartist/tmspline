@@ -25,7 +25,7 @@ const CONTROLS: [string, string][] = [
   ["Right drag / wheel", "Pan / zoom"],
   ["W S / A D", "Fly along the view / sideways (speed follows the distance to the road)"],
   ["Space / Shift", "Camera up / down"],
-  ["F / G", "Frame track · axis gizmo"],
+  ["F / G", "Frame track · axis gizmo (points, handles, selected blocks)"],
   ["Ctrl+Z / Ctrl+Y", "Undo / redo"],
 ];
 
