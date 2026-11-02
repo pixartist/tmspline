@@ -36,8 +36,10 @@ public static class MapMerge
         var map = gbx.Node;
         var old = Gbx.ParseNode<CGameCtnChallenge>(previous);
         var add = Gbx.ParseNode<CGameCtnChallenge>(next);
-        var oldPrefix = previousItemFolder.TrimEnd('\\') + "\\";
-        var newPrefix = nextItemFolder.TrimEnd('\\') + "\\";
+        // Road items of any export of this track (every export gets its own folder "TMSpline\<name>_<id>"): also those of
+        // exports this merge has no record of (written by another server, or before the record was kept).
+        var oldPrefix = Family(previousItemFolder);
+        var newPrefix = Family(nextItemFolder);
 
         // Blocks: the previous export's ones that are still there as exported.
         var blocks = map.Blocks ??= [];
@@ -96,11 +98,29 @@ public static class MapMerge
         return result;
     }
 
-    private static bool IsIn(CGameCtnAnchoredObject o, string prefix) =>
-        o.ItemModel.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    /// <summary>"TMSpline\Name_1a2b3c4d" → "TMSpline\Name_" (the folders of all exports of that track); other folders as they are.</summary>
+    private static string Family(string itemFolder)
+    {
+        var folder = itemFolder.TrimEnd('\\');
+        var underscore = folder.LastIndexOf('_');
+        return underscore > folder.LastIndexOf('\\') && folder.Length - underscore == 9 && folder[(underscore + 1)..].All(char.IsAsciiHexDigit)
+            ? folder[..(underscore + 1)]
+            : folder + "\\";
+    }
+
+    private static bool IsIn(CGameCtnAnchoredObject o, string prefix) => InFamily(o.ItemModel.Id, prefix);
+
+    /// <summary>Whether an item path lies in a folder of the family (prefix "…_" then exactly 8 hex digits and a backslash).</summary>
+    private static bool InFamily(string path, string prefix)
+    {
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        if (prefix.EndsWith('\\')) return true;
+        var rest = path.AsSpan(prefix.Length);
+        return rest.Length > 9 && rest[8] == '\\' && rest[..8].ToString().All(char.IsAsciiHexDigit);
+    }
 
     private static bool InFolder(string entry, string prefix) =>
-        entry.Replace('/', '\\').StartsWith("Items\\" + prefix, StringComparison.OrdinalIgnoreCase);
+        InFamily(entry.Replace('/', '\\'), "Items\\" + prefix);
 
     /// <summary>Where a block is: its cell (and direction) for grid blocks, its world position for free ones.</summary>
     private static Vec3 BlockPosition(CGameCtnBlock b) =>
