@@ -72,6 +72,7 @@ public static class TrackObjects
         r.Curve = a.Curve + (b.Curve - a.Curve) * t;
         r.Flat = a.Flat + (b.Flat - a.Flat) * t;
         r.Sausage = a.Sausage + (b.Sausage - a.Sausage) * t;
+        r.EdgeAnchor = a.EdgeAnchor + (b.EdgeAnchor - a.EdgeAnchor) * t;
         r.BorderHeight = a.BorderHeight + (b.BorderHeight - a.BorderHeight) * t;
         r.BorderScale = a.BorderScale + (b.BorderScale - a.BorderScale) * t;
         r.IsVertex = false;

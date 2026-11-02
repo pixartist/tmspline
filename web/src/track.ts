@@ -60,6 +60,12 @@ export interface TrackPoint {
    * 0 = even round bend, 1 = triangle with a sharp crown, in between a rounded triangle (Trackmania's sausage roads).
    */
   sausage: number;
+  /**
+   * "Keep edges" 0..1, blended between points: 0 = a bent cross-section keeps its middle on the spline (width along
+   * the surface; pipes), 1 = it keeps its edges at the point's height and exactly `width` apart, like the game's own
+   * pieces, with upright curbs. Above 0 the shape is limited to ±180° (see clampShape). Missing in older files = 0.
+   */
+  edgeAnchor: number;
   /** Height of the road borders in meters; blended smoothly towards the neighbouring points. */
   borderHeight: number;
   /**
@@ -82,6 +88,11 @@ const LEGACY_BORDER_HEIGHT = 0.8;
 export const DEFAULT_ROAD_WIDTH = 26.25;
 
 /** Named cross-section shapes for the inspector. */
+/** Points that keep their edges bend at most ±180° (no pipes); the core applies the same limit. */
+export function clampShape(p: TrackPoint): void {
+  if (p.edgeAnchor > 0) p.curve = Math.max(-180, Math.min(180, p.curve));
+}
+
 export const SHAPE_PRESETS: { label: string; curve: number; flat: number; sausage: number }[] = [
   { label: "Sausage", curve: -40, flat: 0, sausage: 0.8 },
   { label: "Flat", curve: 0, flat: 0, sausage: 0 },
@@ -172,12 +183,6 @@ export function newObject(kind: TrackObjectKind, segment: number, at: number, of
 /** One spline road. A map holds one or more of them (e.g. pieces of a route the car jumps between). */
 export interface Track {
   closed: boolean;
-  /**
-   * What a bent cross-section keeps in place: the road's middle (default; Width along the surface) or its edges (Width
-   * apart at the point's height, like the game's own pieces, so bent road lines up with blocks; the middle bows down
-   * or up). See ShapeAnchor in the core. Missing = "Center".
-   */
-  shapeAnchor?: "Center" | "Edges";
   points: TrackPoint[];
   segments: TrackSegment[];
   objects: TrackObject[];
@@ -296,7 +301,7 @@ export function newTrack(center: Vec3 = [0, 16, 0], direction: Vec3 = [0, 0, 1])
   if (length(dir) === 0) dir = [0, 0, 1];
   const point = (along: number): TrackPoint => ({
     position: add(center, scale(dir, along)), handleIn: scale(dir, -24), handleOut: scale(dir, 24),
-    bank: 0, width: DEFAULT_ROAD_WIDTH, curve: 0, flat: 0, sausage: 0, borderHeight: DEFAULT_BORDER_HEIGHT, borders: true, waypoint: "None",
+    bank: 0, width: DEFAULT_ROAD_WIDTH, curve: 0, flat: 0, sausage: 0, edgeAnchor: 0, borderHeight: DEFAULT_BORDER_HEIGHT, borders: true, waypoint: "None",
   });
   return { closed: false, points: [point(-64), point(64)], segments: [defaultSegment()], objects: [] };
 }
@@ -328,6 +333,7 @@ export function appendPoint(t: Track, at?: Vec3): number {
     curve: last.curve,
     flat: last.flat,
     sausage: last.sausage,
+    edgeAnchor: last.edgeAnchor,
     borderHeight: last.borderHeight,
     borders: last.borders,
     waypoint: "None",
@@ -394,14 +400,14 @@ export function splitSegment(t: Track, s: number, at = 0.5): number {
   // The core blends width and shape with a smoothstep over the arc length, banks along the shorter way.
   const fraction = arcFraction(t, s, at);
   const smooth = fraction * fraction * (3 - 2 * fraction);
-  const blend = (key: "width" | "curve" | "flat" | "sausage" | "borderHeight") => a[key] + (b[key] - a[key]) * smooth;
+  const blend = (key: "width" | "curve" | "flat" | "sausage" | "edgeAnchor" | "borderHeight") => a[key] + (b[key] - a[key]) * smooth;
 
   a.handleOut = sub(q0, p0);
   b.handleIn = sub(q2, p3);
   const point: TrackPoint = {
     position: mid, handleIn: sub(r0, mid), handleOut: sub(r1, mid),
     bank: wrapBank(a.bank + wrapBank(b.bank - a.bank) * fraction),
-    width: blend("width"), curve: blend("curve"), flat: blend("flat"), sausage: blend("sausage"),
+    width: blend("width"), curve: blend("curve"), flat: blend("flat"), sausage: blend("sausage"), edgeAnchor: blend("edgeAnchor"),
     borderHeight: blend("borderHeight"),
     // On if either end is: the segment keeps its borders, fading where it did.
     borders: a.borders || b.borders,
@@ -593,7 +599,12 @@ function normalizeTrack(t: Track, label: string): Track {
   migrateWidths(t);
   for (const key of ["version", "name", "laps"]) delete (t as unknown as Record<string, unknown>)[key];
   t.objects = (t.objects ?? []).map((o) => ({ ...o, height: o.height ?? 4 }));
+  // "Keep edges" was a per-track switch for a day: every point of such a track keeps its edges fully.
+  const legacy = t as Track & { shapeAnchor?: string };
+  const legacyAnchor = legacy.shapeAnchor === "Edges" ? 1 : 0;
+  delete legacy.shapeAnchor;
   for (const p of t.points) {
+    p.edgeAnchor ??= legacyAnchor;
     // Banks used to be a running total for a while; as angles they mean the same orientation.
     p.bank = wrapBank(p.bank ?? 0);
     p.curve ??= 0;
@@ -602,6 +613,8 @@ function normalizeTrack(t: Track, label: string): Track {
     delete (p as { flatOuter?: number }).flatOuter; // short-lived predecessor of "sausage"
     p.borderHeight ??= LEGACY_BORDER_HEIGHT;
     p.waypoint ??= "None";
+    p.edgeAnchor = Math.max(0, Math.min(1, p.edgeAnchor));
+    clampShape(p);
   }
   // Files from before gameplay effects existed.
   t.segments = t.segments.map((s) => ({ ...defaultSegment(), ...s }));

@@ -53,11 +53,12 @@ Controls:
   **Sausage %**, which compresses the bend into a crown with straight slopes (0 % round, 100 % triangle; the Sausage
   preset is a rounded triangle like the game's sausage roads).
   Width is measured along the surface, so a pipe's diameter is width / π.
-- **Keep edges** (per track, in the Track section) anchors bent cross-sections like the game's own pieces: the road's
-  edges stay at the points' height and Width apart, so bent road lines up with blocks on the grid, and the middle bows
-  down (half-pipe) or up (sausage). The curbs then stand upright along the track's roll instead of following the bent
-  surface. Off (default), the middle stays on the spline, which is what pipes want. Past 180° the edges curl back
-  inwards, so there they no longer span the full width.
+- **Keep edges %** (per point, blended between points like the shape) anchors bent cross-sections like the game's own
+  pieces: at 100 % the road's edges stay at the point's height and exactly Width apart, so bent road lines up with
+  blocks on the grid, the middle bows down (half-pipe) or up (sausage), and the curbs stand upright along the track's
+  roll instead of following the bent surface. At 0 % (default) the middle stays on the spline and Width is measured
+  along the surface, which is what pipes want; in between it blends. Points that keep their edges at all are limited
+  to Shape −180…180° (no pipes; the Pipe preset turns Keep edges off).
 - Border height is also set per point (0.2–8 m) and blends between points. Borders are switched on and off per point
   and blend from point to point too: a single point without borders fades them out towards it and back in after it.
 - Click the road to select a segment; Ctrl+click the ground to extend the track.

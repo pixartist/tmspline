@@ -241,12 +241,20 @@ public static class RoadMeshBuilder
     }
 
     /// <summary>
-    /// Frame the curb on one side is built in, in ring-local (right, up) coordinates: the surface's end, the outward
-    /// direction (times <paramref name="side"/>: the right side's +tangent) and the curb's up. On the bent surface's edge,
-    /// or upright in the ring's frame with <see cref="Ring.UprightBorders"/>.
+    /// Frame the curb on the side of surface coordinate s is built in, in ring-local (right, up) coordinates: the
+    /// surface's end, the direction of growing s there (outward = times the side) and the curb's up. On the bent
+    /// surface's edge, turned towards upright in the ring's frame by <see cref="Ring.EdgeAnchor"/> (fully: upright).
     /// </summary>
-    private static ((double X, double Y) E, (double X, double Y) T, (double X, double Y) N) CurbFrame(Ring ring, SurfaceArc arc, double s) =>
-        ring.UprightBorders ? (arc.Point(s), (1, 0), (0, 1)) : (arc.Point(s), arc.Tangent(s), arc.Normal(s));
+    private static ((double X, double Y) E, (double X, double Y) T, (double X, double Y) N) CurbFrame(Ring ring, SurfaceArc arc, double s)
+    {
+        var (e, t, n) = (arc.Point(s), arc.Tangent(s), arc.Normal(s));
+        var k = Math.Clamp(ring.EdgeAnchor, 0, 1);
+        if (k <= 0) return (e, t, n);
+        var side = s < 0 ? -1 : 1;
+        // The surface's bend angle at its end (see SurfaceArc.Tangent), turned back towards upright.
+        var angle = Math.Atan2(t.Y * side, t.X) * (1 - k);
+        return (e, (Math.Cos(angle), side * Math.Sin(angle)), (-side * Math.Sin(angle), Math.Cos(angle)));
+    }
 
     /// <summary>
     /// A point on a curb in ring-local coordinates, with its up and outward directions: on side ±1, <paramref name="outward"/>
@@ -254,32 +262,26 @@ public static class RoadMeshBuilder
     /// </summary>
     internal static (double X, double Y, double NX, double NY, double TX, double TY) CurbPoint(Ring ring, int side, double outward, double lift)
     {
-        if (!ring.UprightBorders)
-        {
-            var p = SurfaceSample(ring, side * (ring.Width / 2 + outward));
-            return (p.X + p.NX * lift, p.Y + p.NY * lift, p.NX, p.NY, p.TX, p.TY);
-        }
         var arc = SurfaceArc.For(ring, 0, 0, 0, 1, new RoadMeshSettings());
-        var (e, _, _) = CurbFrame(ring, arc, side * ring.Width / 2);
-        return (e.X + side * outward, e.Y + lift, 0, 1, 1, 0);
+        var (e, t, n) = CurbFrame(ring, arc, side * ring.Width / 2);
+        return (e.X + t.X * side * outward + n.X * lift, e.Y + t.Y * side * outward + n.Y * lift, n.X, n.Y, t.X, t.Y);
     }
 
     /// <summary>
     /// The curb's bottom corners on one side: the inner one on the slab's underside (so the slab stays closed), the outer
-    /// one below the curb's outer face (upright curbs: never inside the inner one).
+    /// one below the curb's outer face, in the curb's frame (turned curbs: never inside the inner one).
     /// </summary>
     private static ((double X, double Y) Inner, (double X, double Y) Outer) CurbBottom(Ring ring, SurfaceArc arc, double s, int side,
         double thickness, double h)
     {
-        var (e, n) = (arc.Point(s), arc.Normal(s));
-        var inner = (e.X - n.X * h, e.Y - n.Y * h);
-        if (!ring.UprightBorders)
-        {
-            var t = arc.Tangent(s);
-            return (inner, (inner.Item1 + t.X * thickness * side, inner.Item2 + t.Y * thickness * side));
-        }
-        var x = side > 0 ? Math.Max(e.X + thickness, inner.Item1) : Math.Min(e.X - thickness, inner.Item1);
-        return (inner, (x, Math.Min(e.Y - h, inner.Item2)));
+        var (e, n0) = (arc.Point(s), arc.Normal(s));
+        var inner = (X: e.X - n0.X * h, Y: e.Y - n0.Y * h);
+        var (_, t, n) = CurbFrame(ring, arc, s);
+        // The inner corner in the curb's frame (outward, up); the outer corner at least as far out and as low.
+        var u = ((inner.X - e.X) * t.X + (inner.Y - e.Y) * t.Y) * side;
+        var v = (inner.X - e.X) * n.X + (inner.Y - e.Y) * n.Y;
+        var (ou, ov) = (Math.Max(thickness, u), Math.Min(-h, v));
+        return (inner, (e.X + t.X * side * ou + n.X * ov, e.Y + t.Y * side * ou + n.Y * ov));
     }
 
     /// <summary>Height of the boost decal above the driving surface.</summary>

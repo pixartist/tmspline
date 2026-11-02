@@ -19,7 +19,7 @@ public static class TrackJson
         public int Version { get; set; } = CurrentVersion;
         public string Name { get; set; } = "Untitled";
         public bool Closed { get; set; }
-        /// <summary>See Track.ShapeAnchor; missing = Center.</summary>
+        /// <summary>Old per-track "keep edges" (see ShapeAnchor); read only.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ShapeAnchor? ShapeAnchor { get; set; }
         public int Laps { get; set; } = 3;
@@ -96,6 +96,9 @@ public static class TrackJson
         public double Flat { get; set; }
         /// <summary>Sausageness 0..1 (see TrackPoint.Sausage).</summary>
         public double Sausage { get; set; }
+        /// <summary>Keep edges 0..1 (see TrackPoint.EdgeAnchor); missing = 0.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? EdgeAnchor { get; set; }
         /// <summary>Border height in meters. Missing in files from before border heights were adjustable.</summary>
         public double? BorderHeight { get; set; }
         /// <summary>Borders at this point (see TrackPoint.Borders). Missing in files from before borders moved to points.</summary>
@@ -166,13 +169,14 @@ public static class TrackJson
 
     public static Track ToTrack(TrackDto dto)
     {
-        var track = new Track { Closed = dto.Closed, ShapeAnchor = dto.ShapeAnchor ?? ShapeAnchor.Center };
+        var track = new Track { Closed = dto.Closed };
+        var legacyAnchor = dto.ShapeAnchor == ShapeAnchor.Edges ? 1.0 : 0.0;
         for (var i = 0; i < dto.Points.Count; i++)
         {
             var p = dto.Points[i];
             var width = p.Width ?? LegacyPointWidth(dto, i);
             track.Points.Add(new TrackPoint(V(p.Position), V(p.HandleOut), p.Bank, width) { HandleIn = V(p.HandleIn), Curve = p.Curve, Flat = Math.Clamp(p.Flat, 0, 0.9),
-                Sausage = Math.Clamp(p.Sausage, 0, 1),
+                Sausage = Math.Clamp(p.Sausage, 0, 1), EdgeAnchor = Math.Clamp(p.EdgeAnchor ?? legacyAnchor, 0, 1),
                 BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Borders = p.Borders, Waypoint = p.Waypoint });
         }
         foreach (var s in dto.Segments)
@@ -200,10 +204,9 @@ public static class TrackJson
     {
         Name = name,
         Closed = track.Closed,
-        ShapeAnchor = track.ShapeAnchor == ShapeAnchor.Center ? null : track.ShapeAnchor,
         Points = track.Points.Select(p => new PointDto
         {
-            Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
+            Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, EdgeAnchor = p.EdgeAnchor > 0 ? p.EdgeAnchor : null, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
         }).ToList(),
         Segments = track.Segments.Select(s => new SegmentDto
         {

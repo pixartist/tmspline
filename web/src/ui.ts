@@ -6,7 +6,7 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 /** Scenery panel settings (kept while the page is open). */
 const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
 import {
-  appendPoint, BORDER_MATERIALS, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, BORDER_MATERIALS, clampShape, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
@@ -434,8 +434,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   // Rebuild the DOM only when the selection changes; otherwise just refresh values so inputs keep focus.
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
-  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${t.shapeAnchor}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
-    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
+  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
+    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
@@ -459,14 +459,6 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
 
   section(map.tracks.length > 1 ? `Track ${editor.active + 1} of ${map.tracks.length}` : "Track");
   checkbox(root, "Closed loop", () => editor.track.closed, (v) => editor.edit((tr) => (tr.closed = v), true), t.points.length < 3);
-  checkbox(root, "Keep edges", () => editor.track.shapeAnchor === "Edges", (v) => editor.edit((tr) => {
-    if (v) tr.shapeAnchor = "Edges";
-    else delete tr.shapeAnchor;
-  }, true));
-  if (t.shapeAnchor === "Edges")
-    hint(root, "Keep edges: bent cross-sections keep the road's edges at the points' height and Width apart, like the "
-      + "game's own pieces, so they line up with blocks; the middle bows down (half-pipe) or up (sausage). Off: the middle "
-      + "stays on the spline and Width is measured along the surface (best for pipes).");
   buttonRow(root, [
     ...(map.tracks.length > 1 ? [
       { label: "◀", onClick: () => editor.setActive((editor.active + map.tracks.length - 1) % map.tracks.length) },
@@ -529,11 +521,20 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     rangeField(root, "Bank °", -180, 180, 1, () => p().bank,
       (v) => editor.edit((tr) => (tr.points[s.index].bank = wrapBank(v)), false, `bank:${s.index}`), 360);
     rangeField(root, "Width m", 4, 128, 0.5, () => p().width, (v) => editor.edit((tr) => (tr.points[s.index].width = v), false, `width:${s.index}`));
-    rangeField(root, "Shape °", -360, 360, 1, () => p().curve, (v) => editor.edit((tr) => (tr.points[s.index].curve = v), false, `curve:${s.index}`));
+    // Points that keep their edges bend at most ±180° (no pipes).
+    const shapeLimit = p().edgeAnchor > 0 ? 180 : 360;
+    rangeField(root, "Shape °", -shapeLimit, shapeLimit, 1, () => p().curve, (v) => editor.edit((tr) => {
+      tr.points[s.index].curve = v;
+      clampShape(tr.points[s.index]);
+    }, false, `curve:${s.index}`));
     rangeField(root, "Flat in %", 0, 90, 1, () => Math.round(p().flat * 100),
       (v) => editor.edit((tr) => (tr.points[s.index].flat = v / 100), false, `flat:${s.index}`));
     rangeField(root, "Sausage %", 0, 100, 1, () => Math.round(p().sausage * 100),
       (v) => editor.edit((tr) => (tr.points[s.index].sausage = v / 100), false, `sausage:${s.index}`));
+    rangeField(root, "Keep edges %", 0, 100, 1, () => Math.round(p().edgeAnchor * 100), (v) => editor.edit((tr) => {
+      tr.points[s.index].edgeAnchor = v / 100;
+      clampShape(tr.points[s.index]);
+    }, false, `edgeAnchor:${s.index}`));
     checkbox(root, "Borders", () => p().borders, (v) => editor.edit((tr) => {
       tr.points[s.index].borders = v;
       syncSegments(tr);
@@ -557,6 +558,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         point.curve = preset.curve;
         point.flat = preset.flat;
         point.sausage = preset.sausage;
+        // A pipe cannot keep its edges.
+        if (Math.abs(preset.curve) > 180) point.edgeAnchor = 0;
       }),
     })));
     profileFields(root, editor, s.index);
@@ -847,8 +850,8 @@ function buttonRow(root: HTMLElement, buttons: { label: string; onClick: () => v
 // ---- saved point profiles ---------------------------------------------------------------------
 
 /** A point's cross-section settings, saved under a name (not its position, handles, bank or waypoint). */
-type PointProfile = Pick<TrackPoint, "width" | "curve" | "flat" | "sausage" | "borders" | "borderHeight">;
-const PROFILE_FIELDS = ["width", "curve", "flat", "sausage", "borders", "borderHeight"] as const;
+type PointProfile = Pick<TrackPoint, "width" | "curve" | "flat" | "sausage" | "edgeAnchor" | "borders" | "borderHeight">;
+const PROFILE_FIELDS = ["width", "curve", "flat", "sausage", "edgeAnchor", "borders", "borderHeight"] as const;
 /** Shared by all tracks (per `?session`, like the autosave). */
 const PROFILES_KEY = SESSION ? `tmspline.profiles.${SESSION}` : "tmspline.profiles";
 let profileChoice = "";
@@ -889,6 +892,7 @@ function profileFields(root: HTMLElement, editor: Editor, index: number) {
           editor.edit((tr) => {
             const point = tr.points[index] as unknown as Record<string, unknown>;
             for (const f of PROFILE_FIELDS) if (profile[f] !== undefined) point[f] = profile[f];
+            clampShape(tr.points[index]);
             syncSegments(tr);
           }, true);
         },

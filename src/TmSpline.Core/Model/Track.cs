@@ -113,6 +113,16 @@ public sealed class TrackPoint
     /// </summary>
     public double Sausage { get; set; }
 
+    /// <summary>
+    /// "Keep edges" (0..1), blended between points: 0 = the bent cross-section keeps its middle on the spline (Width along
+    /// the surface; pipes); 1 = it keeps its edges at the point's height and exactly Width apart, like the game's own
+    /// pieces, with upright curbs. Above 0 the bend is limited to ±180° (<see cref="EffectiveCurve"/>).
+    /// </summary>
+    public double EdgeAnchor { get; set; }
+
+    /// <summary>The bend that is built: limited to ±180° where the point keeps its edges (no pipes there).</summary>
+    public double EffectiveCurve => EdgeAnchor > 0 ? Math.Clamp(Curve, -180, 180) : Curve;
+
     /// <summary>Height of the road borders (curbs) at this point in meters; blended smoothly towards the neighbouring points.</summary>
     public double BorderHeight { get; set; } = DefaultBorderHeight;
 
@@ -325,7 +335,10 @@ public sealed class VanillaBlock
     public ItemColor Color { get; set; }
 }
 
-/// <summary>What stays put when a point's cross-section shape bends the road (see Track.ShapeAnchor).</summary>
+/// <summary>
+/// Old per-track setting for what a bent cross-section keeps in place; read from files only (Edges = every point at
+/// TrackPoint.EdgeAnchor 1).
+/// </summary>
 public enum ShapeAnchor
 {
     /// <summary>The road's middle stays on the spline and the sides bend up or down; Width is measured along the surface.</summary>
@@ -347,9 +360,6 @@ public sealed class Track
     public List<TrackObject> Objects { get; } = new();
 
     public bool Closed { get; set; }
-
-    /// <summary>What a bent cross-section keeps in place: the road's middle (default) or its edges.</summary>
-    public ShapeAnchor ShapeAnchor { get; set; }
 
     public int SegmentCount => Closed ? Points.Count : Math.Max(0, Points.Count - 1);
 

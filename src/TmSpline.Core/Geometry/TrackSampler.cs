@@ -32,10 +32,10 @@ public sealed class Ring
     /// </summary>
     public double BorderScale = 1;
     /// <summary>
-    /// Curbs stand upright in the ring's frame (along the track's roll) instead of on the bent surface's edge
-    /// (ShapeAnchor.Edges, as the game's pieces).
+    /// Keep edges here (0..1, see TrackPoint.EdgeAnchor): how far the cross-section is anchored at its edges, and how far
+    /// the curbs are turned from the bent surface's edge to upright in the ring's frame (along the track's roll).
     /// </summary>
-    public bool UprightBorders;
+    public double EdgeAnchor;
     /// <summary>True if this ring lies exactly on a spline vertex.</summary>
     public bool IsVertex;
     /// <summary>Arc-length fraction of this ring within its segment (0..1).</summary>
@@ -115,9 +115,8 @@ public static class TrackSampler
         }
 
         ComputeFrames(track, rings);
-        if (track.ShapeAnchor == ShapeAnchor.Edges)
-            foreach (var ring in rings)
-                AnchorEdges(ring);
+        foreach (var ring in rings)
+            AnchorEdges(ring);
         foreach (var ring in rings)
             ring.BorderScale = track.PointBorders
                 ? PointBorderScale(track, ring.Segment, ring.SegmentU)
@@ -126,21 +125,22 @@ public static class TrackSampler
     }
 
     /// <summary>
-    /// Edge-anchored cross-section (ShapeAnchor.Edges): the bent profile is scaled so its edges are the ring's width
-    /// apart, and the ring moves along its normal so the edges are where the flat road's edges would be; the middle bows
-    /// below (half-pipe) or above (sausage). Everything built on the ring (mesh, borders, gates, signs, objects) follows.
-    /// Past 180° the edges curl back inwards and no longer span the width; those keep the 180° scale.
+    /// Edge-anchored cross-section (Ring.EdgeAnchor): fully anchored, the bent profile is scaled so its edges are exactly
+    /// the ring's width apart, and the ring moves along its normal so the edges are where the flat road's edges would
+    /// be; the middle bows below (half-pipe) or above (sausage). In between, the scale and the move are that share of
+    /// it. Everything built on the ring (mesh, borders, gates, signs, objects) follows. Points that keep their edges
+    /// bend at most 180°; a bend past that (only on the way to a pipe point without) keeps the 180° scale.
     /// </summary>
     private static void AnchorEdges(Ring ring)
     {
-        ring.UprightBorders = true;
-        if (Math.Abs(ring.Curve) < 1e-9 || ring.Width <= 0) return;
+        var share = Math.Clamp(ring.EdgeAnchor, 0, 1);
+        if (share <= 0 || Math.Abs(ring.Curve) < 1e-9 || ring.Width <= 0) return;
         var half = ring.Width / 2;
         var (edgeX, edgeY) = RoadMeshBuilder.SurfaceEdge(ring, ring.Curve);
         var span = Math.Abs(ring.Curve) <= Math.PI ? edgeX : RoadMeshBuilder.SurfaceEdge(ring, Math.Sign(ring.Curve) * Math.PI).X;
-        var scale = half / Math.Max(half * 0.05, span);
+        var scale = 1 + (half / Math.Max(half * 0.05, span) - 1) * share;
         ring.Width *= scale;
-        ring.Position -= ring.Up * (edgeY * scale);
+        ring.Position -= ring.Up * (edgeY * scale * share);
     }
 
     /// <summary>
@@ -270,7 +270,8 @@ public static class TrackSampler
             table.TotalTurnDegrees / settings.MaxAngleDegrees,
             1.5 * bank / settings.MaxAngleDegrees,
             Blend(p => p.Width, settings.MaxWidthStep),
-            Blend(p => p.Curve, settings.MaxCurveStepDegrees),
+            Blend(p => p.EffectiveCurve, settings.MaxCurveStepDegrees),
+            Blend(p => p.EdgeAnchor, settings.MaxShareStep),
             Blend(p => p.Flat, settings.MaxShareStep),
             Blend(p => p.Sausage, settings.MaxShareStep),
             Blend(p => p.BorderHeight, settings.MaxBorderStep),
@@ -298,7 +299,8 @@ public static class TrackSampler
             Distance = distance,
             Segment = s,
             Width = WidthAt(track, s, u),
-            Curve = Lerp(track.SegmentStart(s).Curve, track.SegmentEnd(s).Curve, SmoothStep(u)) * Math.PI / 180,
+            Curve = Lerp(track.SegmentStart(s).EffectiveCurve, track.SegmentEnd(s).EffectiveCurve, SmoothStep(u)) * Math.PI / 180,
+            EdgeAnchor = Lerp(track.SegmentStart(s).EdgeAnchor, track.SegmentEnd(s).EdgeAnchor, SmoothStep(u)),
             Flat = Lerp(track.SegmentStart(s).Flat, track.SegmentEnd(s).Flat, SmoothStep(u)),
             Sausage = Lerp(track.SegmentStart(s).Sausage, track.SegmentEnd(s).Sausage, SmoothStep(u)),
             BorderHeight = Lerp(track.SegmentStart(s).BorderHeight, track.SegmentEnd(s).BorderHeight, SmoothStep(u)),
