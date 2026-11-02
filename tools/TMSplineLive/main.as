@@ -90,7 +90,8 @@ void Reload()
     float distance = 0, hAngle = 0, vAngle = 0;
     auto editor = Editor();
     if (S_KeepCamera && editor !is null && editor.OrbitalCameraControl !is null) {
-        string open = app.RootMap !is null && app.RootMap.MapInfo !is null ? app.RootMap.MapInfo.FileName : "(none)";
+        string open = "(none)";
+        if (app.RootMap !is null && app.RootMap.MapInfo !is null) open = app.RootMap.MapInfo.FileName;
         if (EditingLatest()) {
             auto cam = editor.OrbitalCameraControl;
             target = cam.m_TargetedPosition;
