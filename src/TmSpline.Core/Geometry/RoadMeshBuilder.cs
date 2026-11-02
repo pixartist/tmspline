@@ -313,8 +313,9 @@ public static class RoadMeshBuilder
             var mid = (rings[k].Distance + rings[k + 1].Distance) / 2;
             return gaps.Any(g => mid > g.Start && mid < g.End);
         }).ToArray();
-        bool GapBefore(int k) => k > 0 ? inGap[k - 1] : track.Closed && inGap[intervals - 1];
-        bool GapAfter(int k) => k + 1 < intervals ? inGap[k + 1] : track.Closed && inGap[0];
+        // The road ends (and gets a cap) before a gap and at an open track's own start and end.
+        bool GapBefore(int k) => k > 0 ? inGap[k - 1] : !track.Closed || inGap[intervals - 1];
+        bool GapAfter(int k) => k + 1 < intervals ? inGap[k + 1] : !track.Closed || inGap[0];
 
         foreach (var (start, end) in SplitRanges(track, rings, settings))
         {
@@ -323,7 +324,7 @@ public static class RoadMeshBuilder
             var vertexCache = new Dictionary<long, int>();
             var chunkStart = rings[start].Distance;
             var chunkLength = Math.Max(1e-6, rings[end].Distance - chunkStart);
-            // Ends of the road at gaps: (ring, segment, facing forward, only the curbs' end faces: where borders start or
+            // Ends of the road at gaps and open track ends: (ring, segment, facing forward, only the curbs' end faces: where borders start or
             // end, grown down to a sliver).
             var caps = new List<(int Ring, TrackSegment Segment, bool Forward, bool CurbsOnly)>();
 
