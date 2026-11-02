@@ -31,6 +31,11 @@ public sealed class Ring
     /// over <see cref="SamplerSettings.BorderRampLength"/> with borders on the segments.
     /// </summary>
     public double BorderScale = 1;
+    /// <summary>
+    /// Curbs stand upright in the ring's frame (along the track's roll) instead of on the bent surface's edge
+    /// (ShapeAnchor.Edges, as the game's pieces).
+    /// </summary>
+    public bool UprightBorders;
     /// <summary>True if this ring lies exactly on a spline vertex.</summary>
     public bool IsVertex;
     /// <summary>Arc-length fraction of this ring within its segment (0..1).</summary>
@@ -110,11 +115,32 @@ public static class TrackSampler
         }
 
         ComputeFrames(track, rings);
+        if (track.ShapeAnchor == ShapeAnchor.Edges)
+            foreach (var ring in rings)
+                AnchorEdges(ring);
         foreach (var ring in rings)
             ring.BorderScale = track.PointBorders
                 ? PointBorderScale(track, ring.Segment, ring.SegmentU)
                 : ramps.Select(r => r.ScaleAt(ring.Distance, starts[^1], track.Closed)).DefaultIfEmpty(1).Min();
         return rings;
+    }
+
+    /// <summary>
+    /// Edge-anchored cross-section (ShapeAnchor.Edges): the bent profile is scaled so its edges are the ring's width
+    /// apart, and the ring moves along its normal so the edges are where the flat road's edges would be; the middle bows
+    /// below (half-pipe) or above (sausage). Everything built on the ring (mesh, borders, gates, signs, objects) follows.
+    /// Past 180° the edges curl back inwards and no longer span the width; those keep the 180° scale.
+    /// </summary>
+    private static void AnchorEdges(Ring ring)
+    {
+        ring.UprightBorders = true;
+        if (Math.Abs(ring.Curve) < 1e-9 || ring.Width <= 0) return;
+        var half = ring.Width / 2;
+        var (edgeX, edgeY) = RoadMeshBuilder.SurfaceEdge(ring, ring.Curve);
+        var span = Math.Abs(ring.Curve) <= Math.PI ? edgeX : RoadMeshBuilder.SurfaceEdge(ring, Math.Sign(ring.Curve) * Math.PI).X;
+        var scale = half / Math.Max(half * 0.05, span);
+        ring.Width *= scale;
+        ring.Position -= ring.Up * (edgeY * scale);
     }
 
     /// <summary>

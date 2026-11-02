@@ -325,6 +325,18 @@ public sealed class VanillaBlock
     public ItemColor Color { get; set; }
 }
 
+/// <summary>What stays put when a point's cross-section shape bends the road (see Track.ShapeAnchor).</summary>
+public enum ShapeAnchor
+{
+    /// <summary>The road's middle stays on the spline and the sides bend up or down; Width is measured along the surface.</summary>
+    Center,
+    /// <summary>
+    /// The road's edges stay on the spline's height, Width apart (as the game's own pieces, so bent road lines up with
+    /// blocks on the grid); the middle bows down (half-pipe) or up (sausage).
+    /// </summary>
+    Edges,
+}
+
 public sealed class Track
 {
     public List<TrackPoint> Points { get; } = new();
@@ -335,6 +347,9 @@ public sealed class Track
     public List<TrackObject> Objects { get; } = new();
 
     public bool Closed { get; set; }
+
+    /// <summary>What a bent cross-section keeps in place: the road's middle (default) or its edges.</summary>
+    public ShapeAnchor ShapeAnchor { get; set; }
 
     public int SegmentCount => Closed ? Points.Count : Math.Max(0, Points.Count - 1);
 

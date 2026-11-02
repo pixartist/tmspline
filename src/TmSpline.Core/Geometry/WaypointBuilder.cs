@@ -159,14 +159,21 @@ public static class WaypointBuilder
         // Posts in the middle of the curb, which reaches from its inset inside the width to its thickness outside.
         var outward = borders ? (settings.BorderThickness - settings.BorderInset) * ring.BorderScale / 2 : -BeamWidth / 2;
 
-        points.Add(Offset(half, baseLift, outward));             // right post foot, on the border
+        // Post feet on the curbs (upright curbs: see RoadMeshBuilder.CurbPoint); without borders at the road's edge.
+        (double X, double Y) Foot(int side)
+        {
+            if (!borders) return Offset(side * half, baseLift, side * outward);
+            var c = RoadMeshBuilder.CurbPoint(ring, side, outward, baseLift);
+            return (c.X, c.Y);
+        }
+        points.Add(Foot(1));                                      // right post foot, on the border
         for (var i = 0; i <= ArchSegments; i++)                   // arch over the road, right to left
         {
             var s = half - ring.Width * i / ArchSegments;
             var along = i == 0 ? outward : i == ArchSegments ? -outward : 0;
             points.Add(Offset(s, clearance, along));
         }
-        points.Add(Offset(-half, baseLift, -outward));           // left post foot
+        points.Add(Foot(-1));                                     // left post foot
         return points;
     }
 

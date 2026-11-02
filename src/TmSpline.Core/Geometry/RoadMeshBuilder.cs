@@ -229,6 +229,59 @@ public static class RoadMeshBuilder
         }
     }
 
+    /// <summary>
+    /// Where the driving surface's right edge is in ring-local (right, up) coordinates, for the ring's width, flat share
+    /// and sausageness bent by <paramref name="curve"/> (radians); see TrackSampler's edge anchoring.
+    /// </summary>
+    internal static (double X, double Y) SurfaceEdge(Ring ring, double curve)
+    {
+        var bent = ring.Clone();
+        bent.Curve = curve;
+        return SurfaceArc.For(bent, 0, 0, 0, 1, new RoadMeshSettings()).Point(ring.Width / 2);
+    }
+
+    /// <summary>
+    /// Frame the curb on one side is built in, in ring-local (right, up) coordinates: the surface's end, the outward
+    /// direction (times <paramref name="side"/>: the right side's +tangent) and the curb's up. On the bent surface's edge,
+    /// or upright in the ring's frame with <see cref="Ring.UprightBorders"/>.
+    /// </summary>
+    private static ((double X, double Y) E, (double X, double Y) T, (double X, double Y) N) CurbFrame(Ring ring, SurfaceArc arc, double s) =>
+        ring.UprightBorders ? (arc.Point(s), (1, 0), (0, 1)) : (arc.Point(s), arc.Tangent(s), arc.Normal(s));
+
+    /// <summary>
+    /// A point on a curb in ring-local coordinates, with its up and outward directions: on side ±1, <paramref name="outward"/>
+    /// meters out from the road's edge (its full width) and <paramref name="lift"/> up (signs, gate posts).
+    /// </summary>
+    internal static (double X, double Y, double NX, double NY, double TX, double TY) CurbPoint(Ring ring, int side, double outward, double lift)
+    {
+        if (!ring.UprightBorders)
+        {
+            var p = SurfaceSample(ring, side * (ring.Width / 2 + outward));
+            return (p.X + p.NX * lift, p.Y + p.NY * lift, p.NX, p.NY, p.TX, p.TY);
+        }
+        var arc = SurfaceArc.For(ring, 0, 0, 0, 1, new RoadMeshSettings());
+        var (e, _, _) = CurbFrame(ring, arc, side * ring.Width / 2);
+        return (e.X + side * outward, e.Y + lift, 0, 1, 1, 0);
+    }
+
+    /// <summary>
+    /// The curb's bottom corners on one side: the inner one on the slab's underside (so the slab stays closed), the outer
+    /// one below the curb's outer face (upright curbs: never inside the inner one).
+    /// </summary>
+    private static ((double X, double Y) Inner, (double X, double Y) Outer) CurbBottom(Ring ring, SurfaceArc arc, double s, int side,
+        double thickness, double h)
+    {
+        var (e, n) = (arc.Point(s), arc.Normal(s));
+        var inner = (e.X - n.X * h, e.Y - n.Y * h);
+        if (!ring.UprightBorders)
+        {
+            var t = arc.Tangent(s);
+            return (inner, (inner.Item1 + t.X * thickness * side, inner.Item2 + t.Y * thickness * side));
+        }
+        var x = side > 0 ? Math.Max(e.X + thickness, inner.Item1) : Math.Min(e.X - thickness, inner.Item1);
+        return (inner, (x, Math.Min(e.Y - h, inner.Item2)));
+    }
+
     /// <summary>Height of the boost decal above the driving surface.</summary>
     private const double DecalLift = 0.02;
 
@@ -429,10 +482,11 @@ public static class RoadMeshBuilder
             var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
             foreach (var sign in new[] { 1, -1 })
             {
-                var (e, t, n) = (arc.Point(sign * half), arc.Tangent(sign * half), arc.Normal(sign * half));
+                var (e, t, n) = CurbFrame(ring, arc, sign * half);
                 (double X, double Y) At(double along, double up) => (e.X + t.X * along * sign + n.X * up, e.Y + t.Y * along * sign + n.Y * up);
+                var (innerBottom, outerBottom) = CurbBottom(ring, arc, sign * half, sign, bt, h);
                 var first = points.Count;
-                points.AddRange(new[] { e, At(0, bh), At(bt, bh), At(bt, -h), At(0, -h) });
+                points.AddRange(new[] { e, At(0, bh), At(bt, bh), outerBottom, innerBottom });
                 for (var i = 1; i < 4; i++)
                     triangles.Add((first, first + i, first + i + 1));
             }
@@ -617,8 +671,8 @@ public static class RoadMeshBuilder
         // Curbs and sides are built in the local frame of each surface end: outward along the tangent,
         // up along the normal. Straight edges are ordered so that the outward normal is (dy, -dx).
         var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
-        var (er, tr, nr) = (arc.Point(half), arc.Tangent(half), arc.Normal(half));
-        var (el, tl, nl) = (arc.Point(-half), arc.Tangent(-half), arc.Normal(-half));
+        var (er, tr, nr) = CurbFrame(ring, arc, half);
+        var (el, tl, nl) = CurbFrame(ring, arc, -half);
         (double X, double Y) At((double X, double Y) e, (double X, double Y) t, double along, (double X, double Y) n, double up) =>
             (e.X + t.X * along + n.X * up, e.Y + t.Y * along + n.Y * up);
         Edge Line(string key, (double X, double Y) a, (double X, double Y) b, TmMaterial m) => new(key, a.X, a.Y, b.X, b.Y, 1, m);
@@ -628,22 +682,25 @@ public static class RoadMeshBuilder
             var border = Surfaces.BorderOf(segment.BorderMaterial);
             // From the inner face (inset inside the width) out to the thickness outside it.
             bt += inset;
-            // Right end: outward = +tangent. Left end: outward = -tangent.
-            yield return Line("rb_out", At(er, tr, bt, nr, -h), At(er, tr, bt, nr, bh), border);
+            // Right end: outward = +tangent. Left end: outward = -tangent. The bottom corners: see CurbBottom.
+            var (rIn, rOut) = CurbBottom(ring, arc, half, 1, bt, h);
+            var (lIn, lOut) = CurbBottom(ring, arc, -half, -1, bt, h);
+            yield return Line("rb_out", rOut, At(er, tr, bt, nr, bh), border);
             yield return Line("rb_top", At(er, tr, bt, nr, bh), At(er, tr, 0, nr, bh), border);
             yield return Line("rb_in", At(er, tr, 0, nr, bh), er, border);
             if (segment.Underside)
-                yield return Line("rb_bot", At(er, tr, 0, nr, -h), At(er, tr, bt, nr, -h), Surfaces.Underside);
+                yield return Line("rb_bot", rIn, rOut, Surfaces.Underside);
             yield return Line("lb_in", el, At(el, tl, 0, nl, bh), border);
             yield return Line("lb_top", At(el, tl, 0, nl, bh), At(el, tl, -bt, nl, bh), border);
-            yield return Line("lb_out", At(el, tl, -bt, nl, bh), At(el, tl, -bt, nl, -h), border);
+            yield return Line("lb_out", At(el, tl, -bt, nl, bh), lOut, border);
             if (segment.Underside)
-                yield return Line("lb_bot", At(el, tl, -bt, nl, -h), At(el, tl, 0, nl, -h), Surfaces.Underside);
+                yield return Line("lb_bot", lOut, lIn, Surfaces.Underside);
         }
         else if (segment.Underside)
         {
-            yield return Line("rs", At(er, tr, 0, nr, -h), er, Surfaces.Underside);
-            yield return Line("ls", el, At(el, tl, 0, nl, -h), Surfaces.Underside);
+            // Plain sides close the slab along the surface's own normal, also with upright borders.
+            yield return Line("rs", CurbBottom(ring, arc, half, 1, 0, h).Inner, er, Surfaces.Underside);
+            yield return Line("ls", el, CurbBottom(ring, arc, -half, -1, 0, h).Inner, Surfaces.Underside);
         }
     }
 

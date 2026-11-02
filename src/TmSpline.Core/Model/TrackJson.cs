@@ -19,6 +19,9 @@ public static class TrackJson
         public int Version { get; set; } = CurrentVersion;
         public string Name { get; set; } = "Untitled";
         public bool Closed { get; set; }
+        /// <summary>See Track.ShapeAnchor; missing = Center.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ShapeAnchor? ShapeAnchor { get; set; }
         public int Laps { get; set; } = 3;
         public List<PointDto> Points { get; set; } = new();
         public List<SegmentDto> Segments { get; set; } = new();
@@ -163,7 +166,7 @@ public static class TrackJson
 
     public static Track ToTrack(TrackDto dto)
     {
-        var track = new Track { Closed = dto.Closed };
+        var track = new Track { Closed = dto.Closed, ShapeAnchor = dto.ShapeAnchor ?? ShapeAnchor.Center };
         for (var i = 0; i < dto.Points.Count; i++)
         {
             var p = dto.Points[i];
@@ -197,6 +200,7 @@ public static class TrackJson
     {
         Name = name,
         Closed = track.Closed,
+        ShapeAnchor = track.ShapeAnchor == ShapeAnchor.Center ? null : track.ShapeAnchor,
         Points = track.Points.Select(p => new PointDto
         {
             Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,

@@ -172,6 +172,12 @@ export function newObject(kind: TrackObjectKind, segment: number, at: number, of
 /** One spline road. A map holds one or more of them (e.g. pieces of a route the car jumps between). */
 export interface Track {
   closed: boolean;
+  /**
+   * What a bent cross-section keeps in place: the road's middle (default; Width along the surface) or its edges (Width
+   * apart at the point's height, like the game's own pieces, so bent road lines up with blocks; the middle bows down
+   * or up). See ShapeAnchor in the core. Missing = "Center".
+   */
+  shapeAnchor?: "Center" | "Edges";
   points: TrackPoint[];
   segments: TrackSegment[];
   objects: TrackObject[];

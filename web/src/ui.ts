@@ -434,7 +434,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   // Rebuild the DOM only when the selection changes; otherwise just refresh values so inputs keep focus.
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
-  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
+  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${t.shapeAnchor}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
@@ -459,6 +459,14 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
 
   section(map.tracks.length > 1 ? `Track ${editor.active + 1} of ${map.tracks.length}` : "Track");
   checkbox(root, "Closed loop", () => editor.track.closed, (v) => editor.edit((tr) => (tr.closed = v), true), t.points.length < 3);
+  checkbox(root, "Keep edges", () => editor.track.shapeAnchor === "Edges", (v) => editor.edit((tr) => {
+    if (v) tr.shapeAnchor = "Edges";
+    else delete tr.shapeAnchor;
+  }, true));
+  if (t.shapeAnchor === "Edges")
+    hint(root, "Keep edges: bent cross-sections keep the road's edges at the points' height and Width apart, like the "
+      + "game's own pieces, so they line up with blocks; the middle bows down (half-pipe) or up (sausage). Off: the middle "
+      + "stays on the spline and Width is measured along the surface (best for pipes).");
   buttonRow(root, [
     ...(map.tracks.length > 1 ? [
       { label: "◀", onClick: () => editor.setActive((editor.active + map.tracks.length - 1) % map.tracks.length) },

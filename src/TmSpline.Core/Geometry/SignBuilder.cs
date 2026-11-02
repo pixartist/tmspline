@@ -35,9 +35,11 @@ public static class SignBuilder
                     // On top of the curb, in its middle (it reaches from its inset inside the width to its thickness
                     // outside); without borders at the road's edge.
                     var scale = Math.Clamp(ring.BorderScale, 0, 1);
-                    var across = side * (ring.Width / 2 + (seg.Borders ? (settings.BorderThickness - settings.BorderInset) * scale / 2 : 0));
+                    var outward = seg.Borders ? (settings.BorderThickness - settings.BorderInset) * scale / 2 : 0;
                     var lift = seg.Borders ? ring.BorderHeight * scale : 0;
-                    var (point, up) = TrackObjects.SurfacePoint(ring, across, lift);
+                    var c = RoadMeshBuilder.CurbPoint(ring, side, outward, lift);
+                    var up = (ring.Right * c.NX + ring.Up * c.NY).Normalized();
+                    var point = ring.Position + ring.Right * c.X + ring.Up * c.Y;
                     var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
                     // Front towards the cars coming along the road; turned round on the right side.
                     var facing = side < 0 ? -forward : forward;
