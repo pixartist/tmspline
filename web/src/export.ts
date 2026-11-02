@@ -62,6 +62,7 @@ export function showExportDialog(track: TrackMap): void {
       <p class="error" hidden></p>
       <div class="actions">
         <button value="cancel" formnovalidate>Close</button>
+        <button value="game" class="game" hidden title="Write the map into Documents\Trackmania\Maps\TMSpline; the TMSpline Live plugin reloads it in the game's editor">Export to game</button>
         <button value="export" class="primary">Export</button>
       </div>
     </form>`;
@@ -74,6 +75,9 @@ export function showExportDialog(track: TrackMap): void {
   const result = dialog.querySelector<HTMLElement>(".result")!;
   const note = dialog.querySelector<HTMLElement>(".estimate-note")!;
   const exportButton = dialog.querySelector<HTMLButtonElement>("button.primary")!;
+  const gameButton = dialog.querySelector<HTMLButtonElement>("button.game")!;
+  // Only local setups write into the game's folder (the server says so).
+  void fetch("/api/health").then((r) => r.json()).then((h) => (gameButton.hidden = !h.exportToGame), () => {});
   login.value = saved.login;
   nickname.value = saved.nickname;
   const quality = () => (form.querySelector<HTMLInputElement>('input[name="quality"]:checked')?.value ?? "Normal") as Quality;
@@ -106,7 +110,9 @@ export function showExportDialog(track: TrackMap): void {
   });
 
   form.addEventListener("submit", async (e) => {
-    if ((e.submitter as HTMLButtonElement | null)?.value !== "export") return;
+    const action = (e.submitter as HTMLButtonElement | null)?.value;
+    if (action !== "export" && action !== "game") return;
+    const toGame = action === "game";
     e.preventDefault();
     const author: Author = { login: login.value.trim(), nickname: nickname.value.trim() };
     if (author.login && !/^[A-Za-z0-9_-]{22}$/.test(author.login)) {
@@ -117,24 +123,26 @@ export function showExportDialog(track: TrackMap): void {
     const q = quality();
     localStorage.setItem(QUALITY_KEY, q);
 
-    exportButton.disabled = true;
-    exportButton.textContent = "Exporting…";
+    const button = toGame ? gameButton : exportButton;
+    const label = button.textContent;
+    exportButton.disabled = gameButton.disabled = true;
+    button.textContent = "Exporting…";
     error.hidden = true;
     result.hidden = true;
     try {
-      const { name, bytes } = await exportMap(track, author, q);
+      const { name, bytes } = await (toGame ? exportToGame : exportMap)(track, author, q);
       const estimated = estimates.find((x) => x.quality === q);
       if (estimated) setCalibration(track.name, { factor: bytes / estimated.bytes, quality: q });
       showEstimates();
-      result.textContent = `Downloaded ${name}: ${mb(bytes)} at ${q} quality`
+      result.textContent = `${toGame ? "Wrote" : "Downloaded"} ${name}: ${mb(bytes)} at ${q} quality`
         + (bytes > MAP_LIMIT_BYTES ? " — over the game's 5 MB limit, try a lower quality." : ` (limit 5 MB).`);
       result.classList.toggle("over", bytes > MAP_LIMIT_BYTES);
       result.hidden = false;
     } catch (err) {
       showError((err as Error).message);
     } finally {
-      exportButton.disabled = false;
-      exportButton.textContent = "Export";
+      exportButton.disabled = gameButton.disabled = false;
+      button.textContent = label;
     }
   });
   dialog.addEventListener("close", () => dialog.remove());
@@ -202,4 +210,16 @@ async function exportMap(track: TrackMap, author: Author, quality: Quality): Pro
   a.click();
   URL.revokeObjectURL(a.href);
   return { name, bytes: blob.size };
+}
+
+/** Writes the map into the game's Maps folder (Maps/TMSpline), where the TMSpline Live plugin reloads it. */
+async function exportToGame(track: TrackMap, author: Author, quality: Quality): Promise<{ name: string; bytes: number }> {
+  const response = await fetch("/api/export/game", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }),
+  });
+  if (!response.ok) throw new Error(await problemMessage(response, "Export failed"));
+  const written = (await response.json()) as { mapPath: string; bytes: number };
+  return { name: `Maps/${written.mapPath}`, bytes: written.bytes };
 }

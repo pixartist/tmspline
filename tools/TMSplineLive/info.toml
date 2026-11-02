@@ -1,0 +1,7 @@
+[meta]
+name     = "TMSpline Live"
+author   = "TMSpline"
+category = "Map Editor"
+version  = "1.0.0"
+
+[script]
