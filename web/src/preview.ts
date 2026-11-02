@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     layer.shadowsVisible = false;
     const pillars = pillarColumns([block], lib);
     layer.setNeighbours([block, ...pillars]);
-    layer.sync([block], null, null);
+    layer.sync([block], new Set(), null);
     layer.syncPillars(pillars);
     scene.add(layer.group);
     await lib.settled();

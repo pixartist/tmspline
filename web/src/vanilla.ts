@@ -748,7 +748,7 @@ export class BlockLayer {
     this.pillarKeys.length = pillars.length;
   }
 
-  sync(blocks: VanillaBlock[], selected: number | null, hovered: number | null): void {
+  sync(blocks: VanillaBlock[], selected: ReadonlySet<number>, hovered: number | null): void {
     blocks.forEach((b, i) => {
       const key = this.keyOf(b);
       if (this.keys[i] === key && this.items[i]) return;
@@ -763,8 +763,8 @@ export class BlockLayer {
     this.keys.length = blocks.length;
     this.items.forEach((item, i) => {
       const outline = item.userData.outline as THREE.LineSegments;
-      outline.visible = i === selected || i === hovered;
-      (outline.material as THREE.LineBasicMaterial).color.setHex(i === selected ? OUTLINE_SELECTED : OUTLINE_HOVER);
+      outline.visible = selected.has(i) || i === hovered;
+      (outline.material as THREE.LineBasicMaterial).color.setHex(selected.has(i) ? OUTLINE_SELECTED : OUTLINE_HOVER);
     });
   }
 

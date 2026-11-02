@@ -17,6 +17,8 @@ export type Selection =
   | { kind: "object"; index: number }
   /** A vanilla block of the map (map-level, not part of a track). */
   | { kind: "block"; index: number }
+  /** Several vanilla blocks (Shift+click, drag a rectangle): moved, raised and deleted together. Always two or more. */
+  | { kind: "blocks"; indices: number[] }
   | null;
 
 /**
@@ -71,8 +73,8 @@ interface Drag {
   plane: THREE.Plane;
   /** Move drags: grabbed position minus the plane hit, so the object does not jump to the cursor. */
   offset: THREE.Vector3;
-  /** Block drags: the block's cell when the drag started and where the drag plane was first hit. */
-  blockStart?: { x: number; z: number; position?: Vec3; hit: THREE.Vector3 };
+  /** Block drags: where the drag plane was first hit, and the moved blocks (the selected ones) as they were then. */
+  blockStart?: { hit: THREE.Vector3; blocks: { index: number; x: number; z: number; position?: Vec3 }[] };
   /** Bank drags: last ring-plane direction and the unsnapped bank. */
   lastDir?: THREE.Vector3;
   rawBank?: number;
@@ -221,6 +223,8 @@ export class Editor {
   private hover: Pick | null = null;
   private drag: Drag | null = null;
   private clickStart: { x: number; y: number } | null = null;
+  /** Rectangle selection of blocks: a left drag that started on nothing draggable (Shift adds, Ctrl removes). */
+  private marquee: { pointerId: number; x: number; y: number; el: HTMLDivElement } | null = null;
   private rightClickStart: { x: number; y: number } | null = null;
   /** Ctrl+wheel amount not yet turned into a level step. */
   private wheelLevel = 0;
@@ -432,6 +436,36 @@ export class Editor {
   private get segmentStarts() { return this.view.segmentStarts; }
   private get placements() { return this.view.placements; }
 
+  /** Indices of the selected blocks (none, one or several). */
+  selectedBlocks(): number[] {
+    const s = this.selection;
+    return s?.kind === "block" ? [s.index] : s?.kind === "blocks" ? s.indices : [];
+  }
+
+  /** Selects blocks: replaces the selection, or adds to, removes from or toggles in the selected blocks. */
+  selectBlocks(indices: Iterable<number>, mode: "replace" | "add" | "remove" | "toggle" = "replace"): void {
+    const set = new Set(mode === "replace" ? [] : this.selectedBlocks());
+    for (const i of indices) {
+      if (mode === "remove" || (mode === "toggle" && set.has(i))) set.delete(i);
+      else set.add(i);
+    }
+    const list = [...set].sort((a, b) => a - b);
+    this.select(list.length === 0 ? null : list.length === 1 ? { kind: "block", index: list[0] } : { kind: "blocks", indices: list });
+  }
+
+  /** Deletes the selected blocks (one undo step); returns whether there were any. */
+  deleteSelectedBlocks(): boolean {
+    const doomed = new Set(this.selectedBlocks());
+    if (doomed.size === 0) return false;
+    this.editBlocks((blocks) => {
+      const keep = blocks.filter((_, i) => !doomed.has(i));
+      blocks.length = 0;
+      blocks.push(...keep);
+    });
+    this.select(null);
+    return true;
+  }
+
   select(selection: Selection): void {
     this.selection = selection;
     this.syncControls();
@@ -528,7 +562,7 @@ export class Editor {
     return true;
   }
 
-  /** PgUp/PgDn: one level (8 m) up or down for the selected block or the one being placed. */
+  /** PgUp/PgDn: one level (8 m) up or down for the selected blocks or the one being placed. */
   raiseBlock(step: number): boolean {
     const place = this.blockPlace;
     if (place) {
@@ -538,13 +572,15 @@ export class Editor {
       this.onChange();
       return true;
     }
-    const s = this.selection;
-    if (s?.kind !== "block") return false;
+    const selected = this.selectedBlocks();
+    if (selected.length === 0) return false;
     this.editBlocks((blocks) => {
-      const b = blocks[s.index];
-      if (b.free && b.position) b.position = [b.position[0], clamp(b.position[1] + step * this.freeLiftStep, Y_MIN, MAX_BLOCK_LEVEL * BLOCK_LEVEL), b.position[2]];
-      else b.y = clamp(b.y + step, 0, MAX_BLOCK_LEVEL);
-    }, `blockLevel:${s.index}`);
+      for (const i of selected) {
+        const b = blocks[i];
+        if (b.free && b.position) b.position = [b.position[0], clamp(b.position[1] + step * this.freeLiftStep, Y_MIN, MAX_BLOCK_LEVEL * BLOCK_LEVEL), b.position[2]];
+        else b.y = clamp(b.y + step, 0, MAX_BLOCK_LEVEL);
+      }
+    }, `blockLevel:${selected.join(",")}`);
     return true;
   }
 
@@ -666,11 +702,11 @@ export class Editor {
   }
 
   private syncBlocks(): void {
-    const s = this.selection, h = this.drag?.pick ?? this.hover;
+    const h = this.drag?.pick ?? this.hover;
     const pillars = pillarColumns(this.map.blocks, this.library);
     // Clips (side walls, caps) show on faces without a neighbour, columns included.
     this.blocks.setNeighbours([...this.map.blocks, ...pillars]);
-    this.blocks.sync(this.map.blocks, s?.kind === "block" ? s.index : null, h?.kind === "block" ? h.index : null);
+    this.blocks.sync(this.map.blocks, new Set(this.selectedBlocks()), h?.kind === "block" ? h.index : null);
     this.blocks.syncPillars(pillars);
     this.items.sync(this.map.items);
   }
@@ -975,7 +1011,7 @@ export class Editor {
     if (delta === 0) return;
     // Ctrl+wheel: level of the block being placed or the selected block (wheel up = higher). Touchpads send many small
     // steps, so they add up to one level per notch-sized amount.
-    if ((e.ctrlKey || e.metaKey) && (this.blockPlace || this.selection?.kind === "block")) {
+    if ((e.ctrlKey || e.metaKey) && (this.blockPlace || this.selectedBlocks().length > 0)) {
       // A mouse wheel notch (one event of 50+ px) is one level; touchpad deltas add up to the same amount.
       if (Math.abs(delta) >= WHEEL_LEVEL_STEP / 2) {
         this.wheelLevel = 0;
@@ -1291,9 +1327,8 @@ export class Editor {
     const same = pick === this.hover || (pick && this.hover && this.samePick(pick, this.hover));
     if (same) return;
     this.hover = pick;
-    const s = this.selection;
     this.renderer.domElement.style.cursor = !pick ? "" : pick.kind === "segment" ? "pointer"
-      : pick.kind === "block" ? (s?.kind === "block" && s.index === pick.index ? "grab" : "pointer") : "grab";
+      : pick.kind === "block" ? (this.selectedBlocks().includes(pick.index) ? "grab" : "pointer") : "grab";
     this.syncBlocks();
     this.showSegmentOverlay(this.hoverOverlay, pick?.kind === "segment" ? pick.index : null, pick ? this.trackOf(pick) : this.active);
     this.updateControls();
@@ -1323,24 +1358,30 @@ export class Editor {
 
   private onPointerDown(e: PointerEvent): void {
     if (e.button === 2) this.rightClickStart = { x: e.clientX, y: e.clientY };
-    if (e.button !== 0) return;
+    // The left button orbits only with Alt held (Alt+Shift pans), so plain left drags can select and move things.
+    // Runs before OrbitControls' listener (capture phase), which reads the button mapping on pointer down.
+    this.orbit.mouseButtons.LEFT = e.altKey ? THREE.MOUSE.ROTATE : (-1 as THREE.MOUSE);
+    if (e.button !== 0 || e.altKey) return;
     // The optional axis gizmo handles its own drags.
     if (this.axisGizmoEnabled && this.axisGizmo.axis) return;
-    // Insert/place mode: clicks insert (handled on pointer up), drags still orbit.
+    // Insert/place mode: clicks insert (handled on pointer up).
     if (this.insertMode || this.placeMode || this.blockPlace) {
       this.clickStart = { x: e.clientX, y: e.clientY };
       return;
     }
 
     let pick = this.pick(e, false);
-    // The selected block can be dragged to other cells; other blocks are selected with a click (so drags still orbit).
-    const selected = this.selection;
-    if (!pick && selected?.kind === "block") {
+    // Selected blocks can be dragged (all of them together); other blocks are selected with a click, so a drag that
+    // starts on them (scenery covers the ground) still draws a selection rectangle.
+    const selected = this.selectedBlocks();
+    if (!pick && selected.length > 0) {
       const hit = this.blockHit(this.rayFrom(e).ray);
-      if (hit?.index === selected.index) pick = { kind: "block", index: hit.index };
+      if (hit && selected.includes(hit.index)) pick = { kind: "block", index: hit.index };
     }
     if (!pick || pick.kind === "segment") {
       this.clickStart = { x: e.clientX, y: e.clientY };
+      // Touch keeps its one-finger orbit (OrbitControls), so only mouse and pen draw rectangles.
+      if (e.pointerType !== "touch") this.marquee = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, el: this.marqueeElement() };
       return;
     }
     // A point of another track: that track becomes the active one, and the drag goes on with its point.
@@ -1367,6 +1408,21 @@ export class Editor {
 
   private onPointerMove(e: PointerEvent): void {
     this.lastPointer = e;
+    const marquee = this.marquee;
+    if (marquee && e.pointerId === marquee.pointerId) {
+      if (marquee.el.hidden && Math.hypot(e.clientX - marquee.x, e.clientY - marquee.y) < DRAG_THRESHOLD_PX) return;
+      if (marquee.el.hidden) {
+        marquee.el.hidden = false;
+        this.setHover(null);
+        try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      }
+      const r = this.container.getBoundingClientRect();
+      Object.assign(marquee.el.style, {
+        left: `${Math.min(marquee.x, e.clientX) - r.left}px`, top: `${Math.min(marquee.y, e.clientY) - r.top}px`,
+        width: `${Math.abs(e.clientX - marquee.x)}px`, height: `${Math.abs(e.clientY - marquee.y)}px`,
+      });
+      return;
+    }
     const drag = this.drag;
     if (drag && e.pointerId === drag.pointerId) {
       if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < DRAG_THRESHOLD_PX) return;
@@ -1399,11 +1455,22 @@ export class Editor {
       this.rightClickStart = null;
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= DRAG_THRESHOLD_PX) {
         if (this.blockPlace) this.setBlockPlaceMode(null);
-        else if (this.selection?.kind === "block") this.select(null);
+        else if (this.selectedBlocks().length > 0) this.select(null);
       }
       return;
     }
     if (e.button !== 0) return;
+    const marquee = this.marquee;
+    this.marquee = null;
+    if (marquee && !marquee.el.hidden) {
+      try { this.renderer.domElement.releasePointerCapture(marquee.pointerId); } catch { /* not captured */ }
+      marquee.el.remove();
+      this.clickStart = null;
+      const inside = this.blocksInRect(marquee.x, marquee.y, e.clientX, e.clientY);
+      this.selectBlocks(inside, e.ctrlKey || e.metaKey ? "remove" : e.shiftKey ? "add" : "replace");
+      return;
+    }
+    marquee?.el.remove();
     if (this.drag) {
       try { this.renderer.domElement.releasePointerCapture(this.drag.pointerId); } catch { /* not captured */ }
       this.drag = null;
@@ -1468,11 +1535,38 @@ export class Editor {
 
     const pick = this.pick(e, true);
     if (pick?.kind === "block") {
-      this.select({ kind: "block", index: pick.index });
+      // Shift+click adds the block to the selection or takes it out again.
+      this.selectBlocks([pick.index], e.shiftKey ? "toggle" : "replace");
       return;
     }
+    // Shift+click elsewhere keeps the selected blocks (a missed shift+click should not lose a large selection).
+    if (e.shiftKey && this.selection?.kind === "blocks") return;
     if (pick?.kind === "segment" && pick.track !== undefined) this.setActive(pick.track);
     this.select(pick?.kind === "segment" ? { kind: "segment", index: pick.index } : null);
+  }
+
+  private marqueeElement(): HTMLDivElement {
+    const el = document.createElement("div");
+    el.className = "select-rect";
+    el.hidden = true;
+    this.container.appendChild(el);
+    return el;
+  }
+
+  /** Blocks whose box centre is inside a screen rectangle (client coordinates) and in front of the camera. */
+  private blocksInRect(x0: number, y0: number, x1: number, y1: number): number[] {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const [left, right] = [Math.min(x0, x1), Math.max(x0, x1)], [top, bottom] = [Math.min(y0, y1), Math.max(y0, y1)];
+    const result: number[] = [];
+    this.map.blocks.forEach((b, i) => {
+      const size = blockSize(this.library, b);
+      const center = new THREE.Vector3(size[0] * BLOCK_CELL / 2, size[1] * BLOCK_LEVEL / 2, size[2] * BLOCK_CELL / 2)
+        .applyMatrix4(blockMatrix(b, size)).project(this.camera);
+      if (center.z < -1 || center.z > 1) return;
+      const sx = r.left + (center.x + 1) / 2 * r.width, sy = r.top + (1 - center.y) / 2 * r.height;
+      if (sx >= left && sx <= right && sy >= top && sy <= bottom) result.push(i);
+    });
+    return result;
   }
 
   private moveMode(e: { shiftKey: boolean; altKey: boolean }): MoveMode {
@@ -1487,8 +1581,8 @@ export class Editor {
     if (e.key === "Shift") this.shiftDown = down;
     else if (e.key === "Alt") {
       this.altDown = down;
-      // Keep the browser from focusing its menu bar when Alt is used as a drag modifier.
-      if (this.drag) e.preventDefault();
+      // Keep the browser from focusing its menu when Alt is released (Alt is the camera key and a drag modifier).
+      e.preventDefault();
     } else return;
 
     const drag = this.drag;
@@ -1524,8 +1618,14 @@ export class Editor {
       // Moves on the block's own level, by whole cells.
       drag.plane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), target);
       const hit = ray.intersectPlane(drag.plane, new THREE.Vector3());
-      const b = this.map.blocks[drag.pick.index];
-      drag.blockStart = hit ? { x: b.x, z: b.z, position: b.position ? [...b.position] : undefined, hit } : undefined;
+      const indices = this.selectedBlocks().includes(drag.pick.index) ? this.selectedBlocks() : [drag.pick.index];
+      drag.blockStart = hit ? {
+        hit,
+        blocks: indices.map((index) => {
+          const b = this.map.blocks[index];
+          return { index, x: b.x, z: b.z, position: b.free && b.position ? [...b.position] as Vec3 : undefined };
+        }),
+      } : undefined;
       return;
     }
     if (drag.pick.kind === "bank") {
@@ -1559,26 +1659,7 @@ export class Editor {
       return;
     }
     if (drag.pick.kind === "block") {
-      const start = drag.blockStart;
-      const hit = this.rayFrom(e).ray.intersectPlane(drag.plane, new THREE.Vector3());
-      const b = this.map.blocks[drag.pick.index];
-      if (!start || !hit || !b || hit.distanceTo(this.camera.position) > 6000) return;
-      if (b.free && start.position) {
-        // Free blocks move freely on their height (snap mode: their origin on the grid; Ctrl ignores snapping).
-        const moved = new THREE.Vector3(...start.position).add(hit.clone().sub(start.hit));
-        if (!e.ctrlKey) this.snapped(moved);
-        b.position = [clampMap(moved.x), start.position[1], clampMap(moved.z)];
-        this.showLabel(e, `${b.name} · ${b.position[0].toFixed(1)}, ${b.position[1].toFixed(1)}, ${b.position[2].toFixed(1)} m`);
-        this.syncBlocks();
-        this.onChange();
-        return;
-      }
-      const [fx, , fz] = this.blockFootprint(b);
-      b.x = this.clampCell(start.x + Math.round((hit.x - start.hit.x) / BLOCK_CELL), fx);
-      b.z = this.clampCell(start.z + Math.round((hit.z - start.hit.z) / BLOCK_CELL), fz);
-      this.showLabel(e, `${b.name} · cell ${b.x}, ${b.z} · level ${b.y}`);
-      this.syncBlocks();
-      this.onChange();
+      this.dragBlocks(e, drag);
       return;
     }
     const hit = this.rayFrom(e).ray.intersectPlane(drag.plane, new THREE.Vector3());
@@ -1634,6 +1715,63 @@ export class Editor {
       else this.label.hidden = true;
     }
     this.changed(false);
+  }
+
+  /**
+   * Moves the grabbed block, and the other selected ones by the same step. With only free blocks the step is free
+   * (snap mode: the grabbed block's origin lands on the grid; Ctrl ignores snapping); as soon as a grid block moves,
+   * everything moves by whole cells. The step is limited so that no block leaves the map.
+   */
+  private dragBlocks(e: PointerEvent, drag: Drag): void {
+    const start = drag.blockStart;
+    const hit = this.rayFrom(e).ray.intersectPlane(drag.plane, new THREE.Vector3());
+    if (!start || !hit || hit.distanceTo(this.camera.position) > 6000) return;
+    const moving = start.blocks.filter((m) => this.map.blocks[m.index]);
+    const grabbed = moving.find((m) => m.index === drag.pick.index);
+    if (!grabbed) return;
+    let dx = hit.x - start.hit.x, dz = hit.z - start.hit.z;
+    const cells = moving.some((m) => !m.position);
+    if (cells) {
+      dx = Math.round(dx / BLOCK_CELL) * BLOCK_CELL;
+      dz = Math.round(dz / BLOCK_CELL) * BLOCK_CELL;
+    } else if (!e.ctrlKey && this.snapStep > 0) {
+      const p = grabbed.position!;
+      const moved = this.snapped(new THREE.Vector3(p[0] + dx, p[1], p[2] + dz));
+      dx = moved.x - p[0];
+      dz = moved.z - p[2];
+    }
+    // The largest step (towards the cursor) that keeps every block inside the map.
+    const half = MAP_HALF_EXTENT;
+    let [minX, maxX, minZ, maxZ] = [-Infinity, Infinity, -Infinity, Infinity];
+    for (const m of moving) {
+      const b = this.map.blocks[m.index];
+      if (m.position) {
+        [minX, maxX] = [Math.max(minX, -half - m.position[0]), Math.min(maxX, half - m.position[0])];
+        [minZ, maxZ] = [Math.max(minZ, -half - m.position[2]), Math.min(maxZ, half - m.position[2])];
+      } else {
+        const [fx, , fz] = this.blockFootprint(b);
+        [minX, maxX] = [Math.max(minX, -half - m.x * BLOCK_CELL), Math.min(maxX, half - (m.x + fx) * BLOCK_CELL)];
+        [minZ, maxZ] = [Math.max(minZ, -half - m.z * BLOCK_CELL), Math.min(maxZ, half - (m.z + fz) * BLOCK_CELL)];
+      }
+    }
+    dx = clamp(dx, Math.min(minX, 0), Math.max(maxX, 0));
+    dz = clamp(dz, Math.min(minZ, 0), Math.max(maxZ, 0));
+    if (cells) [dx, dz] = [Math.trunc(dx / BLOCK_CELL) * BLOCK_CELL, Math.trunc(dz / BLOCK_CELL) * BLOCK_CELL];
+    for (const m of moving) {
+      const b = this.map.blocks[m.index];
+      if (m.position) b.position = [m.position[0] + dx, m.position[1], m.position[2] + dz];
+      else {
+        b.x = m.x + Math.round(dx / BLOCK_CELL);
+        b.z = m.z + Math.round(dz / BLOCK_CELL);
+      }
+    }
+    const b = this.map.blocks[grabbed.index];
+    const where = b.free && b.position
+      ? `${b.position[0].toFixed(1)}, ${b.position[1].toFixed(1)}, ${b.position[2].toFixed(1)} m`
+      : `cell ${b.x}, ${b.z} · level ${b.y}`;
+    this.showLabel(e, moving.length > 1 ? `${moving.length} blocks · moved ${dx.toFixed(cells ? 0 : 1)}, ${dz.toFixed(cells ? 0 : 1)} m` : `${b.name} · ${where}`);
+    this.syncBlocks();
+    this.onChange();
   }
 
   /**
@@ -1771,6 +1909,7 @@ export class Editor {
     if (s.kind === "segment") return s.index < this.track.segments.length;
     if (s.kind === "object") return s.index < this.track.objects.length;
     if (s.kind === "block") return s.index < this.map.blocks.length;
+    if (s.kind === "blocks") return s.indices.every((i) => i < this.map.blocks.length);
     return s.index < this.track.points.length;
   }
 

@@ -38,7 +38,12 @@ npm run dev    # http://localhost:5173
 ```
 
 Controls:
-- Drag points and handles directly, parallel to the screen; `Shift` = keep height, `Alt` = height only, `Ctrl` = snap to 1 m.
+- Drag points and handles directly, parallel to the screen; `Shift` = keep height, `Alt` (pressed once dragging) = height
+  only, `Ctrl` = snap to 1 m.
+- The camera orbits with `Alt` + left drag (`Alt+Shift`: pan); right drag pans. A plain left drag on empty space (or on
+  blocks that are not selected) draws a rectangle that selects the blocks whose centre is inside it (`Shift` adds,
+  `Ctrl` removes); `Shift`+click adds or removes a single block. Dragging one of the selected blocks moves them all (by
+  whole cells as long as a grid block is among them), `PgUp`/`PgDn` raise them, `Del` deletes them.
 - Click a point to show its handles and the orange banking ring; drag the ring to bank (`Ctrl` = 5° steps) or use `Q`/`E`.
   Between two points the road rolls the shorter way round, so a corkscrew is a few points stepping round
   (e.g. 0° → 120° → -120° → 0°), and closed tracks with corkscrews close by themselves.

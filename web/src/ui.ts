@@ -75,6 +75,8 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     const n = editor.track.points.length;
     let indices: number[] | undefined;
     if (!wholeTrack && s) {
+      // Only points and segments are on the track; with blocks or an object selected, M does nothing.
+      if (s.kind !== "point" && s.kind !== "handle" && s.kind !== "segment") return;
       const around = s.kind === "segment" ? [s.index, (s.index + 1) % n] : [s.index];
       indices = around.flatMap((i) => [i - 1, i, i + 1]).map((i) => (editor.track.closed ? (i + n) % n : i));
     }
@@ -82,11 +84,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   };
   const removePoint = () => {
     const s = editor.selection;
-    if (s?.kind === "block") {
-      editor.editBlocks((blocks) => void blocks.splice(s.index, 1));
-      editor.select(null);
-      return;
-    }
+    if (editor.deleteSelectedBlocks()) return;
     if (s?.kind === "object") {
       editor.edit((t) => void t.objects.splice(s.index, 1), true);
       editor.select(null);
@@ -439,7 +437,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
-    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}`;
+    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
     return;
@@ -694,6 +692,20 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       : "Drag the selected block to move it by cells. R turns it (Shift+R back), PgUp / PgDn change its level (8 m), "
         + "Del removes it. Cells are 32 m from the map center; level 0 is the ground (the block's ground variant). "
         + "Tab (or Free) turns it into a free block, which can be anywhere and at any angle.");
+  } else if (s?.kind === "blocks") {
+    const blocks = s.indices.map((i) => editor.map.blocks[i]).filter(Boolean);
+    section(`${blocks.length} blocks`);
+    const counts = new Map<string, number>();
+    for (const b of blocks) counts.set(b.name, (counts.get(b.name) ?? 0) + 1);
+    const names = [...counts].sort((a, b) => b[1] - a[1]);
+    hint(root, names.slice(0, 6).map(([name, n]) => `${n}× ${name}`).join(", ") + (names.length > 6 ? `, … (${names.length} kinds)` : ""));
+    buttonRow(root, [
+      { label: "Deselect", onClick: () => editor.select(null) },
+      { label: "Delete", onClick: removePoint },
+    ]);
+    hint(root, "Drag one of them to move them all (by whole cells as long as a grid block is among them). PgUp / PgDn "
+      + "or Ctrl+wheel raise or lower them all, Del removes them. Shift+click a block to add or remove it, drag a rectangle "
+      + "to select (Shift: add, Ctrl: remove).");
   } else if (s?.kind === "object" && obj) {
     const o = () => editor.track.objects[s.index];
     const set = (key: string, fn: (object: Track["objects"][number]) => void) =>
