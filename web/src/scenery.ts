@@ -30,6 +30,8 @@ export const SCENERY_THEMES: SceneryTheme[] = [
 export interface SceneryInput {
   /** Lowest point of the roads per grid column ("x,z" → metres above the ground). */
   roads: Map<string, number>;
+  /** Where the roads are, at any height: FOOTPRINT_CELL squares ("x,z") the road meshes cover (see roadFootprint). */
+  footprint: Set<string>;
   /** Grid cells taken by blocks ("x,y,z", levels), the scenery's own excluded. */
   occupied: Set<string>;
 }
@@ -121,6 +123,25 @@ export interface SceneryLandOptions extends SceneryOptions {
   forest: string;
   /** Share of the flat cells that get trees, 0..1 (busier cells get more of them). */
   density: number;
+  /** Trees keep at least this many metres from the roads (their curbs, gates ...), at any height. */
+  clearance: number;
+}
+
+/** Size of the squares of the road footprint (SceneryInput.footprint), metres. */
+export const FOOTPRINT_CELL = 2;
+
+/** Whether a spot is at least `clearance` metres from every footprint square (measured to the square's nearest point). */
+function clearOfRoads(footprint: Set<string>, px: number, pz: number, clearance: number): boolean {
+  const reach = Math.ceil(clearance / FOOTPRINT_CELL) + 1;
+  const [cx, cz] = [Math.floor(px / FOOTPRINT_CELL), Math.floor(pz / FOOTPRINT_CELL)];
+  for (let dx = -reach; dx <= reach; dx++)
+    for (let dz = -reach; dz <= reach; dz++) {
+      if (!footprint.has(key(cx + dx, cz + dz))) continue;
+      const nx = Math.max((cx + dx) * FOOTPRINT_CELL, Math.min(px, (cx + dx + 1) * FOOTPRINT_CELL));
+      const nz = Math.max((cz + dz) * FOOTPRINT_CELL, Math.min(pz, (cz + dz + 1) * FOOTPRINT_CELL));
+      if (Math.hypot(px - nx, pz - nz) < clearance) return false;
+    }
+  return true;
 }
 
 /**
@@ -152,10 +173,11 @@ function random(seed: number): () => number {
 }
 
 /**
- * Trees on flat cells (level → its surface): a share `density` of them get 1..4 trees at random spots, kept 7 m apart
- * and 3 m from the cell's edges, random sizes and turns.
+ * Trees on flat cells (level → its surface): a share `density` of them get 1..4 trees at random spots, kept 7 m apart,
+ * 3 m from the cell's edges and `clear` of the roads, random sizes and turns.
  */
-function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string): VanillaItem[] {
+function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string,
+  clear: (x: number, z: number) => boolean): VanillaItem[] {
   const kind = FORESTS.find((f) => f.id === forest);
   if (!kind || density <= 0) return [];
   const items: VanillaItem[] = [];
@@ -167,7 +189,7 @@ function plantForest(surfaces: Map<string, number>, forest: string, density: num
     const spots: [number, number][] = [];
     for (let tries = 0; spots.length < count && tries < 20; tries++) {
       const px = x * BLOCK_CELL + 3 + rnd() * (BLOCK_CELL - 6), pz = z * BLOCK_CELL + 3 + rnd() * (BLOCK_CELL - 6);
-      if (spots.some(([sx, sz]) => Math.hypot(sx - px, sz - pz) < 7)) continue;
+      if (spots.some(([sx, sz]) => Math.hypot(sx - px, sz - pz) < 7) || !clear(px, pz)) continue;
       spots.push([px, pz]);
     }
     // On the ground (level 0) the item stands on the terrain; on land on the platform's top, 2 m above its level.
@@ -209,7 +231,8 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     // The land meets the face where it is still vertical: 3 levels below the top (64 m: level 5, per the user).
     cliff = { high: walls.high, front: walls.front, top: walls.top - CLIFF_LAND_BELOW_TOP, leaning: depth > BLOCK_CELL * 1.25 };
   }
-  // Where trees may stand: flat land (or the ground) at least 2 cells from the track, away from the cliffs.
+  // Where trees may stand: flat land (or the ground) away from the cliffs, not on cells with blocks, and each tree far
+  // enough from the roads (checked per tree, so they also grow right beside the road and on the land under it).
   let surfaces = new Map<string, number>();
   if (options.hills) {
     const land = hills(lib, track, dist, base, cliff, options);
@@ -220,8 +243,12 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     for (let x = -HALF; x < HALF; x++)
       for (let z = -HALF; z < HALF; z++)
         if (!cliff?.high.has(key(x, z)) && !cliff?.front.has(key(x, z))) surfaces.set(key(x, z), 0);
-  for (const k of [...surfaces.keys()]) if ((dist.get(k) ?? Infinity) < 2) surfaces.delete(k);
-  return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id) };
+  for (const k of input.occupied) {
+    const [x, , z] = k.split(",").map(Number);
+    surfaces.delete(key(x, z));
+  }
+  const clear = (x: number, z: number) => clearOfRoads(input.footprint, x, z, Math.max(0, options.clearance));
+  return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id, clear) };
 }
 
 /** Levels between a cliff's top and the land against it: above that the face is no longer vertical. */
@@ -362,8 +389,8 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       if (corner) blocks.push(at(slopes[corner.d].outer, x, z, v, dirFor((d) => same(turn(d, [-1, 1]), corner.c))));
       else {
         if (v > 0) blocks.push(at(flat, x, z, v, 0));
-        // Flat land or ground, not under the road: room for trees.
-        if (!track.has(k)) flatCells.set(k, v);
+        // Flat land or ground (also under the road, beside it: each tree keeps its distance from the road).
+        flatCells.set(k, v);
       }
     }
   }
@@ -484,11 +511,23 @@ function cliffWalls(lib: VanillaLibrary, theme: SceneryTheme, dist: Map<string, 
 /** Lowest road point per grid column, from road meshes (world space). Triangles are sampled every few metres. */
 export function roadColumns(meshes: THREE.Mesh[]): Map<string, number> {
   const columns = new Map<string, number>();
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), p = new THREE.Vector3();
-  const mark = (v: THREE.Vector3) => {
+  sampleRoads(meshes, 4, (v) => {
     const k = key(Math.floor(v.x / BLOCK_CELL), Math.floor(v.z / BLOCK_CELL));
     columns.set(k, Math.min(columns.get(k) ?? Infinity, v.y));
-  };
+  });
+  return columns;
+}
+
+/** The FOOTPRINT_CELL squares the road meshes cover (world space, any height); see SceneryInput.footprint. */
+export function roadFootprint(meshes: THREE.Mesh[]): Set<string> {
+  const squares = new Set<string>();
+  sampleRoads(meshes, FOOTPRINT_CELL, (v) => squares.add(key(Math.floor(v.x / FOOTPRINT_CELL), Math.floor(v.z / FOOTPRINT_CELL))));
+  return squares;
+}
+
+/** Calls `mark` with points on every triangle of the meshes (world space), at most `step` metres apart. */
+function sampleRoads(meshes: THREE.Mesh[], step: number, mark: (v: THREE.Vector3) => void): void {
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), p = new THREE.Vector3();
   for (const mesh of meshes) {
     mesh.updateMatrixWorld();
     const pos = mesh.geometry.getAttribute("position");
@@ -500,7 +539,7 @@ export function roadColumns(meshes: THREE.Mesh[]): Map<string, number> {
       b.fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld);
       c.fromBufferAttribute(pos, ic).applyMatrix4(mesh.matrixWorld);
       const longest = Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a));
-      const n = Math.min(64, Math.max(1, Math.ceil(longest / 4)));
+      const n = Math.min(64, Math.max(1, Math.ceil(longest / step)));
       for (let u = 0; u <= n; u++)
         for (let v = 0; u + v <= n; v++) {
           p.copy(a).multiplyScalar(1 - (u + v) / n).addScaledVector(b, u / n).addScaledVector(c, v / n);
@@ -508,5 +547,4 @@ export function roadColumns(meshes: THREE.Mesh[]): Map<string, number> {
         }
     }
   }
-  return columns;
 }

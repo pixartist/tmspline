@@ -4,7 +4,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, note: "" };
+const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -492,8 +492,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     }, false, Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
     selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => (scenery.forest = v), false,
       { none: "None", ...Object.fromEntries(FORESTS.map((f) => [f.id, f.label])) });
-    if (scenery.forest !== "none")
+    if (scenery.forest !== "none") {
       numberField(root, "Forest density (%)", () => Math.round(scenery.density * 100), (v) => (scenery.density = int(v, 0, 100) / 100), 10);
+      numberField(root, "Tree clearance (m)", () => scenery.clearance, (v) => (scenery.clearance = Math.max(0, Math.min(64, v))), 1);
+    }
     buttonRow(root, [
       {
         label: "Generate", onClick: () => {

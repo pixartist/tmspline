@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
-import { generateScenery, roadColumns, type SceneryLandOptions } from "./scenery";
+import { generateScenery, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
@@ -745,10 +745,12 @@ export class Editor {
     const lib = this.library;
     if (!lib) return null;
     const own = this.map.blocks.filter((b) => !b.scenery);
-    const roads = roadColumns(this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r));
+    const meshes = this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r);
+    const roads = roadColumns(meshes);
+    const footprint = roadFootprint(meshes);
     // The blocks themselves, not their columns: land may rise under an air block (its columns then stop on it).
     const occupied = occupiedCells(own, lib);
-    const generated = generateScenery(lib, { roads, occupied }, options);
+    const generated = generateScenery(lib, { roads, footprint, occupied }, options);
     if (!generated) return null;
     this.editBlocks((blocks) => {
       const keep = blocks.filter((b) => !b.scenery);
