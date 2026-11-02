@@ -220,6 +220,7 @@ async function exportToGame(track: TrackMap, author: Author, quality: Quality): 
     body: JSON.stringify({ track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }),
   });
   if (!response.ok) throw new Error(await problemMessage(response, "Export failed"));
-  const written = (await response.json()) as { mapPath: string; bytes: number };
-  return { name: `Maps/${written.mapPath}`, bytes: written.bytes };
+  const written = (await response.json()) as { mapPath: string; bytes: number; applied: boolean };
+  // With the TMSpline Live plugin running, the export waits for it to save the open map and merge it in.
+  return { name: `Maps/${written.mapPath}${written.applied ? "" : " (TMSpline Live merges it in the game)"}`, bytes: written.bytes };
 }

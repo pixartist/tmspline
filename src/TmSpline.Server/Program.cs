@@ -66,7 +66,7 @@ if (gameMaps.MapsDir is not null)
         {
             try
             {
-                return Results.Ok(gameMaps.Write(map.FileName, map.Data));
+                return Results.Ok(gameMaps.Add(map.FileName, map.Data, map.Result.ItemFolder));
             }
             catch (IOException e)
             {
@@ -77,7 +77,22 @@ if (gameMaps.MapsDir is not null)
     .RequireRateLimiting("export")
     .DisableAntiforgery();
 
-    app.MapGet("/api/game/latest", () => gameMaps.Latest is { } latest ? Results.Ok(latest) : Results.NoContent());
+    app.MapGet("/api/game/latest", () => gameMaps.Poll() is { } latest ? Results.Ok(latest) : Results.NoContent());
+
+    // The plugin saved the open map: merge the waiting export into it.
+    app.MapPost("/api/game/apply", (string id) =>
+    {
+        try
+        {
+            return gameMaps.Apply(id) is { } applied ? Results.Ok(applied) : Results.NotFound();
+        }
+        catch (IOException e)
+        {
+            return Results.Problem($"Could not write the map into the game's folder: {e.Message}",
+                statusCode: StatusCodes.Status500InternalServerError, title: "Apply failed");
+        }
+    })
+    .DisableAntiforgery();
 }
 
 static async Task<IResult> Export(ExportRequestDto request, ExportService service, CancellationToken ct, Func<ExportedMap, IResult> deliver)
