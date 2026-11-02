@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using TmSpline.Export;
 using TmSpline.Server;
@@ -8,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ExportSettings>(builder.Configuration.GetSection("Export"));
 builder.Services.AddSingleton<ExportService>();
 builder.Services.AddSingleton<GameMaps>();
+builder.Services.AddSingleton<VanillaBuilder>();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 
@@ -34,7 +35,9 @@ app.UseStaticFiles();
 // Vanilla block meshes for the editor preview (tools/VanillaLib output). These are the game's own assets, extracted
 // locally: only served when a folder is configured, which is the case in appsettings.Development.json only.
 if (builder.Configuration["Vanilla:Dir"] is { Length: > 0 } vanillaDir
-    && Path.GetFullPath(vanillaDir, builder.Environment.ContentRootPath) is var vanillaPath && Directory.Exists(vanillaPath))
+    && Path.GetFullPath(vanillaDir, builder.Environment.ContentRootPath) is var vanillaPath
+    // With the builder on, the folder is made here so a library built later (by the plugin) is served without a restart.
+    && (Directory.Exists(vanillaPath) || builder.Configuration["Vanilla:Builder"] is { Length: > 0 } && Directory.CreateDirectory(vanillaPath).Exists))
 {
     app.UseStaticFiles(new StaticFileOptions
     {
@@ -93,6 +96,16 @@ if (gameMaps.MapsDir is not null)
         }
     })
     .DisableAntiforgery();
+}
+
+// Local setups only (Vanilla:Builder): the TMSpline Openplanet plugin extracts the game's block files and has them
+// converted into the editor's block library here.
+var vanillaBuilder = app.Services.GetRequiredService<VanillaBuilder>();
+if (vanillaBuilder.Enabled)
+{
+    app.MapGet("/api/vanilla/build", () => Results.Ok(vanillaBuilder.Status));
+    app.MapPost("/api/vanilla/build", () => vanillaBuilder.Start() ? Results.Accepted("/api/vanilla/build") : Results.Ok(vanillaBuilder.Status))
+        .DisableAntiforgery();
 }
 
 static async Task<IResult> Export(ExportRequestDto request, ExportService service, CancellationToken ct, Func<ExportedMap, IResult> deliver)

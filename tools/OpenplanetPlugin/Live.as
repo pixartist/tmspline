@@ -1,16 +1,13 @@
-﻿// TMSpline Live: reloads the map editor when TMSpline exports a new version of the map ("Export to game").
+﻿// Live update: reloads the map editor when TMSpline exports a new version of the map ("Export to game").
 // The TMSpline server (local dev setup) writes the map into Maps/TMSpline and tells us about it at /api/game/latest;
 // we leave the editor, open the new file in the editor and put the camera back where it was.
 // What was added in the game's editor stays: before reloading we save the open map, and the server merges the new export
 // into it (it replaces only what its previous export put there).
 
-[Setting name="TMSpline server" description="Where the TMSpline export server runs."]
-string S_Server = "http://localhost:5080";
-
-[Setting name="Reload automatically" description="Reload the editor as soon as a new export arrives, without asking (the open map is saved first)."]
+[Setting category="Live update" name="Reload automatically" description="Reload the editor as soon as a new export arrives, without asking (the open map is saved first)."]
 bool S_Auto = false;
 
-[Setting name="Keep camera" description="Put the editor camera back where it was after reloading."]
+[Setting category="Live update" name="Keep camera" description="Put the editor camera back where it was after reloading."]
 bool S_KeepCamera = true;
 
 // The export the open editor shows (or that we already offered and the user dismissed).
@@ -26,7 +23,7 @@ string g_latestTime = "";
 bool g_latestApplied = true;   // false: the server waits for us to save the open map, then merges the export into it
 string g_error = "";
 
-void Main()
+void LiveLoop()
 {
     while (true) {
         Poll();
@@ -191,7 +188,7 @@ bool SetCamera(const vec3 &in target, float distance, float hAngle, float vAngle
 }
 
 /// Small window while a new export waits (in the editor and in the menus).
-void Render()
+void RenderLive()
 {
     if (!Pending() || S_Auto || g_busy) return;
     auto app = cast<CTrackMania>(GetApp());
@@ -214,9 +211,9 @@ void Render()
     UI::End();
 }
 
-void RenderMenu()
+void RenderLiveMenu()
 {
     string state = g_serverDown ? " \\$f66(server not reachable)" : g_latestPath == "" ? " \\$888(no export yet)" : "";
-    if (UI::MenuItem("\\$f80TMSpline\\$z Open latest export in editor" + state, "", false, g_latestPath != "" && !g_busy))
+    if (UI::MenuItem("Open latest export in editor" + state, "", false, g_latestPath != "" && !g_busy))
         startnew(Reload);
 }

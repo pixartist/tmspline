@@ -79,18 +79,32 @@ The track autosaves in the browser (`?session=name` in the URL keeps a separate 
 The editor can show the game's own block meshes. They are Nadeo's assets: convert them locally, never commit,
 upload or redistribute them (`artifacts/` is excluded from Docker builds, and only the Development settings serve it).
 
-1. In Trackmania with Openplanet, load the blocks you want (e.g. open a map with them), then extract
-   `GameData\Stadium\GameCtnBlockInfo` and `GameData\Stadium\Media\Prefab` with Openplanet's pack explorer
-   (to `%USERPROFILE%\OpenplanetNext\Extract`).
-2. `dotnet run -c Release --project tools/VanillaLib` writes `artifacts/vanilla` (index, meshes, the game's catalog
-   icons). Meshes use the game's detail level 1 (about 7× fewer triangles than full detail); `-- --lod 2` is coarser
-   still, `--lod 0` full detail. Files that Openplanet could not extract by name are listed in
-   `OpenplanetNext\PluginStorage\TMSplineExtract\missing.txt`: copy `tools/OpenplanetExtract` to
-   `OpenplanetNext\Plugins\TMSplineExtract` (developer signature mode), run its menu entry, and convert again
-   (repeat until nothing is missing: prefabs first, then materials, textures and their images).
-   Each material's diffuse texture is saved as WebP (at most 512 px) under `texture/`, with how the game maps it
-   (mesh UVs, or projected in world space for terrain-like materials such as grass, hills and track walls).
-3. The development server serves it at `/api/vanilla` (`Vanilla:Dir` in `appsettings.Development.json`); reload the editor.
+1. Install the TMSpline Openplanet plugin (see below) and start the dev stack.
+2. In Trackmania, Openplanet menu → **TMSpline → Build block library**. The plugin extracts the block definitions and
+   prefabs to `%USERPROFILE%\OpenplanetNext\Extract`, the server converts them with `tools/VanillaLib` into
+   `artifacts/vanilla` (`Vanilla:Dir` and `Vanilla:Builder` in `appsettings.Development.json`), and the plugin extracts
+   whatever the conversion still misses (materials, textures, their images), round by round until nothing more can be
+   found. About half a minute per round; files already extracted are kept (**Rebuild** extracts everything again,
+   e.g. after a game update).
+3. Reload the editor. The development server serves the library at `/api/vanilla`.
+
+Meshes use the game's detail level 1 (about 7× fewer triangles than full detail); run
+`dotnet run -c Release --project tools/VanillaLib -- --lod 2` (coarser) or `--lod 0` (full detail) by hand for others.
+Each material's diffuse texture is saved as WebP (at most 512 px) under `texture/`, with how the game maps it
+(mesh UVs, or projected in world space for terrain-like materials such as grass, hills and track walls).
+
+## TMSpline Openplanet plugin
+
+`tools/OpenplanetPlugin` (one plugin, "TMSpline", talking to the local TMSpline server, `http://localhost:5080` by
+default): copy the folder to `%USERPROFILE%\OpenplanetNext\Plugins\TMSpline`. It runs in Openplanet's developer
+signature mode only: the regular mode loads only plugins signed by Openplanet, which happens when they are published
+on openplanet.dev and pass its review.
+
+- **Live update**: the export dialog's **Export to game** writes the map to `Documents\Trackmania\Maps\TMSpline`. In the
+  game's editor the plugin offers to reload it: it saves the open map, the server merges the new export into it (what
+  the previous export placed is replaced, what was added in the game's editor stays) and the editor reopens with the
+  camera where it was.
+- **Block library**: see above.
 
 ## Run the export server (development)
 

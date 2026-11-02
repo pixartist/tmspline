@@ -194,12 +194,8 @@ Console.WriteLine($"LOD {lodRequest}; models by number of detail levels: {string
     + $"{meshes.Values.Sum(m => m.Groups.Sum(g => (long)g.I)) / 3:N0} triangles in all meshes");
 Console.WriteLine($"Wrote {outDir}: {blocks.Count} blocks, {meshes.Count} meshes, {materialList.Count} materials, {failed.Count} failed");
 foreach (var f in failed.Take(30)) Console.WriteLine("  " + f);
+// The TMSpline server hands this list to the TMSpline Openplanet plugin (tools/OpenplanetPlugin), which extracts them.
 File.WriteAllLines(Path.Combine(outDir, "missing-files.txt"), missingFiles.Keys.Order());
-// The same list for the TMSplineExtract Openplanet plugin (tools/OpenplanetExtract), as game paths ("GameData/...").
-var pluginStorage = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(extract))!, "PluginStorage", "TMSplineExtract");
-Directory.CreateDirectory(pluginStorage);
-File.WriteAllLines(Path.Combine(pluginStorage, "missing.txt"),
-    missingFiles.Keys.Select(f => Path.GetRelativePath(extract, f).Replace('\\', '/')).Order());
 Console.WriteLine($"  {missingFiles.Count} referenced files are missing (missing-files.txt)");
 foreach (var (type, n) in skipped.OrderByDescending(x => x.Value).Take(15)) Console.WriteLine($"  skipped: {n} x {type}");
 
