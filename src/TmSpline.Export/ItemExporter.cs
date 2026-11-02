@@ -1,4 +1,4 @@
-using System.Security;
+﻿using System.Security;
 using System.Text;
 using TmSpline.Core.Geometry;
 using TmSpline.Core.Model;
@@ -13,6 +13,11 @@ public sealed record ImportedItem(string Name, string ItemGbxPath, string Relati
 
 public static class ItemExporter
 {
+    static ItemExporter()
+    {
+        GBX.NET.Gbx.LZO = new GBX.NET.LZO.Lzo();
+    }
+
     /// <summary>
     /// Writes the importer sources (.fbx, .MeshParams.xml, .Item.xml) for all meshes below
     /// <c>{userDir}\Work\Items\{itemFolder}</c>, imports them in one importer run and returns the produced items.
@@ -28,13 +33,44 @@ public static class ItemExporter
         var output = await importer.RunAsync(userDir, $@"Items\{itemFolder}\*.Item.xml", ct);
         log?.Invoke(output);
 
-        return meshes.Select(m => FindImported(userDir, itemFolder, m.Name, output) with
+        return meshes.Select(m =>
         {
-            Offset = m.ItemOffset,
-            PitchYawRoll = m.Frame.StoredPitchYawRoll,
-            Waypoint = m.Waypoint,
-            Color = m.Color,
+            var item = FindImported(userDir, itemFolder, m.Name, output);
+            UseGameMaterials(item.ItemGbxPath, m.AllMaterials, log);
+            return item with
+            {
+                Offset = m.ItemOffset,
+                PitchYawRoll = m.Frame.StoredPitchYawRoll,
+                Waypoint = m.Waypoint,
+                Color = m.Color,
+            };
         }).ToList();
+    }
+
+    /// <summary>
+    /// Makes the item's materials with a <see cref="TmMaterial.GamePath"/> game materials (IsUsingGameMaterial, full
+    /// link), as items built in the game's mesh modeller store them: only then does the collision use the PhysicsId
+    /// the importer stored on them (magnet surfaces).
+    /// </summary>
+    private static void UseGameMaterials(string itemPath, IEnumerable<TmMaterial> materials, Action<string>? log)
+    {
+        var paths = materials.Where(m => m.GamePath is not null).ToDictionary(m => m.Name, m => m.GamePath!);
+        if (paths.Count == 0) return;
+        var gbx = GBX.NET.Gbx.Parse<GBX.NET.Engines.GameData.CGameItemModel>(itemPath);
+        var mesh = (gbx.Node.EntityModel as GBX.NET.Engines.GameData.CGameCommonItemEntityModel)?.StaticObject?.Mesh
+            ?? throw new InvalidOperationException($"{itemPath}: not a static item with a mesh");
+        var changed = 0;
+        foreach (var material in mesh.CustomMaterials ?? [])
+        {
+            if (material.MaterialUserInst is not { } inst || inst.MaterialName is null || !paths.TryGetValue(inst.MaterialName, out var path)) continue;
+            inst.IsUsingGameMaterial = true;
+            inst.Link = path;
+            changed++;
+        }
+        if (changed == 0) return;
+        using (var file = File.Create(itemPath))
+            gbx.Save(file);
+        log?.Invoke($"{Path.GetFileName(itemPath)}: {changed} material(s) made game materials");
     }
 
     public static void WriteSources(MeshChunk mesh, string userDir, string itemFolder, string authorName)

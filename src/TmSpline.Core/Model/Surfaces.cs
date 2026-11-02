@@ -4,7 +4,13 @@ namespace TmSpline.Core.Model;
 /// A material as it ends up in the .MeshParams.xml: Link from NadeoImporterMaterialLib.txt, optional PhysicsId override,
 /// optional Color (hex RGB, only for colorizable materials), optional GameplayId (only for <see cref="Surfaces.SupportsEffects"/>).
 /// </summary>
-public sealed record TmMaterial(string Name, string Link, string? PhysicsId = null, string? Color = null, string? GameplayId = null);
+/// <param name="GamePath">
+/// When set, the compiled item's material is changed after the import to use this game material directly
+/// (IsUsingGameMaterial, Link = the full path below GameData): only then does the game take the collision physics from
+/// the material's PhysicsId instead of the linked material's own (see <see cref="Surfaces.Road(Surface)"/>, magnets).
+/// </param>
+public sealed record TmMaterial(string Name, string Link, string? PhysicsId = null, string? Color = null, string? GameplayId = null,
+    string? GamePath = null);
 
 public static class Surfaces
 {
@@ -19,7 +25,8 @@ public static class Surfaces
     /// <summary>Pillars under the road: light grey concrete.</summary>
     public static readonly TmMaterial Pillar = new("Pillar", "CustomConcrete", Color: "8C9096");
 
-    private const string MagnetColor = "000020";
+    private static TmMaterial Magnet(string name, string physics) =>
+        new(name, "RoadTech", physics, GamePath: @"Stadium\Media\Material\RoadTech");
 
     /// <summary>Material links that accept a GameplayId, per the NadeoImporter MeshParams documentation.</summary>
     private static readonly HashSet<string> EffectLinks = new()
@@ -111,11 +118,14 @@ public static class Surfaces
         Surface.Snow => new("Snow", "CustomSnow"),
         Surface.Sand => new("Sand", "CustomSand"),
         Surface.Grass => new("Grass", "CustomGrass"),
-        // The community's established magnet look: CustomConcrete colorized to near-black blue (#000020),
-        // as used by the MagnetPlateform pack on item.exchange. The physics override makes it magnetic.
-        Surface.Magnet => new("Magnet", "CustomConcrete", "TechMagnetic", MagnetColor),
-        Surface.MagnetAccel => new("MagnetAccel", "CustomConcrete", "TechMagneticAccel", MagnetColor),
-        Surface.SuperMagnet => new("SuperMagnet", "CustomConcrete", "TechSuperMagnetic", MagnetColor),
+        // Magnets: RoadTech with the magnet physics, made a game material after the import (GamePath). Tested in game
+        // 2026-11-02 (TMSpline_MagnetPhysProbe): the importer's PhysicsId alone does not stick (the game takes the linked
+        // material's physics); with IsUsingGameMaterial and the full path it does. CustomConcrete (the old dark look)
+        // ignores the physics even then; the mesh modeller's TechSuperMagnetic material sticks but draws as a checker
+        // and vanishes from the editor after test drives.
+        Surface.Magnet => Magnet("Magnet", "TechMagnetic"),
+        Surface.MagnetAccel => Magnet("MagnetAccel", "TechMagneticAccel"),
+        Surface.SuperMagnet => Magnet("SuperMagnet", "TechSuperMagnetic"),
         _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null),
     };
 }
