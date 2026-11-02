@@ -1,4 +1,4 @@
-namespace TmSpline.Core.Model;
+﻿namespace TmSpline.Core.Model;
 
 /// <summary>
 /// A material as it ends up in the .MeshParams.xml: Link from NadeoImporterMaterialLib.txt, optional PhysicsId override,
@@ -26,7 +26,7 @@ public static class Surfaces
     public static readonly TmMaterial Pillar = new("Pillar", "CustomConcrete", Color: "8C9096");
 
     private static TmMaterial Magnet(string name, string physics) =>
-        new(name, "RoadTech", physics, GamePath: @"Stadium\Media\Material\RoadTech");
+        new(name, "Structure", physics, GamePath: @"Stadium\Media\Material\Structure");
 
     /// <summary>Material links that accept a GameplayId, per the NadeoImporter MeshParams documentation.</summary>
     private static readonly HashSet<string> EffectLinks = new()
@@ -118,7 +118,8 @@ public static class Surfaces
         Surface.Snow => new("Snow", "CustomSnow"),
         Surface.Sand => new("Sand", "CustomSand"),
         Surface.Grass => new("Grass", "CustomGrass"),
-        // Magnets: RoadTech with the magnet physics, made a game material after the import (GamePath). Tested in game
+        // Magnets: the Structure material (picked by the user from TMSpline_MagnetLooks, 2026-11-02) with the magnet physics,
+        // made a game material after the import (GamePath). Tested in game
         // 2026-11-02 (TMSpline_MagnetPhysProbe): the importer's PhysicsId alone does not stick (the game takes the linked
         // material's physics); with IsUsingGameMaterial and the full path it does. CustomConcrete (the old dark look)
         // ignores the physics even then; the mesh modeller's TechSuperMagnetic material sticks but draws as a checker
