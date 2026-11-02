@@ -12,7 +12,8 @@ namespace TmSpline.Core.Model;
 /// </summary>
 public static class TrackJson
 {
-    public const int CurrentVersion = 2;
+    /// <summary>3: point widths no longer include the curbs' inset (see TrackPoint.LegacyCurbInset).</summary>
+    public const int CurrentVersion = 3;
 
     public sealed class TrackDto
     {
@@ -150,6 +151,9 @@ public static class TrackJson
             throw new JsonException($"Track version {dto.Version} is newer than supported ({CurrentVersion})");
         var map = new TrackMap { Name = dto.Name, Laps = Math.Clamp(dto.Laps, 1, 99) };
         map.Tracks.AddRange(Parts(dto).Select(ToTrack));
+        if (dto.Version < 3)
+            foreach (var track in map.Tracks)
+                RemoveCurbInset(track);
         foreach (var b in dto.Blocks ?? new())
             if (!string.IsNullOrWhiteSpace(b.Name))
                 map.Blocks.Add(new VanillaBlock
@@ -166,6 +170,24 @@ public static class TrackJson
 
     public static string Serialize(Track track, string name = "Untitled") =>
         JsonSerializer.Serialize(FromTrack(track, name), TrackJsonContext.Default.TrackDto);
+
+    /// <summary>
+    /// Files before version 3: the width of points with borders included the curbs' inset; without it the curbs and the
+    /// driving surface stay where they were. Points without borders had none.
+    /// </summary>
+    private static void RemoveCurbInset(Track track)
+    {
+        track.SyncSegments();
+        var n = track.Points.Count;
+        for (var i = 0; i < n; i++)
+        {
+            var p = track.Points[i];
+            // Borders on the segments (older files): the point had curbs when a segment it joins had them.
+            var curbs = track.PointBorders ? p.Borders == true
+                : (i < track.SegmentCount && track.Segments[i].Borders) || ((i > 0 || track.Closed) && track.Segments[(i - 1 + n) % n].Borders);
+            if (curbs) p.Width = Math.Max(1, p.Width - 2 * TrackPoint.LegacyCurbInset);
+        }
+    }
 
     public static Track ToTrack(TrackDto dto)
     {

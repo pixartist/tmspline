@@ -71,16 +71,10 @@ public sealed class RoadMeshSettings
 {
     public double Thickness { get; set; } = 0.5;
     /// <summary>
-    /// Curb thickness outside the road width: as the game's road blocks (RoadTech curb from the road's edge at the matching
-    /// width of 26.25 m out to x = 1.5 in the cell: 1.375 m).
+    /// Curb width, from the road's edge outwards: as the game's RoadTech curbs, which reach from x = 1.5 in the cell to
+    /// the edge of the driving surface at the matching road width of 25.61 m (both matched in game by the user).
     /// </summary>
-    public double BorderThickness { get; set; } = 1.375;
-
-    /// <summary>
-    /// How far the curbs' inner face stands inside the road width (the game's curbs reach over the road edge; matched in
-    /// game by the user): the driving surface ends there, its texture still spans the full width.
-    /// </summary>
-    public double BorderInset { get; set; } = 0.32;
+    public double BorderThickness { get; set; } = 1.695;
     /// <summary>Approximate width of one column of the driving surface, in meters.</summary>
     public double ColumnWidth { get; set; } = 4.0;
     /// <summary>Maximum angle between two columns of a bent surface (pipes, sausages), in degrees.</summary>
@@ -94,9 +88,11 @@ public sealed class RoadMeshSettings
     /// <summary>
     /// Share of the road texture (0..0.5) left out on each side, for the Road* materials. Their textures run on under the
     /// curbs, with dark bands at their edges; the texture is stretched across the road, so a fixed share hides them at
-    /// any width. 9 % was the best of the candidates on all four road surfaces in game (tools/RoadInset).
+    /// any width. 9 % of a 26.25 m span was the best of the candidates on all four road surfaces in game
+    /// (tools/RoadInset); the texture then still ran 0.32 m under each curb. Over the 25.61 m driving surface alone the
+    /// same layout (meters per texture and where it is cut off) is 10 %.
     /// </summary>
-    public double RoadTextureInset { get; set; } = 0.09;
+    public double RoadTextureInset { get; set; } = 0.1;
     /// <summary>Directional effects (boost) are split into chunks of at most this length, each aimed separately.</summary>
     public double EffectChunkLength { get; set; } = 8.0;
     public RotationConvention Rotation { get; set; } = RotationConvention.Default;
@@ -120,11 +116,6 @@ public static class RoadMeshBuilder
         double DecalYaw = 0, double DecalStart = 0, double DecalPadLength = 1)
     {
         public SurfaceArc? Arc { get; init; }
-        /// <summary>
-        /// Surface coordinates the road texture spans across (V 0..1), when not the arc's own ends: the top surface ends
-        /// under the curbs' inset, but keeps the texture laid out over the full width.
-        /// </summary>
-        public (double S0, double S1)? TextureSpan { get; init; }
     }
 
     /// <summary>
@@ -203,7 +194,7 @@ public static class RoadMeshBuilder
             if (Half <= 0)
                 return S0 + (S1 - S0) * f;
             // Spread by need in "column space" between the ends' own column coordinates, so the ends land exactly on S0
-            // and S1 also when the surface stops short of the full width (under the curbs' inset).
+            // and S1 also when the surface stops short of the full width.
             var (wf, wa, ws) = Weights();
             var (fa, fb, fh) = (A, B, Half);
             double ToT(double s)
@@ -241,27 +232,20 @@ public static class RoadMeshBuilder
     }
 
     /// <summary>
-    /// Frame the curb on the side of surface coordinate s (the surface's end, <paramref name="inset"/> inside the road's
-    /// width) is built in, in ring-local (right, up) coordinates: the surface's end E, the curb's inner bottom corner C,
-    /// the direction of growing s (outward = times the side) and the curb's up. On the bent surface's edge (C = E),
-    /// turned towards upright in the ring's frame by <see cref="Ring.EdgeAnchor"/>; fully anchored, C is measured from
-    /// the road's real edge (inset inside it along the curb), so the curb does not move when the shape changes; the
-    /// curb's inner face then runs down to the surface's end.
+    /// Frame the curb on the side of surface coordinate s (the road's edge) is built in, in ring-local (right, up)
+    /// coordinates: the road's edge, the direction of growing s (outward = times the side) and the curb's up. On the bent
+    /// surface's edge, turned towards upright in the ring's frame by <see cref="Ring.EdgeAnchor"/> (fully: upright, and
+    /// as the edge itself stays put then, so does the curb).
     /// </summary>
-    private static ((double X, double Y) E, (double X, double Y) C, (double X, double Y) T, (double X, double Y) N) CurbFrame(Ring ring,
-        SurfaceArc arc, double s, double inset = 0)
+    private static ((double X, double Y) E, (double X, double Y) T, (double X, double Y) N) CurbFrame(Ring ring, SurfaceArc arc, double s)
     {
         var (e, t, n) = (arc.Point(s), arc.Tangent(s), arc.Normal(s));
         var k = Math.Clamp(ring.EdgeAnchor, 0, 1);
-        if (k <= 0) return (e, e, t, n);
+        if (k <= 0) return (e, t, n);
         var side = s < 0 ? -1 : 1;
         // The surface's bend angle at its end (see SurfaceArc.Tangent), turned back towards upright.
         var angle = Math.Atan2(t.Y * side, t.X) * (1 - k);
-        var (tk, nk) = ((Math.Cos(angle), side * Math.Sin(angle)), (-side * Math.Sin(angle), Math.Cos(angle)));
-        var edge = arc.Point(s + side * inset);
-        var anchored = (edge.X - tk.Item1 * side * inset, edge.Y - tk.Item2 * side * inset);
-        var c = (e.X + (anchored.Item1 - e.X) * k, e.Y + (anchored.Item2 - e.Y) * k);
-        return (e, c, tk, nk);
+        return (e, (Math.Cos(angle), side * Math.Sin(angle)), (-side * Math.Sin(angle), Math.Cos(angle)));
     }
 
     /// <summary>
@@ -271,7 +255,7 @@ public static class RoadMeshBuilder
     internal static (double X, double Y, double NX, double NY, double TX, double TY) CurbPoint(Ring ring, int side, double outward, double lift)
     {
         var arc = SurfaceArc.For(ring, 0, 0, 0, 1, new RoadMeshSettings());
-        var (_, e, t, n) = CurbFrame(ring, arc, side * ring.Width / 2);
+        var (e, t, n) = CurbFrame(ring, arc, side * ring.Width / 2);
         return (e.X + t.X * side * outward + n.X * lift, e.Y + t.Y * side * outward + n.Y * lift, n.X, n.Y, t.X, t.Y);
     }
 
@@ -280,13 +264,13 @@ public static class RoadMeshBuilder
     /// one below the curb's outer face, in the curb's frame (turned curbs: never inside the inner one).
     /// </summary>
     private static ((double X, double Y) Inner, (double X, double Y) Outer) CurbBottom(Ring ring, SurfaceArc arc, double s, int side,
-        double thickness, double h, double inset = 0)
+        double thickness, double h)
     {
         var (e, n0) = (arc.Point(s), arc.Normal(s));
         var inner = (X: e.X - n0.X * h, Y: e.Y - n0.Y * h);
-        var (_, c, t, n) = CurbFrame(ring, arc, s, inset);
-        // The inner corner in the curb's frame (outward, from C); the outer corner at least as far out, always the slab's
-        // thickness below C, so the curb's outer face does not move with the shape (the bottom face slopes instead).
+        var (c, t, n) = CurbFrame(ring, arc, s);
+        // The inner corner in the curb's frame (outward, from the edge); the outer corner at least as far out, always the
+        // slab's thickness below the edge, so the curb's outer face does not move with the shape (the bottom face slopes).
         var u = ((inner.X - c.X) * t.X + (inner.Y - c.Y) * t.Y) * side;
         var ou = Math.Max(thickness, u);
         return (inner, (c.X + t.X * side * ou - n.X * h, c.Y + t.Y * side * ou - n.Y * h));
@@ -465,10 +449,9 @@ public static class RoadMeshBuilder
     private static void AddCap(MeshChunk chunk, Ring ring, TrackSegment segment, bool forward, int topColumns, Vec3d itemOrigin,
         (double U0, double U1) band, RoadMeshSettings s, bool curbsOnly = false)
     {
-        // As in Profile: with borders the surfaces end at the curbs' inner face, inset inside the width.
-        var (bh, bt, inset) = segment.Borders ? BorderSize(ring, s) : (0, 0, 0);
-        var half = ring.Width * 0.5 - inset;
-        bt += inset;
+        // As in Profile: the curbs stand on the road's edges, outside the width.
+        var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
+        var half = ring.Width * 0.5;
         var h = s.Thickness;
         var top = SurfaceArc.For(ring, half, -half, 0, 1, s);
         var bottom = SurfaceArc.For(ring, -half, half, -h, -1, s);
@@ -492,9 +475,9 @@ public static class RoadMeshBuilder
             var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
             foreach (var sign in new[] { 1, -1 })
             {
-                var (e, c, t, n) = CurbFrame(ring, arc, sign * half, inset);
-                (double X, double Y) At(double along, double up) => (c.X + t.X * along * sign + n.X * up, c.Y + t.Y * along * sign + n.Y * up);
-                var (innerBottom, outerBottom) = CurbBottom(ring, arc, sign * half, sign, bt, h, inset);
+                var (e, t, n) = CurbFrame(ring, arc, sign * half);
+                (double X, double Y) At(double along, double up) => (e.X + t.X * along * sign + n.X * up, e.Y + t.Y * along * sign + n.Y * up);
+                var (innerBottom, outerBottom) = CurbBottom(ring, arc, sign * half, sign, bt, h);
                 var first = points.Count;
                 points.AddRange(new[] { e, At(0, bh), At(bt, bh), outerBottom, innerBottom });
                 for (var i = 1; i < 4; i++)
@@ -618,18 +601,17 @@ public static class RoadMeshBuilder
     }
 
     /// <summary>
-    /// Height, thickness (outside the road width) and inset (how far the curb's inner face stands inside the width) of the
+    /// Height and thickness (outside the road width) of the
     /// curbs at a ring: where borders start or end they grow out of the road's edge (see Ring.BorderScale), from a sliver
     /// (not zero: no degenerate triangles) to full size.
     /// </summary>
-    private static (double Height, double Thickness, double Inset) BorderSize(Ring ring, RoadMeshSettings s)
+    private static (double Height, double Thickness) BorderSize(Ring ring, RoadMeshSettings s)
     {
         // Where the cross-section closes (a road folding into a pipe), the two curbs face each other: they shrink with the
         // gap between the road's edges, so they never run into each other or the far wall (and a pipe's edges meet).
         var room = BorderRoom(ring, s);
         var k = Math.Max(MinBorderScale, Math.Min(ring.BorderScale, room));
-        // The inset goes all the way to zero, so where borders start the surface meets the plain road's edge exactly.
-        return (ring.BorderHeight * k, s.BorderThickness * k, s.BorderInset * Math.Clamp(Math.Min(ring.BorderScale, room), 0, 1));
+        return (ring.BorderHeight * k, s.BorderThickness * k);
     }
 
     /// <summary>
@@ -656,15 +638,14 @@ public static class RoadMeshBuilder
         var width = ring.Width * 0.5;
         var h = s.Thickness;
         var road = Surfaces.Road(segment.Surface, segment.Effect);
-        // With borders the curbs stand `inset` inside the width (as the game's do): the surfaces end at their inner face,
-        // the road texture still spans the full width.
-        var (bh, bt, inset) = segment.Borders ? BorderSize(ring, s) : (0, 0, 0);
-        var half = width - inset;
+        // The curbs stand on the road's edges, outside the width.
+        var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
+        var half = width;
         // The driving surface goes right to left; its normal is explicit (see SurfaceArc).
         Edge Surface(string key, double lift, double sign, TmMaterial material, double s0, double s1) =>
             new(key, 0, 0, 0, 0, topColumns, material) { Arc = SurfaceArc.For(ring, s0, s1, lift, sign, s) };
 
-        yield return Surface("top", 0, 1, road, half, -half) with { TextureSpan = (width, -width) };
+        yield return Surface("top", 0, 1, road, half, -half);
         if (road.GameplayId is not null && Surfaces.Decal(segment.Effect) is { } decal)
         {
             // Whole pads per segment: about one road width each, stretched slightly to fit exactly.
@@ -681,9 +662,8 @@ public static class RoadMeshBuilder
         // Curbs and sides are built in the local frame of each surface end: outward along the tangent,
         // up along the normal. Straight edges are ordered so that the outward normal is (dy, -dx).
         var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
-        // er/el: the surface's ends; cr/cl: the curbs' inner bottom corners (see CurbFrame).
-        var (er, cr, tr, nr) = CurbFrame(ring, arc, half, inset);
-        var (el, cl, tl, nl) = CurbFrame(ring, arc, -half, inset);
+        var (er, tr, nr) = CurbFrame(ring, arc, half);
+        var (el, tl, nl) = CurbFrame(ring, arc, -half);
         (double X, double Y) At((double X, double Y) e, (double X, double Y) t, double along, (double X, double Y) n, double up) =>
             (e.X + t.X * along + n.X * up, e.Y + t.Y * along + n.Y * up);
         Edge Line(string key, (double X, double Y) a, (double X, double Y) b, TmMaterial m) => new(key, a.X, a.Y, b.X, b.Y, 1, m);
@@ -691,19 +671,17 @@ public static class RoadMeshBuilder
         if (segment.Borders)
         {
             var border = Surfaces.BorderOf(segment.BorderMaterial);
-            // From the inner face (inset inside the width) out to the thickness outside it.
-            bt += inset;
             // Right end: outward = +tangent. Left end: outward = -tangent. The bottom corners: see CurbBottom.
-            var (rIn, rOut) = CurbBottom(ring, arc, half, 1, bt, h, inset);
-            var (lIn, lOut) = CurbBottom(ring, arc, -half, -1, bt, h, inset);
-            yield return Line("rb_out", rOut, At(cr, tr, bt, nr, bh), border);
-            yield return Line("rb_top", At(cr, tr, bt, nr, bh), At(cr, tr, 0, nr, bh), border);
-            yield return Line("rb_in", At(cr, tr, 0, nr, bh), er, border);
+            var (rIn, rOut) = CurbBottom(ring, arc, half, 1, bt, h);
+            var (lIn, lOut) = CurbBottom(ring, arc, -half, -1, bt, h);
+            yield return Line("rb_out", rOut, At(er, tr, bt, nr, bh), border);
+            yield return Line("rb_top", At(er, tr, bt, nr, bh), At(er, tr, 0, nr, bh), border);
+            yield return Line("rb_in", At(er, tr, 0, nr, bh), er, border);
             if (segment.Underside)
                 yield return Line("rb_bot", rIn, rOut, Surfaces.Underside);
-            yield return Line("lb_in", el, At(cl, tl, 0, nl, bh), border);
-            yield return Line("lb_top", At(cl, tl, 0, nl, bh), At(cl, tl, -bt, nl, bh), border);
-            yield return Line("lb_out", At(cl, tl, -bt, nl, bh), lOut, border);
+            yield return Line("lb_in", el, At(el, tl, 0, nl, bh), border);
+            yield return Line("lb_top", At(el, tl, 0, nl, bh), At(el, tl, -bt, nl, bh), border);
+            yield return Line("lb_out", At(el, tl, -bt, nl, bh), lOut, border);
             if (segment.Underside)
                 yield return Line("lb_bot", lOut, lIn, Surfaces.Underside);
         }
@@ -773,7 +751,7 @@ public static class RoadMeshBuilder
         var isRoad = edge.Key == "top";
         var u0 = ring.Distance / (isRoad ? s.RoadTextureLength : s.TextureScale);
         // Road texture across: the position on the surface, not the column fraction (columns are spread by need).
-        var (t0, t1) = edge.TextureSpan ?? (edge.Arc is { } surface ? (surface.S0, surface.S1) : (0, 0));
+        var (t0, t1) = edge.Arc is { } surface ? (surface.S0, surface.S1) : (0, 0);
         var acrossFraction = edge.Arc is not null && t1 != t0 ? (across - t0) / (t1 - t0) : f;
         var inset = edge.Material.Link.StartsWith("Road") ? s.RoadTextureInset : 0;
         var v0 = isRoad ? inset + acrossFraction * (1 - 2 * inset) : len * f / s.TextureScale;

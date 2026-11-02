@@ -47,7 +47,9 @@ Controls:
 - Click a point to show its handles and the orange banking ring; drag the ring to bank (`Ctrl` = 5° steps) or use `Q`/`E`.
   Between two points the road rolls the shorter way round, so a corkscrew is a few points stepping round
   (e.g. 0° → 120° → -120° → 0°), and closed tracks with corkscrews close by themselves.
-- Road width is set per point (inspector or `[`/`]`) and blends smoothly between points.
+- Road width is set per point (inspector or `[`/`]`) and blends smoothly between points. It is the driving surface
+  between the curbs, which stand outside it (1.695 m each); new tracks get 25.61 m, as the game's road blocks. Files from
+  before version 3 counted 0.32 m under each curb as width: their points with borders load 0.64 m narrower, unchanged.
 - Each point also has a cross-section **Shape** (degrees: negative = sausage, 0 = flat, 180 = half-pipe, 360 = closed
   pipe), a **Flat in** share that keeps the middle flat and bends only the sides (Shape 180° + Flat 50% = U profile), and
   **Sausage %**, which compresses the bend into a crown with straight slopes (0 % round, 100 % triangle; the Sausage

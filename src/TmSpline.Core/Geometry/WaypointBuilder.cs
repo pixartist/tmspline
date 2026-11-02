@@ -156,8 +156,8 @@ public static class WaypointBuilder
         var borders = segment.Borders;
         // On the border, also where it is still growing (see Ring.BorderScale).
         var baseLift = borders ? ring.BorderHeight * ring.BorderScale : 0;
-        // Posts in the middle of the curb, which reaches from its inset inside the width to its thickness outside.
-        var outward = borders ? (settings.BorderThickness - settings.BorderInset) * ring.BorderScale / 2 : -BeamWidth / 2;
+        // Posts in the middle of the curb, which reaches from the road's edge to its thickness outside.
+        var outward = borders ? settings.BorderThickness * ring.BorderScale / 2 : -BeamWidth / 2;
 
         // Post feet on the curbs (upright curbs: see RoadMeshBuilder.CurbPoint); without borders at the road's edge.
         (double X, double Y) Foot(int side)

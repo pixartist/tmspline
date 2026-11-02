@@ -82,10 +82,15 @@ export const DEFAULT_BORDER_HEIGHT = 1.0;
 /** Border height of points in files that stored none (the default before it matched the game's curbs). */
 const LEGACY_BORDER_HEIGHT = 0.8;
 /**
- * Road width of new tracks: where the road texture matches the game's road blocks exactly (26.25 m, checked in game by
- * the user; their surface mesh spans 26.6 m, x 2.7..29.3, partly under the curbs). Our borders sit outside the width.
+ * Road width of new tracks: the driving surface between the curbs of the game's road blocks (25.61 m; the road texture
+ * matches theirs exactly, checked in game by the user). The curbs sit outside the width.
  */
-export const DEFAULT_ROAD_WIDTH = 26.25;
+export const DEFAULT_ROAD_WIDTH = 25.61;
+/**
+ * Until file version 3 the curbs stood this far inside a point's width (TrackPoint.LegacyCurbInset in the core): older
+ * files' points with borders are read with their width less twice this, so curbs and road stay where they were.
+ */
+const LEGACY_CURB_INSET = 0.32;
 
 /** Named cross-section shapes for the inspector. */
 /** Points that keep their edges bend at most ±180° (no pipes); the core applies the same limit. */
@@ -190,7 +195,8 @@ export interface Track {
 
 /** The document: a map with its tracks. Start, checkpoints and finish are only where the mapper puts them. */
 export interface TrackMap {
-  version: 2;
+  /** 3: point widths no longer include the curbs' inset (see LEGACY_CURB_INSET). */
+  version: 3;
   name: string;
   /** Laps when the map has a start/finish. */
   laps: number;
@@ -307,7 +313,7 @@ export function newTrack(center: Vec3 = [0, 16, 0], direction: Vec3 = [0, 0, 1])
 }
 
 export function newMap(): TrackMap {
-  return { version: 2, name: "My Track", laps: 3, tracks: [newTrack()], blocks: [], items: [] };
+  return { version: 3, name: "My Track", laps: 3, tracks: [newTrack()], blocks: [], items: [] };
 }
 
 export const cloneMap = (m: TrackMap): TrackMap => structuredClone(m);
@@ -552,18 +558,22 @@ function migrateWidths(t: Track): void {
 }
 
 /**
- * Reads a track file: a version 2 map, or a version 1 single track (becomes a map with that one track). Version 1
- * files got an automatic start and finish when they had none; those are now added as explicit waypoints.
+ * Reads a track file: a version 2 or 3 map, or a version 1 single track (becomes a map with that one track). Version 1
+ * files got an automatic start and finish when they had none; those are now added as explicit waypoints. Before
+ * version 3, the width of points with borders included the curbs' inset (see LEGACY_CURB_INSET).
  */
 export function parseMap(json: string): TrackMap {
   const doc = JSON.parse(json) as Omit<Partial<TrackMap>, "version"> & Partial<Track> & { version?: number };
-  if (doc.version !== 1 && doc.version !== 2) throw new Error(`Unsupported track version ${doc.version}`);
+  if (doc.version !== 1 && doc.version !== 2 && doc.version !== 3) throw new Error(`Unsupported track version ${doc.version}`);
   // Read the map fields first: a version 1 file is the track itself, and normalizing it drops them.
   const { version, name = "Untitled", laps = 3 } = doc;
-  const parts = version === 2 ? doc.tracks ?? [] : [doc as Track];
+  const parts = version === 1 ? [doc as Track] : doc.tracks ?? [];
   if (parts.length === 0) throw new Error("The file has no track");
   const tracks = parts.map((p, i) => normalizeTrack(p, parts.length > 1 ? `Track ${i + 1}` : "The track"));
   if (version === 1) addLegacyWaypoints(tracks[0]);
+  if (version < 3)
+    for (const t of tracks)
+      for (const p of t.points) if (p.borders) p.width = Math.max(1, p.width - 2 * LEGACY_CURB_INSET);
   const blocks = (Array.isArray(doc.blocks) ? doc.blocks : [])
     .filter((b) => typeof b?.name === "string" && b.name.length > 0)
     .map((b): VanillaBlock => {
@@ -582,7 +592,7 @@ export function parseMap(json: string): TrackMap {
       name: i.name, position: i.position.map(Number) as Vec3, yaw: Number(i.yaw) || 0,
       ...(typeof i.scenery === "string" && i.scenery ? { scenery: i.scenery } : {}),
     }));
-  return { version: 2, name, laps, tracks, blocks, ...(items.length ? { items } : {}) };
+  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

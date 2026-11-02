@@ -32,10 +32,10 @@ public static class SignBuilder
                 var ring = TrackObjects.RingAt(rings, d);
                 foreach (var side in sides)
                 {
-                    // On top of the curb, in its middle (it reaches from its inset inside the width to its thickness
+                    // On top of the curb, in its middle (it reaches from the road's edge to its thickness
                     // outside); without borders at the road's edge.
                     var scale = Math.Clamp(ring.BorderScale, 0, 1);
-                    var outward = seg.Borders ? (settings.BorderThickness - settings.BorderInset) * scale / 2 : 0;
+                    var outward = seg.Borders ? settings.BorderThickness * scale / 2 : 0;
                     var lift = seg.Borders ? ring.BorderHeight * scale : 0;
                     var c = RoadMeshBuilder.CurbPoint(ring, side, outward, lift);
                     var up = (ring.Right * c.NX + ring.Up * c.NY).Normalized();

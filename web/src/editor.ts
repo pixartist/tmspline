@@ -113,7 +113,7 @@ const COLORS = {
 /** On-screen size of points: world radius per meter of camera distance. */
 /** Materials that are not the driving surface (their UVs are not along/across the road). */
 /** Same as RoadMeshSettings.RoadTextureInset in the core (Road* surfaces only). */
-const ROAD_TEXTURE_INSET = 0.09;
+const ROAD_TEXTURE_INSET = 0.1;
 const NO_GRID_SURFACES = { Border: 1, BorderPlastic: 1, Underside: 1, Pillar: 1 };
 
 /**

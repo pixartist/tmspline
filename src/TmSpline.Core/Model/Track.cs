@@ -143,7 +143,17 @@ public sealed class TrackPoint
     public const double LegacyBorderHeight = 0.8;
 
     /// <summary>Width of new roads: where the road texture matches the game's road blocks (user, checked in game).</summary>
-    public const double DefaultWidth = 26.25;
+    /// <summary>
+    /// Road width of new points: the driving surface between the curbs of the game's road blocks (25.61 m; until file
+    /// version 3 the width included 0.32 m under each curb, see <see cref="LegacyCurbInset"/>).
+    /// </summary>
+    public const double DefaultWidth = 25.61;
+
+    /// <summary>
+    /// Until file version 3 the curbs stood this far inside the width; such files' points with borders are read with
+    /// their width less twice this, so the curbs and the road stay where they were.
+    /// </summary>
+    public const double LegacyCurbInset = 0.32;
 
     public TrackPoint(Vec3d position, Vec3d handleOut, double bankDegrees = 0, double width = DefaultWidth)
     {
