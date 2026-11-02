@@ -27,7 +27,8 @@ public sealed class Ring
     public double BorderHeight;
     /// <summary>
     /// How far the borders have grown here (0..1): they rise out of the road's edge where they start and sink back where
-    /// they end (see <see cref="SamplerSettings.BorderRampLength"/>), so they never end in an open cross-section.
+    /// they end, so they never end in an open cross-section: blended from point to point with borders on the points,
+    /// over <see cref="SamplerSettings.BorderRampLength"/> with borders on the segments.
     /// </summary>
     public double BorderScale = 1;
     /// <summary>True if this ring lies exactly on a spline vertex.</summary>
@@ -55,7 +56,10 @@ public sealed class SamplerSettings
     public double MaxShareStep { get; set; } = 0.1;
     /// <summary>Maximum change of the border height between rings, in meters.</summary>
     public double MaxBorderStep { get; set; } = 0.25;
-    /// <summary>Length over which borders grow from nothing where they start (and shrink where they end), in meters.</summary>
+    /// <summary>
+    /// Length over which borders grow from nothing where they start (and shrink where they end), in meters; only for
+    /// borders set on the segments (on the points they blend over whole segments).
+    /// </summary>
     public double BorderRampLength { get; set; } = 12.0;
 }
 
@@ -76,8 +80,9 @@ public static class TrackSampler
         var starts = Starts(tables);
         // Gaps need rings exactly at their ends, so the road stops and starts where the mapper put them.
         var cuts = TrackObjects.GapRanges(track, starts).SelectMany(g => new[] { g.Start, g.End }).ToList();
-        // Border ramps need rings along them, or they would be one long wedge.
-        var ramps = BorderRuns(track, starts, settings);
+        // Border ramps need rings along them, or they would be one long wedge (borders on the points blend over whole
+        // segments instead, see RingCount).
+        var ramps = track.PointBorders ? new List<BorderRun>() : BorderRuns(track, starts, settings);
         cuts.AddRange(ramps.SelectMany(r => r.RingDistances(starts[^1], track.Closed)));
         // Bump objects: cross-sections over their length, a few per bump (segment patterns raise the ring count instead).
         foreach (var (from, to, detail) in new RoadBumps(track, starts).ObjectSpans())
@@ -106,8 +111,20 @@ public static class TrackSampler
 
         ComputeFrames(track, rings);
         foreach (var ring in rings)
-            ring.BorderScale = ramps.Select(r => r.ScaleAt(ring.Distance, starts[^1], track.Closed)).DefaultIfEmpty(1).Min();
+            ring.BorderScale = track.PointBorders
+                ? PointBorderScale(track, ring.Segment, ring.SegmentU)
+                : ramps.Select(r => r.ScaleAt(ring.Distance, starts[^1], track.Closed)).DefaultIfEmpty(1).Min();
         return rings;
+    }
+
+    /// <summary>
+    /// Borders set on the points blend from point to point like the width: full at points with borders, gone at points
+    /// without, smoothly in between. A single point without borders fades them out towards it and back in after it.
+    /// </summary>
+    private static double PointBorderScale(Track track, int segment, double u)
+    {
+        static double On(TrackPoint p) => p.Borders == true ? 1 : 0;
+        return Lerp(On(track.SegmentStart(segment)), On(track.SegmentEnd(segment)), SmoothStep(u));
     }
 
     /// <summary>
@@ -231,6 +248,8 @@ public static class TrackSampler
             Blend(p => p.Flat, settings.MaxShareStep),
             Blend(p => p.Sausage, settings.MaxShareStep),
             Blend(p => p.BorderHeight, settings.MaxBorderStep),
+            // Borders fading between points (see PointBorderScale).
+            Blend(p => p.Borders == true ? 1 : 0, settings.MaxShareStep),
             // Bumps along the road (waves, noise): a cross-section every `detail` meters.
             track.Segments[segment] is { Bumps: BumpPattern.Waves or BumpPattern.Noise } bumpy ? table.Length / Math.Max(0.25, bumpy.BumpDetail) : 0,
         };

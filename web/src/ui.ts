@@ -534,7 +534,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       rangeField(root, "Border m", 0.2, 8, 0.1, () => p().borderHeight,
         (v) => editor.edit((tr) => (tr.points[s.index].borderHeight = v), false, `borderHeight:${s.index}`));
     else
-      hint(root, "No borders here: next to points with borders they fade out towards this one.");
+      hint(root, "No borders here: they fade out from the previous point to this one and back in towards the next.");
     const waypoints = WAYPOINTS.filter((w) => editor.track.closed || w !== "StartFinish");
     selectField(root, "Waypoint", waypoints, () => p().waypoint, (v) => editor.edit((tr) => (tr.points[s.index].waypoint = v as Waypoint), true),
       false, { StartFinish: "Start / finish (laps)" });

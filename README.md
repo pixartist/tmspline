@@ -53,7 +53,8 @@ Controls:
   **Sausage %**, which compresses the bend into a crown with straight slopes (0 % round, 100 % triangle; the Sausage
   preset is a rounded triangle like the game's sausage roads).
   Width is measured along the surface, so a pipe's diameter is width / π.
-- Border height is also set per point (0.2–8 m) and blends between points; borders are switched on/off per segment.
+- Border height is also set per point (0.2–8 m) and blends between points. Borders are switched on and off per point
+  and blend from point to point too: a single point without borders fades them out towards it and back in after it.
 - Click the road to select a segment; Ctrl+click the ground to extend the track.
 - Segment borders: None, Rubber (native) or Plastic (grindable without losing speed, bouncy; shiny yellow).
 - Segments can carry a gameplay effect on Road and Platform surfaces: Turbo (yellow/red), Reactor boost (normal/red),

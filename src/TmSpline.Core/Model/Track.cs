@@ -117,9 +117,9 @@ public sealed class TrackPoint
     public double BorderHeight { get; set; } = DefaultBorderHeight;
 
     /// <summary>
-    /// Road borders (curbs) at this point: a segment has them when either of its points does, and they fade out towards a
-    /// point without (see TrackSampler's border ramps). Null on every point: the segments' own Borders settings (older
-    /// tracks and code that sets them directly).
+    /// Road borders (curbs) at this point: they blend from point to point (full here, gone at a point without, see
+    /// TrackSampler.PointBorderScale), so a segment has them when either of its points does. Null on every point: the
+    /// segments' own Borders settings (older tracks and code that sets them directly).
     /// </summary>
     public bool? Borders { get; set; }
 

@@ -63,8 +63,8 @@ export interface TrackPoint {
   /** Height of the road borders in meters; blended smoothly towards the neighbouring points. */
   borderHeight: number;
   /**
-   * Road borders at this point: a segment has them when either of its points does, and they fade out towards a point
-   * without (over the core's border ramp length). Segment.borders follows from these (see syncSegments).
+   * Road borders at this point: they blend from point to point (full here, gone at a point without), so a segment has
+   * them when either of its points does. Segment.borders follows from these (see syncSegments).
    */
   borders: boolean;
   /** Race gate at this point. */
