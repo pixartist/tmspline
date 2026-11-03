@@ -219,7 +219,7 @@ public static class TrackJson
             {
                 Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
                 Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
-                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -20, 20), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
+                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -20, 20), BumpSize = Math.Clamp(s.BumpSize, 0.5, 512),
                 BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16), BumpSeed = s.BumpSeed,
                 Signs = s.Signs, SignSide = s.SignSide, SignSpacing = Math.Clamp(s.SignSpacing, 2, 256), SignColor = s.SignColor,
             });

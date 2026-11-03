@@ -677,8 +677,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       const setSeg = (key: string, fn: (segment: Track["segments"][number]) => void) =>
         editor.edit((tr) => fn(tr.segments[s.index]), false, `${key}:${s.index}`);
       rangeField(root, "Bump height m", -20, 20, 0.05, () => seg().bumpHeight, (v) => setSeg("bumpHeight", (x) => (x.bumpHeight = Math.max(-20, Math.min(20, v)))), 20);
-      rangeField(root, seg().bumps === "Noise" ? "Bump size m" : "Bump spacing m", 1, 64, 0.5, () => seg().bumpSize,
-        (v) => setSeg("bumpSize", (x) => (x.bumpSize = Math.max(0.5, v))), 256);
+      rangeField(root, seg().bumps === "Noise" ? "Bump size m" : "Bump spacing m", 1, seg().bumps === "Noise" ? 512 : 64, 0.5, () => seg().bumpSize,
+        (v) => setSeg("bumpSize", (x) => (x.bumpSize = Math.max(0.5, Math.min(512, v)))), 512);
       rangeField(root, "Bump detail m", 0.25, 8, 0.25, () => seg().bumpDetail, (v) => setSeg("bumpDetail", (x) => (x.bumpDetail = Math.max(0.25, v))), 16);
       if (seg().bumps === "Noise")
         rangeField(root, "Seed", 0, 100, 1, () => seg().bumpSeed ?? 0, (v) => setSeg("bumpSeed", (x) => {
