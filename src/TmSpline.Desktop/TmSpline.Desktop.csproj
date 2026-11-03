@@ -31,12 +31,41 @@
     <Delete Files="$(PublishDir)appsettings.json;$(PublishDir)appsettings.Development.json" Condition="'$(PublishDir)' != ''" />
   </Target>
 
-  <!-- The built editor; `npm run build` in web/ first (after `npm run wasm`). -->
+  <!--
+    The built editor (web/dist → wwwroot). Building the app rebuilds it whenever its sources changed, and the preview
+    core (web/public/_framework) whenever TmSpline.Core or TmSpline.Wasm changed; web/dist is not in git, so an old one
+    would otherwise ship silently. BuildEditor=false skips both (then whatever web/dist holds is used).
+  -->
+  <PropertyGroup>
+    <WebDir>$(MSBuildThisFileDirectory)..\..\web</WebDir>
+    <BuildEditor Condition="'$(BuildEditor)' == ''">true</BuildEditor>
+  </PropertyGroup>
   <ItemGroup>
-    <Content Include="$(EditorDist)\**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EditorSource Include="$(WebDir)\src\**;$(WebDir)\index.html;$(WebDir)\public\**;$(WebDir)\package.json;$(WebDir)\vite.config.*" Exclude="$(WebDir)\public\_framework\**" />
+    <PreviewCoreSource Include="$(MSBuildThisFileDirectory)..\TmSpline.Core\**\*.cs;$(MSBuildThisFileDirectory)..\TmSpline.Core\*.csproj;$(MSBuildThisFileDirectory)..\TmSpline.Wasm\**\*.cs;$(MSBuildThisFileDirectory)..\TmSpline.Wasm\*.csproj"
+                       Exclude="$(MSBuildThisFileDirectory)..\**\bin\**;$(MSBuildThisFileDirectory)..\**\obj\**" />
   </ItemGroup>
+  <Target Name="InstallEditorPackages" BeforeTargets="BuildPreviewCore" Condition="'$(BuildEditor)' == 'true' And !Exists('$(WebDir)\node_modules')">
+    <Exec Command="npm install" WorkingDirectory="$(WebDir)" />
+  </Target>
+  <Target Name="BuildPreviewCore" BeforeTargets="BuildEditorBundle" Condition="'$(BuildEditor)' == 'true'"
+          Inputs="@(PreviewCoreSource)" Outputs="$(WebDir)\public\_framework\TmSpline.Core.wasm">
+    <Exec Command="npm run wasm" WorkingDirectory="$(WebDir)" />
+  </Target>
+  <Target Name="BuildEditorBundle" BeforeTargets="BeforeBuild" Condition="'$(BuildEditor)' == 'true'"
+          Inputs="@(EditorSource);$(WebDir)\public\_framework\TmSpline.Core.wasm" Outputs="$(EditorDist)\index.html">
+    <Exec Command="npm run build" WorkingDirectory="$(WebDir)" />
+  </Target>
+  <!-- Collected after the bundle is built, so a fresh build is copied the same run. -->
+  <Target Name="CopyEditor" AfterTargets="BuildEditorBundle" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <_EditorFile Include="$(EditorDist)\**" />
+      <Content Include="@(_EditorFile)" Link="wwwroot\%(_EditorFile.RecursiveDir)%(_EditorFile.Filename)%(_EditorFile.Extension)"
+               CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
   <Target Name="WarnNoEditor" BeforeTargets="Build" Condition="!Exists('$(EditorDist)\index.html')">
-    <Warning Text="web/dist is missing: run `npm run build` in web/ so the app has an editor to show." />
+    <Warning Text="web/dist is missing: the app has no editor to show (BuildEditor=false, or the npm build failed)." />
   </Target>
 
 </Project>

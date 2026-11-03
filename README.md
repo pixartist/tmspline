@@ -36,9 +36,12 @@ the editor in a window (Photino.NET: WebView2 on Windows, WebKit on macOS/Linux)
 same process on `http://localhost:5080`, where the Openplanet plugin finds it.
 
 ```sh
-cd web && npm run wasm && npm run build && cd ..   # the editor bundle the app shows (web/dist → wwwroot)
 dotnet run --project src/TmSpline.Desktop
 ```
+
+Building the app also builds what it shows: the editor bundle (`npm run build`, web/dist → wwwroot) whenever the
+editor's sources changed, and the preview core (`npm run wasm`) whenever TmSpline.Core or TmSpline.Wasm changed
+(`-p:BuildEditor=false` skips both).
 
 - Its files are in `%LOCALAPPDATA%\TMSpline` (`~/.local/share/TMSpline` elsewhere): the editor's storage (`webview`),
   export jobs, the block library (`vanilla`), live update state (`game`), the log (`logs/tmspline.log`) and an optional
