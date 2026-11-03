@@ -17,6 +17,7 @@ public static class ServerApp
         builder.Services.AddSingleton<GameMaps>();
         builder.Services.AddSingleton<VanillaBuilder>();
         builder.Services.AddSingleton<ImporterSetup>();
+        builder.Services.AddSingleton<CloudLink>();
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         builder.Services.AddProblemDetails();
 
@@ -151,6 +152,98 @@ public static class ServerApp
         })
         .RequireRateLimiting("estimate")
         .DisableAntiforgery();
+
+        MapCloud(app);
+    }
+
+    /// <summary>
+    /// The link to TMSpline's hosted service (Cloud:Url, the desktop app): sign-in, and the editor's cloud requests,
+    /// forwarded with the user's token. Requests need the header X-TMSpline: 1, which other websites cannot send to
+    /// localhost without a CORS preflight this server never allows.
+    /// </summary>
+    private static void MapCloud(WebApplication app)
+    {
+        var cloud = app.Services.GetRequiredService<CloudLink>();
+        if (!cloud.Enabled) return;
+
+        var group = app.MapGroup("/api/cloud").DisableAntiforgery();
+        group.AddEndpointFilter(async (context, next) =>
+            context.HttpContext.Request.Headers["X-TMSpline"] == "1"
+                ? await next(context)
+                : Results.Problem("Missing X-TMSpline header.", statusCode: StatusCodes.Status400BadRequest));
+
+        group.MapGet("", () => cloud.Status);
+        group.MapPost("/login", async (HttpContext c, CancellationToken ct) =>
+        {
+            try
+            {
+                await cloud.StartLogin($"http://127.0.0.1:{c.Connection.LocalPort}/callback", ct);
+                return Results.Ok(cloud.Status);
+            }
+            catch (HttpRequestException e)
+            {
+                return Results.Problem($"TMSpline's server is not reachable: {e.Message}", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+        group.MapPost("/logout", () =>
+        {
+            cloud.SignOut();
+            return Results.Ok(cloud.Status);
+        });
+        group.MapPost("/open", (string path) =>
+        {
+            cloud.OpenPage(path);
+            return Results.NoContent();
+        });
+
+        // The service's API, for the paths the editor uses.
+        var allowed = new System.Text.RegularExpressions.Regex(@"^(me|app/latest|tracks|tracks/[A-Za-z0-9_-]{8,64}(/share)?|shared/[a-z0-9]{6,32})$");
+        group.MapMethods("/api/{**path}", ["GET", "PUT", "POST", "DELETE"], async (string path, HttpContext c, CancellationToken ct) =>
+        {
+            if (!allowed.IsMatch(path)) return Results.NotFound();
+            byte[]? body = null;
+            if (c.Request.ContentLength > 0 || c.Request.Headers.TransferEncoding.Count > 0)
+            {
+                using var buffer = new MemoryStream();
+                await c.Request.Body.CopyToAsync(buffer, ct);
+                body = buffer.ToArray();
+            }
+            try
+            {
+                using var response = await cloud.Send(new HttpMethod(c.Request.Method), path + c.Request.QueryString, body, c.Request.ContentType, ct);
+                var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+                c.Response.StatusCode = (int)response.StatusCode;
+                if (bytes.Length > 0)
+                {
+                    c.Response.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+                    await c.Response.Body.WriteAsync(bytes, ct);
+                }
+                return Results.Empty;
+            }
+            catch (HttpRequestException e)
+            {
+                return Results.Problem($"TMSpline's server is not reachable: {e.Message}", statusCode: StatusCodes.Status502BadGateway, title: "Offline");
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return Results.Problem("TMSpline's server did not answer in time.", statusCode: StatusCodes.Status504GatewayTimeout, title: "Offline");
+            }
+        });
+
+        // Authentik sends the browser back here after the login.
+        app.MapGet("/callback", async (string? code, string? state, string? error, CancellationToken ct) =>
+        {
+            var problem = await cloud.CompleteLogin(code, state, error, ct);
+            var (title, text) = problem is null
+                ? ("Signed in", "You are signed in to TMSpline. You can close this tab and go back to the app.")
+                : ("Not signed in", problem);
+            return Results.Content($$"""
+                <!doctype html><html lang="en"><head><meta charset="utf-8" /><title>TMSpline · {{title}}</title>
+                <style>body{font:16px system-ui,sans-serif;background:#0d1020;color:#eef0f6;display:grid;place-items:center;height:100vh;margin:0}
+                main{max-width:480px;padding:28px 32px;border-radius:14px;background:#171a33;border:1px solid #ff8a3d55}h1{margin:0 0 8px;font-size:22px}</style>
+                </head><body><main><h1>{{title}}</h1><p>{{System.Net.WebUtility.HtmlEncode(text)}}</p></main></body></html>
+                """, "text/html; charset=utf-8");
+        });
     }
 
     private static async Task<IResult> Export(ExportRequestDto request, ExportService service, CancellationToken ct, Func<ExportedMap, IResult> deliver)

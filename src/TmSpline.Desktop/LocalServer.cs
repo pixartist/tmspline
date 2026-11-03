@@ -21,6 +21,8 @@ internal sealed record DesktopPaths(string Root)
     /// <summary>The webview's profile: the editor's local storage (autosaved tracks) is kept here.</summary>
     public string WebView => Path.Combine(Root, "webview");
     public string Logs => Path.Combine(Root, "logs");
+    /// <summary>The cloud login's refresh token, encrypted with the user's Windows account.</summary>
+    public string CloudToken => Path.Combine(Root, "cloud-token.dat");
 
     public static DesktopPaths Create()
     {
@@ -40,6 +42,8 @@ internal sealed class DesktopSettings
     public int Port { get; set; } = 5080;
     /// <summary>The webview's developer tools and context menu.</summary>
     public bool DevTools { get; set; }
+    /// <summary>TMSpline's hosted service: sign-in, cloud tracks, share links, updates.</summary>
+    public string CloudUrl { get; set; } = "https://tmspline.ddns.pixartist.de";
 
     public static DesktopSettings Load(string file)
     {
@@ -84,6 +88,11 @@ internal static class LocalServer
             ["Vanilla:Builder"] = VanillaBuilder.SelfBuilder,
             ["Game:MapsDir"] = "auto",
             ["Game:StateDir"] = paths.GameState,
+            ["Cloud:Url"] = settings.CloudUrl,
+            ["Cloud:TokenFile"] = paths.CloudToken,
+            ["App:Version"] = typeof(LocalServer).Assembly.GetName().Version?.ToString(3),
+            // Only requests addressed to this machine: a website cannot reach the server through DNS rebinding.
+            ["AllowedHosts"] = "localhost;127.0.0.1",
         });
         builder.WebHost.UseUrls(url);
         builder.Logging.ClearProviders();

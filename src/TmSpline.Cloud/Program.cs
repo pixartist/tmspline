@@ -143,6 +143,11 @@ app.MapGet("/download/{file}", (string file, Releases releases) =>
     .RequireAuthorization("api");
 
 // ---- API -----------------------------------------------------------------------------------------------------------
+// Public: how the desktop app signs in (the same Authentik application as the website).
+app.MapGet("/api/client", () => devUser is not null
+    ? Results.Ok(new { dev = true })
+    : Results.Ok(new { authority = config["Auth:Authority"], clientId = config["Auth:ClientId"] }));
+
 var api = app.MapGroup("/api").RequireAuthorization("api");
 // Requests with the login cookie that change something must come from TMSpline's own pages (not another site's form).
 api.AddEndpointFilter(async (context, next) =>

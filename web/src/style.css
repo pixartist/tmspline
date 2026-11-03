@@ -112,6 +112,34 @@ dialog.export .importer p { margin: 4px 0 8px; }
 .controls-help.collapsed { width: auto; }
 .controls-help.collapsed dl { display: none; }
 
+/* Cloud link (desktop app): sync state, Share, account. */
+.cloud { margin-left: auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cloud-state { color: var(--muted); font-size: 12px; }
+.cloud-state[data-state="offline"], .cloud-state[data-state="error"], .cloud-state[data-state="conflict"] { color: #ff9a6b; }
+.cloud-menu {
+  position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.cloud-menu button { text-align: left; background: none; border: 0; }
+.cloud-menu button:hover { background: #3b434e; }
+dialog.cloud-dialog { width: min(560px, 92vw); }
+dialog.cloud-dialog h3 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; font-weight: normal; text-transform: uppercase; letter-spacing: 0.05em; }
+dialog.cloud-dialog .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 12px; }
+dialog.cloud-dialog .actions.left { justify-content: flex-start; margin-top: 4px; }
+dialog.cloud-dialog .link-row, dialog.cloud-dialog .share-link { display: flex; gap: 6px; margin: 8px 0; }
+dialog.cloud-dialog .link-row[hidden] { display: none; }
+dialog.cloud-dialog input {
+  flex: 1; font: inherit; color: var(--text); background: #1d2126; border: 1px solid #3f4752; border-radius: 4px; padding: 4px 6px;
+}
+dialog.cloud-dialog .track-list { max-height: 50vh; overflow-y: auto; display: grid; gap: 2px; }
+dialog.cloud-dialog .track-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 4px; }
+dialog.cloud-dialog .track-row.current { background: rgb(255 210 63 / 0.08); }
+dialog.cloud-dialog .track-row .name { text-align: left; background: none; border: 0; color: var(--text); padding: 4px 2px; }
+dialog.cloud-dialog .track-row .name:hover { color: var(--accent); }
+dialog.cloud-dialog .track-row .meta { color: var(--muted); font-size: 12px; }
+dialog.cloud-dialog .track-row .delete { font-size: 12px; padding: 2px 8px; }
+dialog.cloud-dialog .error { color: #ff7a6b; }
+
 .conflict-banner {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; background: rgb(60 30 20 / 0.95); border: 1px solid #c9643c; border-radius: 8px; z-index: 10;

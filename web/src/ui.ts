@@ -1,5 +1,6 @@
 import { MAX_BLOCK_LEVEL, type Editor } from "./editor";
 import { showExportDialog } from "./export";
+import { createCloudUi, type CloudUi } from "./cloudUi";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
@@ -50,6 +51,9 @@ export function loadSavedMap(): TrackMap {
 export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLElement, status: HTMLElement): void {
   const history = new History();
   editor.onBeforeEdit = (snapshot) => history.push(snapshot);
+  // The desktop app's cloud link (sign-in, sync, sharing); null in a plain browser.
+  let cloud: CloudUi | null = null;
+  void createCloudUi(editor, toolbar.parentElement!, STORAGE_KEY).then((c) => (cloud = c), (err) => console.warn("Cloud link failed", err));
 
   const button = (label: string, title: string, onClick: () => void) => {
     const b = document.createElement("button");
@@ -100,8 +104,10 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     editor.editMap((m) => Object.assign(m, newMap()));
     editor.select(null);
     editor.frameTrack();
+    cloud?.replaced();
   });
-  button("Open…", "Load a .track.json file", () => openFile(editor));
+  button("Open…", "Open one of your tracks, a .track.json file or a share link", () =>
+    cloud ? cloud.open((opened) => openFile(editor, opened)) : openFile(editor));
   button("Save", "Download the map (all tracks) as .track.json", () => download(editor.map));
   button("Export map", "Generate a Trackmania .Map.Gbx", () => showExportDialog(editor.exportMap())).classList.add("primary");
   separator();
@@ -197,6 +203,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     if (json === lastSaved && !force) return;
     localStorage.setItem(STORAGE_KEY, json);
     lastSaved = json;
+    cloud?.sync.changed(json);
   };
   window.addEventListener("storage", (e) => {
     if (e.key !== STORAGE_KEY || e.newValue === null || e.newValue === lastSaved || conflict) return;
@@ -959,7 +966,7 @@ function download(track: TrackMap): void {
   URL.revokeObjectURL(a.href);
 }
 
-function openFile(editor: Editor): void {
+function openFile(editor: Editor, opened?: () => void): void {
   const input = Object.assign(document.createElement("input"), { type: "file", accept: ".json,application/json" });
   input.addEventListener("change", async () => {
     const file = input.files?.[0];
@@ -969,6 +976,7 @@ function openFile(editor: Editor): void {
       editor.editMap((m) => Object.assign(m, map));
       editor.select(null);
       editor.frameTrack();
+      opened?.();
     } catch (err) {
       alert(`Could not open ${file.name}: ${(err as Error).message}`);
     }
