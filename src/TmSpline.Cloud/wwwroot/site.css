@@ -53,6 +53,7 @@ main { max-width: 1040px; margin: 0 auto; padding: 4vh clamp(16px, 4vw, 48px) 48
 }
 .button:hover { filter: brightness(1.08); }
 .muted { color: var(--muted); font-size: 14px; }
+.hash { flex-basis: 100%; font: 11px ui-monospace, Consolas, monospace; word-break: break-all; opacity: 0.75; }
 .small { font-size: 13.5px; color: var(--muted); }
 
 .steps { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 24px; backdrop-filter: blur(10px); }

@@ -281,6 +281,13 @@ export class CloudSync {
     void this.upload();
   }
 
+  /** Uploads now if needed and waits for it (at most a few seconds), e.g. before the app closes for an update. */
+  async flushAndWait(json: string): Promise<void> {
+    this.flush(json);
+    const deadline = Date.now() + 8000;
+    while (this.state === "saving" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  }
+
   /** Keep this version after a conflict: overwrite the one in the cloud. */
   overwrite(json: string): void {
     this.link.version = null;

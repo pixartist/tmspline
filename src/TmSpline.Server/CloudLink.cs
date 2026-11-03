@@ -21,6 +21,8 @@ public sealed class CloudLink
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ILogger<CloudLink> _logger;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    /// <summary>For large downloads (app updates): no overall timeout, the caller cancels.</summary>
+    private readonly HttpClient _downloads = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private readonly object _lock = new();
     private readonly string? _tokenFile;
@@ -224,21 +226,27 @@ public sealed class CloudLink
 
     // ---- requests --------------------------------------------------------------------------------------------------
 
-    /// <summary>Sends a request to the service's API (path below /api/), with the access token; refreshes it once on 401.</summary>
-    public async Task<HttpResponseMessage> Send(HttpMethod method, string path, byte[]? body, string? contentType, CancellationToken ct)
+    /// <summary>
+    /// Sends a request to the service with the access token, refreshing it once on 401. <paramref name="path"/> is below
+    /// /api/, or from the service's root when it starts with "/" (downloads). With <paramref name="streamed"/> the
+    /// answer's body is read as it arrives (large files).
+    /// </summary>
+    public async Task<HttpResponseMessage> Send(HttpMethod method, string path, byte[]? body, string? contentType, CancellationToken ct,
+        bool streamed = false)
     {
         for (var attempt = 0; ; attempt++)
         {
             var token = await AccessToken(attempt > 0, ct);
             if (token is null) return new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized);
-            var request = new HttpRequestMessage(method, $"{Url}/api/{path}");
+            var request = new HttpRequestMessage(method, path.StartsWith('/') ? Url + path : $"{Url}/api/{path}");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (body is not null)
             {
                 request.Content = new ByteArrayContent(body);
                 request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType ?? "application/json");
             }
-            var response = await _http.SendAsync(request, ct);
+            var response = await (streamed ? _downloads : _http).SendAsync(request,
+                streamed ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct);
             if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized || attempt > 0) return response;
             response.Dispose();
         }

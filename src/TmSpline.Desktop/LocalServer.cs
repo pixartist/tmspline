@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TmSpline.Server;
@@ -26,8 +27,10 @@ internal sealed record DesktopPaths(string Root)
 
     public static DesktopPaths Create()
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
-            Environment.SpecialFolderOption.Create), "TMSpline");
+        // TMSPLINE_HOME moves everything elsewhere (a portable install, or a second copy next to the usual one).
+        var root = Environment.GetEnvironmentVariable("TMSPLINE_HOME") is { Length: > 0 } home
+            ? Path.GetFullPath(home)
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create), "TMSpline");
         var paths = new DesktopPaths(root);
         foreach (var dir in new[] { root, paths.Jobs, paths.WebView, paths.Logs })
             Directory.CreateDirectory(dir);
@@ -103,6 +106,8 @@ internal static class LocalServer
         ServerApp.AddServices(builder);
         var app = builder.Build();
         ServerApp.Map(app);
+        new Updater(paths, app.Services.GetRequiredService<CloudLink>(), typeof(LocalServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
+            app.Services.GetRequiredService<ILogger<Updater>>()).Map(app);
         return app;
     }
 }

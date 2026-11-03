@@ -18,6 +18,7 @@
     get("/api/app/latest").then((r) => {
       const link = (f, label) => f
         ? `<a class="button" href="${esc(f.url)}" download>${label}</a><span class="muted">${esc(f.name)} · ${mb(f.size)}</span>`
+          + `<span class="muted hash" title="SHA-256 of the file, to check the download">SHA-256 ${esc(f.sha256)}</span>`
         : `<span class="muted">Not available yet.</span>`;
       app.innerHTML = r ? link(r.app, `Download TMSpline ${esc(r.version)}`) + (r.notes ? `<p class="small">${esc(r.notes)}</p>` : "")
         : `<span class="muted">No release yet: coming soon.</span>`;

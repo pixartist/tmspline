@@ -54,6 +54,8 @@ internal static class Program
             .SetDevToolsEnabled(settings.DevTools)
             .SetContextMenuEnabled(settings.DevTools)
             .Load(new Uri(url + "/"));
+        // The updater closes the app once its new files wait to be copied over these.
+        Updater.RequestClose = () => window.Invoke(window.Close);
         window.WaitForClose();
 
         using (var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5)))

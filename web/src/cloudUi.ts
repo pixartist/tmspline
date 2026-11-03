@@ -1,5 +1,6 @@
 import type { Editor } from "./editor";
 import type { TrackMap } from "./track";
+import { bannerHost } from "./banners";
 import {
   availableUpdate, cloudStatus, CloudSync, deleteTrack, listTracks, loadShared, loadTrack, openWebsite, shareTrack, signIn, signOut,
   skipUpdate, unshareTrack, type CloudStatus, type CloudTrack,
@@ -58,10 +59,13 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
     // Releases are for signed-in users: checked once signed in (at startup or later).
     if (s?.signedIn && !updateChecked) {
       updateChecked = true;
-      void availableUpdate(s).then((release) => {
+      void availableUpdate(s).then(async (release) => {
         if (!release) return;
-        banner(`TMSpline ${release.version} is available${release.notes ? `: ${release.notes}` : "."}`, [
-          ["Download", () => void openWebsite("/")],
+        const text = `TMSpline ${release.version} is available${release.notes ? `: ${release.notes}` : "."}`;
+        // The app updates itself where it can (a release build on Windows); otherwise the website has the download.
+        const self = await fetch("/api/update", { headers: { "X-TMSpline": "1" } }).then((r) => (r.ok ? r.json() : null), () => null);
+        banner(text, [
+          self?.supported ? ["Install update", () => void installUpdate(release.version)] : ["Download", () => void openWebsite("/")],
           ["Later", () => {}],
           ["Skip this version", () => skipUpdate(release.version)],
         ]);
@@ -106,7 +110,7 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
       });
       b.append(button);
     });
-    container.appendChild(b);
+    bannerHost(container).appendChild(b);
     return b;
   }
 
@@ -243,6 +247,36 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
   // ---- startup ------------------------------------------------------------------------------------------------------
 
   applyStatus(status);
+
+  /** Downloads the update in the app (progress in a banner), then offers to restart into it. */
+  async function installUpdate(version: string): Promise<void> {
+    const headers = { "X-TMSpline": "1" };
+    const b = banner(`Downloading TMSpline ${version}…`, []);
+    const text = b.querySelector("span")!;
+    let s = await fetch("/api/update/install", { method: "POST", headers }).then((r) => r.json());
+    while (s.state === "downloading") {
+      text.textContent = `Downloading TMSpline ${version}… ${s.size ? Math.round((100 * s.received) / s.size) : 0} %`;
+      await new Promise((r) => setTimeout(r, 400));
+      s = await fetch("/api/update", { headers }).then((r) => r.json());
+    }
+    b.remove();
+    if (s.state !== "ready") {
+      banner(`The update could not be downloaded: ${s.error ?? "unknown error"}`, [["OK", () => {}], ["Open the website", () => void openWebsite("/")]]);
+      return;
+    }
+    banner(`TMSpline ${version} is ready. Restart now? (Your map is saved.)`, [
+      ["Restart now", async () => {
+        // The map is saved on every change; this makes sure the last one is in before the app closes.
+        await sync.flushAndWait(mapJson());
+        const r = await fetch("/api/update/apply", { method: "POST", headers });
+        if (!r.ok) {
+          const p = await r.json().catch(() => null);
+          banner(p?.detail ?? "The update could not be applied.", [["OK", () => {}]]);
+        }
+      }],
+      ["Later", () => {}],
+    ]);
+  }
 
   async function save(button: HTMLButtonElement): Promise<void> {
     const label = "Save";

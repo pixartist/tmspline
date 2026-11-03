@@ -1,6 +1,7 @@
 import { MAX_BLOCK_LEVEL, type Editor } from "./editor";
 import { showExportDialog } from "./export";
 import { createCloudUi, type CloudUi } from "./cloudUi";
+import { bannerHost } from "./banners";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
@@ -276,7 +277,7 @@ async function hintBlockLibrary(container: HTMLElement): Promise<void> {
   const never = Object.assign(document.createElement("button"), { textContent: "Don't show again" });
   never.addEventListener("click", () => close(true));
   banner.append(ok, never);
-  container.appendChild(banner);
+  bannerHost(container).appendChild(banner);
 }
 
 /** Banner shown when another tab saved the track; returns the banner element. */
@@ -297,7 +298,7 @@ function showConflict(container: HTMLElement, actions: { loadTheirs: () => void;
   };
   choice("Load the other version", actions.loadTheirs, true);
   choice("Keep this one", actions.keepMine);
-  container.appendChild(banner);
+  bannerHost(container).appendChild(banner);
   return banner;
 }
 

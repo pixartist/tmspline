@@ -140,9 +140,14 @@ dialog.cloud-dialog .track-row .meta { color: var(--muted); font-size: 12px; }
 dialog.cloud-dialog .track-row .delete { font-size: 12px; padding: 2px 8px; }
 dialog.cloud-dialog .error { color: #ff7a6b; }
 
+.banner-stack {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; width: max-content; max-width: min(900px, 92%);
+}
+.banner-stack:empty { display: none; }
 .conflict-banner {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; background: rgb(60 30 20 / 0.95); border: 1px solid #c9643c; border-radius: 8px; z-index: 10;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: rgb(60 30 20 / 0.95); border: 1px solid #c9643c; border-radius: 8px;
 }
 
 .button-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px 88px; }

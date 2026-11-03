@@ -217,6 +217,13 @@ at ground level (map Y = 8).
 The app (win-x64, .NET runtime included, ~56 MB zipped), the plugin (`TMSpline.op`) and `latest.json`, which the
 website links and the app checks for updates. Deploy the service itself with `.\deploy\mac\deploy.ps1`.
 
+The app is not signed, so Windows' SmartScreen warns on the first start of a downloaded zip ("More info → Run anyway";
+the website says so). Later versions install from inside the app: **Install update** downloads the zip from the
+service (signed in), checks its size and SHA-256 against `latest.json`, unpacks it into `update/`, and on **Restart
+now** closes the app while a small PowerShell script copies the files over the installed ones and starts it again
+(log: `logs/update.log`). Files the app downloads itself carry no internet mark, so SmartScreen does not ask again.
+Release builds on Windows only; `TMSPLINE_HOME` moves the app's data folder (e.g. a second, separate copy).
+
 ## License
 
 TMSpline is free software under the GNU General Public License v3 (`LICENSE`). It uses `GBX.NET.LZO`, which is
