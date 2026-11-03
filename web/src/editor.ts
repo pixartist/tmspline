@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
-import { generateScenery, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
+import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
@@ -747,16 +747,35 @@ export class Editor {
    * Replaces the generated scenery (blocks and trees) with a new one round the tracks and the other blocks (one undo
    * step). Returns how many blocks and items it placed, or null when the block library lacks the theme's pieces.
    */
-  generateScenery(options: SceneryLandOptions): { blocks: number; items: number } | null {
+  async generateScenery(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
     const lib = this.library;
     if (!lib) return null;
+    // The land pieces' meshes, so trees can stand on slopes at their real surface height.
+    const pieceMeshes = new Map<string, THREE.BufferGeometry>();
+    await Promise.all(landPieces(options.theme).flatMap((name) => [true, false].map(async (ground) => {
+      const file = lib.variant(name, ground)?.mesh?.file;
+      if (file && !pieceMeshes.has(file)) pieceMeshes.set(file, await lib.geometry(file));
+    })));
+    const ray = new THREE.Raycaster();
+    const probe = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    const surface = (b: VanillaBlock, x: number, z: number): number | null => {
+      const file = lib.variant(b.name, !b.free && b.y === 0)?.mesh?.file;
+      const geo = file ? pieceMeshes.get(file) : undefined;
+      if (!geo) return null;
+      const mesh = new THREE.Mesh(geo, probe);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(blockMatrix(b, blockSize(lib, b)));
+      mesh.updateMatrixWorld(true);
+      ray.set(new THREE.Vector3(x, Y_MAX + 100, z), new THREE.Vector3(0, -1, 0));
+      return ray.intersectObject(mesh, false)[0]?.point.y ?? null;
+    };
     const own = this.map.blocks.filter((b) => !b.scenery);
     const meshes = this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r);
     const roads = roadColumns(meshes);
     const footprint = roadFootprint(meshes);
     // The blocks themselves, not their columns: land may rise under an air block (its columns then stop on it).
     const occupied = occupiedCells(own, lib);
-    const generated = generateScenery(lib, { roads, footprint, occupied }, options);
+    const generated = generateScenery(lib, { roads, footprint, occupied, surface }, options);
     if (!generated) return null;
     this.editBlocks((blocks) => {
       const keep = blocks.filter((b) => !b.scenery);

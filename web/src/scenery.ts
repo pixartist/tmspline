@@ -36,6 +36,18 @@ export interface SceneryInput {
   footprint: Set<string>;
   /** Grid cells taken by blocks ("x,y,z", levels), the scenery's own excluded. */
   occupied: Set<string>;
+  /**
+   * Height of a land piece's surface at a point (metres above the ground, world x/z), or null where it has none: lets
+   * trees stand on slopes too (measured on the piece's real mesh, see landPieces). Without it trees stay on flat land.
+   */
+  surface?: (block: VanillaBlock, x: number, z: number) => number | null;
+}
+
+/** The land pieces a theme's hills use (flat, then the slopes), e.g. to load their meshes for SceneryInput.surface. */
+export function landPieces(theme: SceneryTheme): string[] {
+  const s = theme.land;
+  return [`DecoPlatform${s}Base`, `DecoHill${s}Slope2Straight`, `DecoHill${s}Slope2Curve1In`, `DecoHill${s}Slope2Curve1Out`,
+    `DecoPlatform${s}SlopeBase`, `DecoPlatform${s}SlopeBaseCurve1InFull`, `DecoPlatform${s}SlopeBaseCurve1OutFull`];
 }
 
 export interface SceneryOptions {
@@ -192,11 +204,14 @@ function random(seed: number): () => number {
  * 3 m from the cell's edges and `clear` of the roads, random sizes and turns.
  */
 function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string,
-  clear: (x: number, z: number) => boolean): VanillaItem[] {
+  clear: (x: number, z: number) => boolean, slopes = new Map<string, VanillaBlock>(),
+  surface?: SceneryInput["surface"]): VanillaItem[] {
   const kind = FORESTS.find((f) => f.id === forest);
   if (!kind || density <= 0) return [];
   const items: VanillaItem[] = [];
-  for (const [k, level] of surfaces) {
+  // Flat cells by their level, slope cells (when their surface can be measured) by their piece.
+  const cells: [string, number | VanillaBlock][] = [...surfaces, ...(surface ? [...slopes] : [])];
+  for (const [k, on] of cells) {
     const [x, z] = parse(k);
     const rnd = random((x * 73856093) ^ (z * 19349663) ^ 0x5eed);
     if (rnd() > density) continue;
@@ -207,10 +222,13 @@ function plantForest(surfaces: Map<string, number>, forest: string, density: num
       if (spots.some(([sx, sz]) => Math.hypot(sx - px, sz - pz) < 7) || !clear(px, pz)) continue;
       spots.push([px, pz]);
     }
-    // On the ground (level 0) the item stands on the terrain; on land on the platform's top, 2 m above its level.
-    const y = level > 0 ? level * BLOCK_LEVEL + 2 : 0;
-    for (const [px, pz] of spots)
+    for (const [px, pz] of spots) {
+      // On the ground (level 0) the item stands on the terrain; on flat land on the platform's top, 2 m above its level;
+      // on a slope where its surface is at that spot (as the game's editor places trees on hills).
+      const y = typeof on === "number" ? (on > 0 ? on * BLOCK_LEVEL + 2 : 0) : surface!(on, px, pz);
+      if (y === null) continue;
       items.push({ name: kind.trees[Math.floor(rnd() * kind.trees.length)], position: [px, y, pz], yaw: Math.round(rnd() * 360), scenery: theme });
+    }
   }
   return items;
 }
@@ -251,6 +269,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   // Where trees may stand: flat land (or the ground) away from the cliffs, not on cells with blocks, and each tree far
   // enough from the roads (checked per tree, so they also grow right beside the road and on the land under it).
   let surfaces = new Map<string, number>();
+  let slopes = new Map<string, VanillaBlock>();
   if (options.hills || nestle) {
     const cells = nestle ? [...dist.keys()] : gridCells();
     const land = hills(lib, track, dist, base, cliff, options, cells);
@@ -259,6 +278,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     // the grid).
     blocks.push(...(nestle ? nestleBlocks(lib, land.blocks, land.height, options.theme.id) : land.blocks));
     surfaces = land.flat;
+    slopes = land.slopes;
   } else
     for (let x = -HALF; x < HALF; x++)
       for (let z = -HALF; z < HALF; z++)
@@ -266,9 +286,10 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   for (const k of input.occupied) {
     const [x, , z] = k.split(",").map(Number);
     surfaces.delete(key(x, z));
+    slopes.delete(key(x, z));
   }
   const clear = (x: number, z: number) => clearOfRoads(input.footprint, x, z, Math.max(0, options.clearance));
-  return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id, clear) };
+  return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id, clear, slopes, input.surface) };
 }
 
 function gridCells(): string[] {
@@ -336,7 +357,7 @@ interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: 
  */
 function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string, number>, base: Map<string, number>,
   cliff: Cliffs | null, options: SceneryLandOptions, cells: Iterable<string>):
-  { blocks: VanillaBlock[]; flat: Map<string, number>; height: Map<string, number> } | null {
+  { blocks: VanillaBlock[]; flat: Map<string, number>; height: Map<string, number>; slopes: Map<string, VanillaBlock> } | null {
   const flatCells = new Map<string, number>();
   const cliffHigh = cliff?.high ?? new Set<string>(), cliffFront = cliff?.front ?? new Set<string>();
   const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
@@ -468,7 +489,10 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       }
     }
   }
-  return { blocks, flat: flatCells, height };
+  // Every cell with a sloped piece (the cells that are not flat land), for trees on slopes.
+  const slopeCells = new Map<string, VanillaBlock>();
+  for (const b of blocks) if (b.name !== flat && !flatCells.has(key(b.x, b.z))) slopeCells.set(key(b.x, b.z), b);
+  return { blocks, flat: flatCells, height, slopes: slopeCells };
 }
 
 const even2 = (n: number) => Math.max(0, 2 * Math.floor(n / 2));

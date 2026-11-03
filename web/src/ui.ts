@@ -557,9 +557,9 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     }
     buttonRow(root, [
       {
-        label: "Generate", onClick: () => {
+        label: "Generate", onClick: async () => {
           const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
-          const n = editor.generateScenery({ ...scenery, theme });
+          const n = await editor.generateScenery({ ...scenery, theme });
           scenery.note = n === null ? "The block library lacks pieces for these settings."
             : `Placed ${n.blocks} blocks${n.items ? ` and ${n.items} trees` : ""}.`;
           editor.onChange();
