@@ -213,7 +213,7 @@ public static class TrackJson
             {
                 Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
                 Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
-                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -10, 10), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
+                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -20, 20), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
                 BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16),
                 Signs = s.Signs, SignSide = s.SignSide, SignSpacing = Math.Clamp(s.SignSpacing, 2, 256), SignColor = s.SignColor,
             });
@@ -223,7 +223,7 @@ public static class TrackJson
                 Kind = o.Kind, Segment = o.Segment, At = Math.Clamp(o.At, 0, 1), Offset = o.Offset, Shape = o.Shape,
                 Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width),
                 // Bumps may be dips (negative height).
-                Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -10, 10) : Math.Max(0.1, o.Height), Color = o.Color,
+                Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -20, 20) : Math.Max(0.1, o.Height), Color = o.Color,
             });
         track.SyncSegments();
         return track;
