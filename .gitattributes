@@ -1,0 +1,3 @@
+# Scripts and files that run on the Mac keep Unix line endings in every checkout.
+*.sh text eol=lf
+*.plist text eol=lf
