@@ -6,7 +6,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle", band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -482,6 +482,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
+    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
@@ -525,21 +526,28 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   if (!s && editor.library) {
     section("Scenery");
     const int = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
-    checkbox(root, "Hills", () => scenery.hills, (v) => (scenery.hills = v));
+    // Settings that show or hide other fields redraw the inspector.
+    const relayout = () => editor.onChange();
+    const nestle = scenery.mode === "nestle";
+    selectField(root, "Mode", ["fill", "nestle"], () => scenery.mode, (v) => { scenery.mode = v as "fill" | "nestle"; relayout(); }, false,
+      { fill: "Fill the grid (from the ground)", nestle: "Nestle (band at the track's height)" });
+    if (!nestle) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
-    if (scenery.hills) {
+    if (nestle) numberField(root, "Band (cells)", () => scenery.band, (v) => (scenery.band = int(v, 1, 24)), 1);
+    if (scenery.hills || nestle) {
       numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
       // With cliffs the hills climb to their top instead.
-      if (scenery.cliffs === 0)
+      if (scenery.cliffs === 0 || nestle)
         numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
     }
-    numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => (scenery.cliffs = int(v, 0, 24)), 1);
+    if (!nestle)
+      numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => { scenery.cliffs = int(v, 0, 24); relayout(); }, 1);
     // The theme sets the land's surface and the cliffs, and picks its forest (which can still be changed).
     selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => {
       scenery.theme = v;
       scenery.forest = SCENERY_THEMES.find((th) => th.id === v)?.forest ?? scenery.forest;
     }, false, Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
-    selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => (scenery.forest = v), false,
+    selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => { scenery.forest = v; relayout(); }, false,
       { none: "None", ...Object.fromEntries(FORESTS.map((f) => [f.id, f.label])) });
     if (scenery.forest !== "none") {
       numberField(root, "Forest density (%)", () => Math.round(scenery.density * 100), (v) => (scenery.density = int(v, 0, 100) / 100), 10);
@@ -557,11 +565,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       },
       { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks and trees.`; editor.onChange(); } },
     ]);
-    hint(root, (scenery.note ? scenery.note + " " : "")
-      + "Builds land round the tracks: up to just below the roads (they run on it instead of columns), a flat shoulder "
+    hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
+      ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "
+        + "hills rising by 2 levels every hill step, as free blocks without columns (the land floats, e.g. along a ski "
+        + "slope high up), also outside the grid. Where the road climbs faster than 2 levels per cell, the land steps. "
+        + "Generating again replaces what was generated."
+      : "Builds land round the tracks: up to just below the roads (they run on it instead of columns), a flat shoulder "
       + "beside them, then hills rising by 2 levels every hill step, and cliff walls further out as a backdrop (also "
       + "inside loops), with trees on the flat land (shown as simple stand-ins; the game has the real ones). Generating "
-      + "again replaces what was generated; it is normal blocks and items otherwise (clear jumps by hand).");
+      + "again replaces what was generated; it is normal blocks and items otherwise (clear jumps by hand)."));
   }
 
   if (s?.kind === "point" || s?.kind === "handle") {

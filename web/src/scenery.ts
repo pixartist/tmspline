@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, type VanillaBlock, type VanillaItem } from "./track";
+import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, wrapBank, type VanillaBlock, type VanillaItem } from "./track";
 import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
 
 /**
@@ -8,8 +8,10 @@ import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
  * runs, outer and inner corners, round the outside and round islands inside loops. It knows nothing about jumps (the
  * mapper removes what is in the way).
  *
- * Works on the 32 m grid, ground level only. The cliff pieces are read from the block library: in each piece the tallest
- * columns are the wall, the others the space its face leans into (towards the track).
+ * Two modes. "Fill" works on the whole 32 m grid from the ground up, with cliffs as a backdrop. "Nestle" lays a band of
+ * land round the tracks at their own height (a ski slope gets its slope, high up), as free blocks without columns, also
+ * outside the grid. The cliff pieces are read from the block library: in each piece the tallest columns are the wall, the
+ * others the space its face leans into (towards the track).
  */
 
 /**
@@ -76,13 +78,17 @@ function place(lib: VanillaLibrary, p: Piece, dir: number, anchor: Cell, at: Cel
 
 const HALF = Math.round(MAP_HALF_EXTENT / BLOCK_CELL);
 const inMap = (x: number, z: number) => x >= -HALF && x < HALF && z >= -HALF && z < HALF;
+/** Cells where free blocks may stand (WORLD_HALF_EXTENT: 2 km round the grid). */
+const WORLD = Math.floor(WORLD_HALF_EXTENT / BLOCK_CELL);
+const inWorld = (x: number, z: number) => x >= -WORLD && x < WORLD && z >= -WORLD && z < WORLD;
 const parse = (k: string) => k.split(",").map(Number) as Cell;
 
 /**
- * Distance in cells (8 neighbours) from the source cells over the map, and the value of the nearest source (the lowest
- * where several are equally near).
+ * Distance in cells (8 neighbours) from the source cells over the map (or the cells `within` allows, up to `reach`), and
+ * the value of the nearest source (the lowest where several are equally near).
  */
-function spread(sources: Map<string, number>): { dist: Map<string, number>; base: Map<string, number> } {
+function spread(sources: Map<string, number>, within: (x: number, z: number) => boolean = inMap, reach = Infinity):
+  { dist: Map<string, number>; base: Map<string, number> } {
   const dist = new Map<string, number>(), base = new Map<string, number>();
   let frontier: Cell[] = [];
   for (const [k, v] of sources) {
@@ -90,14 +96,14 @@ function spread(sources: Map<string, number>): { dist: Map<string, number>; base
     base.set(k, v);
     frontier.push(parse(k));
   }
-  for (let d = 1; frontier.length; d++) {
+  for (let d = 1; frontier.length && d <= reach; d++) {
     const next: Cell[] = [];
     for (const [x, z] of frontier)
       for (let dx = -1; dx <= 1; dx++)
         for (let dz = -1; dz <= 1; dz++) {
           const [nx, nz] = [x + dx, z + dz];
           const k = key(nx, nz);
-          if (!inMap(nx, nz)) continue;
+          if (!within(nx, nz)) continue;
           const v = base.get(key(x, z))!;
           if (!dist.has(k)) {
             dist.set(k, d);
@@ -111,6 +117,13 @@ function spread(sources: Map<string, number>): { dist: Map<string, number>; base
 }
 
 export interface SceneryLandOptions extends SceneryOptions {
+  /**
+   * "fill": the whole grid from the ground up (cliffs as a backdrop). "nestle": a band of land `band` cells wide beyond the
+   * shoulder, at the tracks' own height, as free blocks without columns (floating), on the grid and outside it.
+   */
+  mode: "fill" | "nestle";
+  /** Nestle: cells of land beyond the shoulder. */
+  band: number;
   /** Hills: platform-base land and DecoHill slopes, up to just below the roads and rising away from them. */
   hills: boolean;
   /** Cells between a rise of the hills (2 levels) and the next. */
@@ -216,11 +229,13 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     lower(key(x, z), y - 1);
   }
   if (track.size === 0) return { blocks: [], items: [] };
-  const { dist, base } = spread(track);
+  const nestle = options.mode === "nestle";
+  // Nestle: only the band round the tracks, wherever they are (also outside the grid).
+  const { dist, base } = nestle ? spread(track, inWorld, Math.max(0, options.gap) + Math.max(1, options.band)) : spread(track);
 
   const blocks: VanillaBlock[] = [];
   let cliff: Cliffs | null = null;
-  if (options.cliffs > 0) {
+  if (options.cliffs > 0 && !nestle) {
     const walls = cliffWalls(lib, options.theme, dist, options.cliffs);
     if (!walls) return null;
     blocks.push(...walls.blocks);
@@ -234,10 +249,13 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   // Where trees may stand: flat land (or the ground) away from the cliffs, not on cells with blocks, and each tree far
   // enough from the roads (checked per tree, so they also grow right beside the road and on the land under it).
   let surfaces = new Map<string, number>();
-  if (options.hills) {
-    const land = hills(lib, track, dist, base, cliff, options);
+  if (options.hills || nestle) {
+    const cells = nestle ? [...dist.keys()] : gridCells();
+    const land = hills(lib, track, dist, base, cliff, options, cells);
     if (!land) return null;
-    blocks.push(...land.blocks);
+    // Nestle floats: every piece becomes the same block placed freely (free blocks get no columns, and may stand outside
+    // the grid).
+    blocks.push(...(nestle ? land.blocks.map((b) => freeBlock(lib, b)) : land.blocks));
     surfaces = land.flat;
   } else
     for (let x = -HALF; x < HALF; x++)
@@ -249,6 +267,18 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   }
   const clear = (x: number, z: number) => clearOfRoads(input.footprint, x, z, Math.max(0, options.clearance));
   return { blocks, items: plantForest(surfaces, options.forest, options.density, options.theme.id, clear) };
+}
+
+function gridCells(): string[] {
+  const cells: string[] = [];
+  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) cells.push(key(x, z));
+  return cells;
+}
+
+/** The same block placed freely, exactly where it stands on the grid (as the editor's Tab converts it). */
+function freeBlock(lib: VanillaLibrary, b: VanillaBlock): VanillaBlock {
+  const origin = new THREE.Vector3().setFromMatrixPosition(blockMatrix(b, blockSize(lib, b)));
+  return { ...b, free: true, position: [origin.x, origin.y, origin.z], yaw: wrapBank(-b.dir * 90), pitch: 0, roll: 0 };
 }
 
 /** Levels between a cliff's top and the land against it: above that the face is no longer vertical. */
@@ -266,7 +296,7 @@ interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: 
  * inner and outer corners the curved ones.
  */
 function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string, number>, base: Map<string, number>,
-  cliff: Cliffs | null, options: SceneryLandOptions): { blocks: VanillaBlock[]; flat: Map<string, number> } | null {
+  cliff: Cliffs | null, options: SceneryLandOptions, cells: Iterable<string>): { blocks: VanillaBlock[]; flat: Map<string, number> } | null {
   const flatCells = new Map<string, number>();
   const cliffHigh = cliff?.high ?? new Set<string>(), cliffFront = cliff?.front ?? new Set<string>();
   const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
@@ -283,9 +313,7 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
   const id = options.theme.id;
 
   const height = new Map<string, number>();
-  for (let x = -HALF; x < HALF; x++)
-    for (let z = -HALF; z < HALF; z++) {
-      const k = key(x, z);
+  for (const k of cells) {
       if (cliffHigh.has(k)) continue;
       if (track.has(k)) { height.set(k, track.get(k)!); continue; }
       if (cliff && cliffFront.has(k)) { height.set(k, cliff.top); continue; }
@@ -388,7 +416,8 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       // The outer corner is modelled high at its (-X, +Z) corner.
       if (corner) blocks.push(at(slopes[corner.d].outer, x, z, v, dirFor((d) => same(turn(d, [-1, 1]), corner.c))));
       else {
-        if (v > 0) blocks.push(at(flat, x, z, v, 0));
+        // On the grid the ground is there at level 0; outside it (nestle) the land needs its own floor.
+        if (v > 0 || !inMap(x, z)) blocks.push(at(flat, x, z, v, 0));
         // Flat land or ground (also under the road, beside it: each tree keeps its distance from the road).
         flatCells.set(k, v);
       }
