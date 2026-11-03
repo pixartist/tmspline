@@ -43,17 +43,9 @@ if ($Setup) {
     return
 }
 
-scp $tar "${Mac}:/tmp/tmspline-app.tar.gz"
-ssh $Mac @"
-set -e
-rm -rf /tmp/tmspline-update && mkdir /tmp/tmspline-update
-tar -xzf /tmp/tmspline-app.tar.gz -C /tmp/tmspline-update
-rsync -a --delete /tmp/tmspline-update/app/ /opt/tmspline/app/
-chmod +x /opt/tmspline/app/TmSpline.Cloud
-codesign --force -s - /opt/tmspline/app/TmSpline.Cloud
-rm -rf /tmp/tmspline-update /tmp/tmspline-app.tar.gz
-sudo -n /bin/launchctl kickstart -k system/de.pixartist.tmspline
-sleep 3
-curl -fsS -o /dev/null http://127.0.0.1:5090/site.css && echo 'TMSpline restarted and answering.'
-"@
-if ($LASTEXITCODE -ne 0) { throw "updating the Mac failed" }
+# The commands run from update.sh (kept with Unix line endings by .gitattributes): commands written here would carry
+# this file's CRLF line endings to the Mac's shell.
+scp $tar (Join-Path $PSScriptRoot "update.sh") "${Mac}:/tmp/"
+if ($LASTEXITCODE -ne 0) { throw "copying to the Mac failed" }
+ssh $Mac "sh /tmp/update.sh; status=`$?; rm -f /tmp/update.sh; exit `$status"
+if ($LASTEXITCODE -ne 0) { throw "updating the Mac failed (see the output above)" }
