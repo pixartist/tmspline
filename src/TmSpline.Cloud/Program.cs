@@ -17,6 +17,10 @@ var config = builder.Configuration;
 var dataDir = Path.GetFullPath(config["Cloud:DataDir"] ?? "data", builder.Environment.ContentRootPath);
 var releasesDir = Path.GetFullPath(config["Cloud:ReleasesDir"] ?? Path.Combine(dataDir, "releases"), builder.Environment.ContentRootPath);
 Directory.CreateDirectory(releasesDir);
+// Who runs the site (Impressum, privacy page): site.json next to the data folder, kept out of the repository.
+var siteFile = Path.GetFullPath(config["Cloud:SiteFile"] ?? Path.Combine(dataDir, "..", "site.json"), builder.Environment.ContentRootPath);
+builder.Configuration.AddJsonFile(siteFile, optional: true, reloadOnChange: true);
+builder.Services.Configure<SiteOperator>(config.GetSection("Site:Operator"));
 var maxTrackBytes = config.GetValue("Cloud:MaxTrackBytes", 5_000_000);
 var maxTracks = config.GetValue("Cloud:MaxTracksPerUser", 1000);
 
@@ -122,6 +126,11 @@ IResult Page(string file) => Results.File(Path.Combine(pages, file), "text/html;
 // ---- website -------------------------------------------------------------------------------------------------------
 app.MapGet("/", () => Page("index.html")).RequireAuthorization("web");
 app.MapGet("/s/{share}", (string share) => Page("share.html")).RequireAuthorization("web");
+// Public, like the law wants them: reachable without an account.
+app.MapGet("/impressum", (IOptionsMonitor<SiteOperator> site) => Results.Content(LegalPages.Impressum(site.CurrentValue), "text/html; charset=utf-8"));
+app.MapGet("/datenschutz", (IOptionsMonitor<SiteOperator> site) => Results.Content(LegalPages.Datenschutz(site.CurrentValue), "text/html; charset=utf-8"));
+if (!app.Services.GetRequiredService<IOptionsMonitor<SiteOperator>>().CurrentValue.Complete)
+    app.Logger.LogWarning("Site:Operator is incomplete ({File}): the Impressum shows no operator", siteFile);
 app.MapGet("/login", (string? returnUrl) => Results.Challenge(
     new AuthenticationProperties { RedirectUri = returnUrl is { } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/" }));
 app.MapPost("/logout", async (HttpContext c) =>
