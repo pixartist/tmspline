@@ -158,6 +158,8 @@ public static class MapExporter
         if (options.Items.Count > 0)
             log?.Invoke($"Placed {options.Items.Count} vanilla items");
 
+        FitHeight(map, log);
+
         // Multilap: a start/finish gate makes it a lap race.
         var laps = items.Any(i => i.Waypoint == Waypoint.StartFinish);
         map.IsLapRace = laps;
@@ -165,6 +167,27 @@ public static class MapExporter
 
         SyncHeaderXml(map);
         gbx.Save(output);
+    }
+
+    /// <summary>Highest map size in block rows (8 m each; the ground is row <see cref="GroundBlockY"/>): the size is a byte.</summary>
+    public const int MaxMapRows = 255;
+
+    /// <summary>
+    /// Makes the map tall enough for what is in it: the template's height (40 rows, 248 m above the ground) or more, up
+    /// to <see cref="MaxMapRows"/>. Items only tell where their pivot is, not how far their mesh reaches up, so they get a
+    /// generous margin (a 128 m track chunk can climb a lot); blocks get a few rows for their own height.
+    /// </summary>
+    private static void FitHeight(CGameCtnChallenge map, Action<string>? log)
+    {
+        var rows = map.Size.Y;
+        foreach (var o in map.GetAnchoredObjects())
+            rows = Math.Max(rows, (int)Math.Floor(o.AbsolutePositionInMap.Y / 8) + 8 + 16);
+        foreach (var b in map.GetBlocks())
+            rows = Math.Max(rows, (b.IsFree && b.AbsolutePositionInMap is { } at ? (int)Math.Floor(at.Y / 8) + 8 : b.Coord.Y) + 8);
+        rows = Math.Min(rows, MaxMapRows);
+        if (rows == map.Size.Y) return;
+        map.Size = new Int3(map.Size.X, rows, map.Size.Z);
+        log?.Invoke($"Map made {rows} rows tall for its content");
     }
 
     public static void Export(string templateMapPath, string outputMapPath, IReadOnlyList<ImportedItem> items, MapExportOptions options, Action<string>? log = null)

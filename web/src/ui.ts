@@ -1,4 +1,4 @@
-import type { Editor } from "./editor";
+import { MAX_BLOCK_LEVEL, type Editor } from "./editor";
 import { showExportDialog } from "./export";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
@@ -676,7 +676,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     } else {
       numberField(root, "Cell X", () => b().x, (v) => set("X", (x) => (x.x = Math.round(v))), 1);
       numberField(root, "Cell Z", () => b().z, (v) => set("Z", (x) => (x.z = Math.round(v))), 1);
-      numberField(root, "Level", () => b().y, (v) => set("Y", (x) => (x.y = Math.max(0, Math.min(30, Math.round(v))))), 1);
+      numberField(root, "Level", () => b().y, (v) => set("Y", (x) => (x.y = Math.max(0, Math.min(MAX_BLOCK_LEVEL, Math.round(v))))), 1);
       if (!b().pillar)
         checkbox(root, "Pillars", () => b().pillars !== false, (v) => set("Pillars", (x) => {
           if (v) delete x.pillars;

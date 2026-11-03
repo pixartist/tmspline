@@ -144,14 +144,15 @@ const REACTOR_EFFECTS = [3, 4];
 const SCREEN_SIZE = 0.011;
 const OBJECT_MARKER = new THREE.OctahedronGeometry(1.1);
 const DRAG_THRESHOLD_PX = 3;
-const Y_MIN = -8, Y_MAX = 1000;
+/** Height range of track points and free blocks, meters above the ground (the export server's limit; the exported map grows to fit). */
+const Y_MIN = -8, Y_MAX = 1960;
 /**
  * Height of the game's block roads and platform tops above their level (RoadTech, PlatformTech: 2 m): snapped track
  * points sit there, so the spline road meets blocks flush.
  */
 const ROAD_SURFACE = 2;
-/** Highest block level above the ground (the 48² template is 40 levels high, the ground is level 9 of them). */
-const MAX_BLOCK_LEVEL = 30;
+/** Highest block level above the ground (the exported map grows to fit, up to 255 rows of 8 m; the ground is row 9). */
+export const MAX_BLOCK_LEVEL = 240;
 const DIRECTION_NAMES = ["North", "East", "South", "West"];
 /** Touchpad wheel delta (pixels) per level step with Ctrl+wheel; a mouse wheel notch is about 100 and always one step. */
 const WHEEL_LEVEL_STEP = 100;
