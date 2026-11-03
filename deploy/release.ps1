@@ -73,7 +73,10 @@ $pluginDir = Join-Path $root "tools\OpenplanetPlugin"
 if (Test-Path $plugin) { Remove-Item -Force $plugin }
 $pluginZip = Join-Path $out "TMSpline-plugin.zip"
 if (Test-Path $pluginZip) { Remove-Item -Force $pluginZip }
-tar -a -c -f $pluginZip -C $pluginDir *
+# Only the plugin's own files: anything else lying in the folder (e.g. a zip made by hand) stays out.
+$pluginFiles = @(Get-ChildItem $pluginDir -File | Where-Object { $_.Name -eq "info.toml" -or $_.Extension -eq ".as" } | ForEach-Object Name)
+if (-not ($pluginFiles -contains "info.toml")) { throw "tools/OpenplanetPlugin has no info.toml" }
+tar -a -c -f $pluginZip -C $pluginDir @pluginFiles
 if ($LASTEXITCODE -ne 0) { throw "zipping the plugin failed" }
 Move-Item $pluginZip $plugin
 Write-Host ("Plugin: TMSpline.op ({0:0} KB)" -f ((Get-Item $plugin).Length / 1KB))
