@@ -215,8 +215,8 @@ public sealed partial class ExportService
                 throw new ExportRejectedException("Bank must be within ±3600° (10 turns)");
             if (Math.Abs(p.Position[0]) > 768 || Math.Abs(p.Position[2]) > 768 || p.Position[1] < -8 || p.Position[1] > MaxHeight)
                 throw new ExportRejectedException("Points must stay inside the map");
-            if (p.Width is { } w && (!double.IsFinite(w) || w < 2 || w > 128))
-                throw new ExportRejectedException("Road width must be between 2 and 128 m");
+            if (p.Width is { } w && (!double.IsFinite(w) || w < 2 || w > 512))
+                throw new ExportRejectedException("Road width must be between 2 and 512 m");
             if (!double.IsFinite(p.Curve) || p.Curve < -360 || p.Curve > 360)
                 throw new ExportRejectedException("Road shape must be between -360° (tube) and 360° (pipe)");
             if (p.BorderHeight is { } bh && (!double.IsFinite(bh) || bh < 0.1 || bh > 10))

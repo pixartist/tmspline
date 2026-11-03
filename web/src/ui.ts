@@ -174,7 +174,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
       const s = editor.selection;
       if (s?.kind === "point" || s?.kind === "handle") {
         const step = (key === "[" ? -1 : 1) * (e.shiftKey ? 4 : 1);
-        editor.edit((t) => (t.points[s.index].width = clamp(t.points[s.index].width + step, 4, 64)), false, `width:${s.index}`);
+        editor.edit((t) => (t.points[s.index].width = clamp(t.points[s.index].width + step, 4, 512)), false, `width:${s.index}`);
       }
     }
     else if (key === "q" || key === "e") {
@@ -526,7 +526,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, axis, () => p().position[i], (v) => editor.edit((tr) => (tr.points[s.index].position[i] = v)), 0.5));
     rangeField(root, "Bank °", -180, 180, 1, () => p().bank,
       (v) => editor.edit((tr) => (tr.points[s.index].bank = wrapBank(v)), false, `bank:${s.index}`), 360);
-    rangeField(root, "Width m", 4, 128, 0.5, () => p().width, (v) => editor.edit((tr) => (tr.points[s.index].width = v), false, `width:${s.index}`));
+    rangeField(root, "Width m", 4, 512, 0.5, () => p().width, (v) => editor.edit((tr) => (tr.points[s.index].width = v), false, `width:${s.index}`));
     // Points that keep their edges bend at most ±180° (no pipes).
     const shapeLimit = p().edgeAnchor > 0 ? 180 : 360;
     rangeField(root, "Shape °", -shapeLimit, shapeLimit, 1, () => p().curve, (v) => editor.edit((tr) => {
@@ -736,7 +736,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         const x = tr.objects[s.index];
         x.width = x.length = +v;
       }), false, { 2: "2 m", 4: "4 m", 8: "8 m", 16: "16 m" });
-      rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
+      rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 256);
       selectField(root, "Color", ITEM_COLORS, () => o().color ?? "Default", (v) => editor.edit((tr) => {
         const x = tr.objects[s.index];
         if (v === "Default") delete x.color;
@@ -747,7 +747,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         false, { Rect: "Rectangle" });
       rangeField(root, "Length m", 0.5, 32, 0.1, () => o().length, (v) => set("Length", (x) => (x.length = Math.max(0.1, v))), 256);
       rangeField(root, "Width m", 0.5, 32, 0.1, () => o().width, (v) => set("Width", (x) => (x.width = Math.max(0.1, v))), 256);
-      rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
+      rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 256);
       if (obj.kind === "Bump")
         rangeField(root, "Height m", -10, 10, 0.05, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(-10, Math.min(10, v)))), 10);
     } else {

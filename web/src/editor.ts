@@ -1846,7 +1846,7 @@ export class Editor {
     const { segment, at: fraction } = this.segmentAt(distance);
     o.segment = segment;
     o.at = fraction;
-    if (o.kind !== "Gap") o.offset = clamp(o.offset + step.dot(right), -64, 64);
+    if (o.kind !== "Gap") o.offset = clamp(o.offset + step.dot(right), -256, 256);
     this.showLabel(e, o.kind === "Gap" ? `Gap at ${distance.toFixed(1)} m` : `${o.kind} at ${distance.toFixed(1)} m, ${o.offset >= 0 ? "right" : "left"} ${Math.abs(o.offset).toFixed(1)} m`);
     this.changed(false);
   }
