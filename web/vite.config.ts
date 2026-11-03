@@ -5,7 +5,8 @@ export default defineConfig({
   build: { target: "es2022" },
   server: {
     port: 5173,
-    // The export backend (src/TmSpline.Server) runs on :5080 during development.
-    proxy: { "/api": "http://localhost:5080" },
+    // The export backend (src/TmSpline.Server) runs on :5080 during development. TMSPLINE_API points the editor at
+    // another one, e.g. a test server, while the desktop app (which also listens on :5080) is running.
+    proxy: { "/api": process.env.TMSPLINE_API ?? "http://localhost:5080" },
   },
 });

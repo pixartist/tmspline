@@ -130,6 +130,8 @@ export interface SceneryLandOptions extends SceneryOptions {
   hillStep: number;
   /** Highest the hills rise above the track's land, in levels (even). */
   hillRise: number;
+  /** Without cliffs: beyond the shoulder the land also climbs 1 level every this many cells, past the hills (0: off). */
+  farRise: number;
   /** Cliff walls this many cells away from the track (0: none). */
   cliffs: number;
   /** Trees on the flat land (a FORESTS id, or "none"). */
@@ -369,7 +371,12 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
           // hills too).
           const c = toCliff.get(k) ?? Infinity;
           height.set(k, Math.min(cliff.top, Math.max(b + rise, cliff.top - 2 * Math.floor((c - 1) / step))));
-        } else height.set(k, b + Math.min(rise, even2(options.hillRise)));
+        } else {
+          // ...up to the hills' height, and on top of that a gentle climb with the distance (the land keeps rising past
+          // the hills instead of levelling off).
+          const far = options.farRise > 0 ? Math.floor((d - options.gap - 1) / options.farRise) : 0;
+          height.set(k, b + Math.min(rise, even2(options.hillRise)) + far);
+        }
       }
     }
   const h = (x: number, z: number) => height.get(key(x, z));
