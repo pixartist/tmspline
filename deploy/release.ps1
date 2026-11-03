@@ -76,6 +76,13 @@ if (Test-Path $pluginZip) { Remove-Item -Force $pluginZip }
 # Only the plugin's own files: anything else lying in the folder (e.g. a zip made by hand) stays out.
 $pluginFiles = @(Get-ChildItem $pluginDir -File | Where-Object { $_.Name -eq "info.toml" -or $_.Extension -eq ".as" } | ForEach-Object Name)
 if (-not ($pluginFiles -contains "info.toml")) { throw "tools/OpenplanetPlugin has no info.toml" }
+# openplanet.dev rejects an info.toml that starts with a UTF-8 BOM (some editors add one); none of the files may.
+foreach ($name in $pluginFiles) {
+    $head = [IO.File]::ReadAllBytes((Join-Path $pluginDir $name)) | Select-Object -First 3
+    if ($head.Count -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF) {
+        throw "tools/OpenplanetPlugin/$name starts with a UTF-8 BOM, which openplanet.dev refuses: save it as UTF-8 without BOM."
+    }
+}
 tar -a -c -f $pluginZip -C $pluginDir @pluginFiles
 if ($LASTEXITCODE -ne 0) { throw "zipping the plugin failed" }
 Move-Item $pluginZip $plugin

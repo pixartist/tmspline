@@ -1,4 +1,4 @@
-﻿// Live update: reloads the map editor when TMSpline exports a new version of the map ("Export to game").
+// Live update: reloads the map editor when TMSpline exports a new version of the map ("Export to game").
 // The TMSpline server (local dev setup) writes the map into Maps/TMSpline and tells us about it at /api/game/latest;
 // we leave the editor, open the new file in the editor and put the camera back where it was.
 // What was added in the game's editor stays: before reloading we save the open map, and the server merges the new export
