@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The TMSpline desktop app: the editor in a window (Photino: WebView2 on Windows, WebKit on macOS/Linux) and, inside
+    the same process, the TMSpline server for everything that touches the game on the user's machine (NadeoImporter,
+    export to game, live update, the block library). The built editor (web/dist) is copied to wwwroot.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TMSpline</AssemblyName>
+    <RootNamespace>TmSpline.Desktop</RootNamespace>
+    <Version>0.1.0</Version>
+    <!-- The server and VanillaLib are executables too; they run inside this one. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <EditorDist>$(MSBuildThisFileDirectory)..\..\web\dist</EditorDist>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+    <ProjectReference Include="..\TmSpline.Server\TmSpline.Server.csproj" />
+    <ProjectReference Include="..\..\tools\VanillaLib\VanillaLib.csproj" />
+  </ItemGroup>
+
+  <!-- The server's own settings are for running it standalone; the app configures it in code. -->
+  <Target Name="DropServerSettings" AfterTargets="Build;Publish">
+    <Delete Files="$(OutDir)appsettings.json;$(OutDir)appsettings.Development.json" />
+    <Delete Files="$(PublishDir)appsettings.json;$(PublishDir)appsettings.Development.json" Condition="'$(PublishDir)' != ''" />
+  </Target>
+
+  <!-- The built editor; `npm run build` in web/ first (after `npm run wasm`). -->
+  <ItemGroup>
+    <Content Include="$(EditorDist)\**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="WarnNoEditor" BeforeTargets="Build" Condition="!Exists('$(EditorDist)\index.html')">
+    <Warning Text="web/dist is missing: run `npm run build` in web/ so the app has an editor to show." />
+  </Target>
+
+</Project>

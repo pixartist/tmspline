@@ -26,6 +26,17 @@ interface Author {
   nickname: string;
 }
 
+/** GET /api/importer: NadeoImporter on the machine that exports (in the desktop app: the user's own). */
+interface ImporterStatus {
+  installed: boolean;
+  canInstall: boolean;
+  installing: boolean;
+  received: number;
+  size: number;
+  error: string | null;
+  source: string;
+}
+
 interface Estimate {
   quality: Quality;
   items: number;
@@ -54,6 +65,13 @@ export function showExportDialog(track: TrackMap): void {
           <span class="hint">${QUALITY_HINTS[q]}</span></label>`).join("")}
       </div>
       <p class="hint estimate-note">Estimating map sizes…</p>
+      <div class="importer" hidden>
+        <p>Exporting needs Nadeo's <b>NadeoImporter</b>, which turns the road into the game's items. TMSpline cannot
+          include it, but can download it from Nadeo (<code class="source"></code>, <span class="size"></span>)
+          into its own folder.</p>
+        <p class="progress" hidden></p>
+        <button type="button" class="install">Download NadeoImporter</button>
+      </div>
       <h2>Author</h2>
       <label class="row"><span>Account login</span><input name="login" placeholder="optional, 22 characters" maxlength="22" /></label>
       <label class="row"><span>Nickname</span><input name="nickname" placeholder="optional" maxlength="64" /></label>
@@ -78,6 +96,7 @@ export function showExportDialog(track: TrackMap): void {
   const gameButton = dialog.querySelector<HTMLButtonElement>("button.game")!;
   // Only local setups write into the game's folder (the server says so).
   void fetch("/api/health").then((r) => r.json()).then((h) => (gameButton.hidden = !h.exportToGame), () => {});
+  void setupImporter(dialog, (ready) => (exportButton.disabled = gameButton.disabled = !ready));
   login.value = saved.login;
   nickname.value = saved.nickname;
   const quality = () => (form.querySelector<HTMLInputElement>('input[name="quality"]:checked')?.value ?? "Normal") as Quality;
@@ -152,6 +171,51 @@ export function showExportDialog(track: TrackMap): void {
     error.textContent = message;
     error.hidden = false;
   }
+}
+
+/**
+ * Where the importer can be downloaded (the desktop app) and is missing, the dialog offers the download and keeps the
+ * export buttons off until it is there.
+ */
+async function setupImporter(dialog: HTMLDialogElement, setReady: (ready: boolean) => void): Promise<void> {
+  const box = dialog.querySelector<HTMLElement>(".importer")!;
+  const progress = box.querySelector<HTMLElement>(".progress")!;
+  const install = box.querySelector<HTMLButtonElement>("button.install")!;
+  const get = async () => {
+    const response = await fetch("/api/importer");
+    return response.ok ? ((await response.json()) as ImporterStatus) : null;
+  };
+  let status = await get().catch(() => null);
+  // Older servers have no /api/importer; servers that cannot download it report a missing importer on export.
+  if (!status || status.installed || !status.canInstall) return;
+  box.querySelector<HTMLElement>(".source")!.textContent = status.source;
+  box.querySelector<HTMLElement>(".size")!.textContent = mb(status.size);
+  box.hidden = false;
+  setReady(false);
+
+  const follow = async () => {
+    install.disabled = true;
+    progress.hidden = false;
+    while (status && status.installing && dialog.open) {
+      progress.textContent = `Downloading… ${Math.round((100 * status.received) / Math.max(1, status.size))} %`;
+      await new Promise((r) => setTimeout(r, 300));
+      status = await get().catch(() => null);
+    }
+    if (status?.installed) {
+      box.hidden = true;
+      setReady(true);
+      return;
+    }
+    progress.textContent = `The download failed: ${status?.error ?? "no answer from TMSpline"}`;
+    install.disabled = false;
+  };
+  if (status.installing) void follow();
+  install.addEventListener("click", async () => {
+    const response = await fetch("/api/importer/install", { method: "POST" }).catch(() => null);
+    status = response?.ok ? await get().catch(() => null) : null;
+    if (status && !status.installing && !status.installed) status = { ...status, installing: true };
+    await follow();
+  });
 }
 
 const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 2 : 1)} MB`;

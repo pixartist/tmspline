@@ -17,11 +17,15 @@ public sealed class ImporterException(string message, string output) : Exception
     public string Output { get; } = output;
 }
 
-/// <summary>Helpers shared by the importer implementations.</summary>
-internal static class ImporterFiles
+/// <summary>Helpers shared by the importer implementations (and the desktop app's importer setup).</summary>
+public static class ImporterFiles
 {
     /// <summary>The files from the NadeoImporter zip that are needed to run it.</summary>
     public static readonly string[] Required = { "NadeoImporter.exe", "libfbxsdk.dll", "NadeoImporterMaterialLib.txt" };
+
+    /// <summary>Whether <paramref name="importerDir"/> holds every file needed to run the importer.</summary>
+    public static bool IsPresent(string importerDir) =>
+        importerDir.Length > 0 && Required.All(f => File.Exists(Path.Combine(importerDir, f)));
 
     public static void Validate(string importerDir)
     {

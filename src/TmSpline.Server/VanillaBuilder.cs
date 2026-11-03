@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace TmSpline.Server;
 
@@ -9,8 +9,9 @@ public sealed record VanillaBuildStatus(bool Running, string? Progress, string? 
 
 /// <summary>
 /// Converts the game files the TMSpline Openplanet plugin extracted (OpenplanetNext\Extract) into the editor's block
-/// library (Vanilla:Dir) by running tools/VanillaLib, on the plugin's request. Local setups only: it needs the repository
-/// (Vanilla:Builder, the VanillaLib project) and the game's files on this machine.
+/// library (Vanilla:Dir) by running tools/VanillaLib, on the plugin's request. Local setups only: it needs the game's files
+/// on this machine and either the repository (Vanilla:Builder = the VanillaLib project, run with dotnet) or the desktop
+/// app, which carries VanillaLib inside (Vanilla:Builder = "self": the app's own executable with --vanilla-lib).
 /// </summary>
 public sealed class VanillaBuilder
 {
@@ -23,8 +24,8 @@ public sealed class VanillaBuilder
         _logger = logger;
         if (configuration["Vanilla:Dir"] is not { Length: > 0 } dir || configuration["Vanilla:Builder"] is not { Length: > 0 } builder)
             return;
-        var project = Path.GetFullPath(builder, environment.ContentRootPath);
-        if (!Directory.Exists(project) && !File.Exists(project))
+        var project = builder == SelfBuilder ? SelfBuilder : Path.GetFullPath(builder, environment.ContentRootPath);
+        if (project != SelfBuilder && !Directory.Exists(project) && !File.Exists(project))
         {
             logger.LogWarning("Block library builder {Project} not found; building the library from the plugin is off", project);
             return;
@@ -35,6 +36,11 @@ public sealed class VanillaBuilder
             ? Path.GetFullPath(extract, environment.ContentRootPath)
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OpenplanetNext", "Extract");
     }
+
+    /// <summary>Vanilla:Builder value for the desktop app: VanillaLib runs in its own executable.</summary>
+    public const string SelfBuilder = "self";
+    /// <summary>The command-line switch the desktop app runs VanillaLib with.</summary>
+    public const string SelfSwitch = "--vanilla-lib";
 
     public string? Project { get; }
     public string? OutDir { get; }
@@ -62,13 +68,15 @@ public sealed class VanillaBuilder
         try
         {
             Directory.CreateDirectory(OutDir!);
-            var info = new ProcessStartInfo("dotnet")
+            var self = Project == SelfBuilder;
+            var info = new ProcessStartInfo(self ? Environment.ProcessPath! : "dotnet")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
+                CreateNoWindow = true,
             };
-            foreach (var arg in new[] { "run", "-c", "Release", "--project", Project!, "--", ExtractDir!, OutDir! })
+            foreach (var arg in self ? [SelfSwitch, ExtractDir!, OutDir!] : new[] { "run", "-c", "Release", "--project", Project!, "--", ExtractDir!, OutDir! })
                 info.ArgumentList.Add(arg);
             using var process = Process.Start(info) ?? throw new InvalidOperationException("Could not start dotnet");
             var errors = new List<string>();

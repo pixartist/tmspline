@@ -19,8 +19,7 @@ Gbx.LZO = new Lzo();
 // --dds <file.dds> <outDir>: converts one image (debugging), with and without alpha.
 if (args.Length >= 3 && args[0] == "--dds") { Textures.ConvertForDebug(args[1], args[2]); return; }
 var extract = args.Length > 0 ? args[0] : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OpenplanetNext", "Extract");
-var root = FindRepoRoot();
-var outDir = args.Length > 1 ? args[1] : Path.Combine(root, "artifacts", "vanilla");
+var outDir = args.Length > 1 ? args[1] : Path.Combine(FindRepoRoot(), "artifacts", "vanilla");
 var filter = args.Length > 2 && !args[2].StartsWith("--") ? args[2] : "";
 // --lod N: detail level of the meshes (0 = the game's full detail; the editor preview uses 1 by default).
 var lodRequest = args.SkipWhile(a => a != "--lod").Skip(1).Select(int.Parse).FirstOrDefault(1);

@@ -12,6 +12,8 @@ public sealed class ExportSettings
     public string ImporterMode { get; set; } = "Wine";
     /// <summary>Folder with NadeoImporter.exe, libfbxsdk.dll and NadeoImporterMaterialLib.txt.</summary>
     public string ImporterDir { get; set; } = "";
+    /// <summary>The importer may be downloaded from Nadeo into ImporterDir on the user's request (desktop app only).</summary>
+    public bool ImporterDownload { get; set; }
     public string WineCommand { get; set; } = "wine";
     public string DockerImage { get; set; } = "tmspline-importer";
     public string WorkDir { get; set; } = "jobs";

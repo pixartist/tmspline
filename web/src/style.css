@@ -82,6 +82,15 @@ button.active { background: #4a5563; border-color: var(--accent); }
 }
 
 /* Rectangle selection of blocks (left drag on empty space). */
+dialog.export .importer {
+  border: 1px solid #c90;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: rgba(200, 150, 0, 0.08);
+}
+dialog.export .importer p { margin: 4px 0 8px; }
+
 .select-rect {
   position: absolute; pointer-events: none; border: 1px solid var(--accent);
   background: rgb(255 210 63 / 0.12);

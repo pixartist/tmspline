@@ -12,6 +12,7 @@ whose road is made of custom items generated with Nadeo's NadeoImporter.
 | `src/TmSpline.Wasm` | Core compiled to WebAssembly for the editor's live preview. |
 | `src/TmSpline.Cli` | `track.json` → `.Map.Gbx` using a local NadeoImporter. |
 | `src/TmSpline.Server` | ASP.NET Core: `POST /api/export` (track → map), serves the built editor in production. |
+| `src/TmSpline.Desktop` | The desktop app (`TMSpline.exe`): the editor in a window (Photino), the server inside it on localhost. |
 | `web/` | Editor: Vite + TypeScript + Three.js. |
 | `Dockerfile` | Production image: server + editor + Wine. |
 | `docker/importer` | Importer-only Wine image (used by the server's `Docker` importer mode). |
@@ -27,6 +28,26 @@ whose road is made of custom items generated with Nadeo's NadeoImporter.
 
 It installs the web dependencies on first run and writes the server's output to `artifacts/dev-server.log`. If
 something already listens on :5080, it is used as the export server.
+
+## Desktop app
+
+Everything that touches Nadeo's software or the game's files runs on the user's own machine, in the desktop app:
+the editor in a window (Photino.NET: WebView2 on Windows, WebKit on macOS/Linux) and the TMSpline server inside the
+same process on `http://localhost:5080`, where the Openplanet plugin finds it.
+
+```sh
+cd web && npm run wasm && npm run build && cd ..   # the editor bundle the app shows (web/dist → wwwroot)
+dotnet run --project src/TmSpline.Desktop
+```
+
+- Its files are in `%LOCALAPPDATA%\TMSpline` (`~/.local/share/TMSpline` elsewhere): the editor's storage (`webview`),
+  export jobs, the block library (`vanilla`), live update state (`game`), the log (`logs/tmspline.log`) and an optional
+  `settings.json` (`{ "port": 5080, "devTools": false }`; another port needs the same in the plugin's server URL).
+- **NadeoImporter** is not shipped: the export dialog offers to download it from Nadeo
+  (`nadeo-download.cdn.ubi.com`, 6.5 MB, checked against its known SHA-256) into `NadeoImporter`.
+- The block library is converted by the app itself (`TMSpline.exe --vanilla-lib <extract> <out>`), no SDK needed.
+- Trackmania and NadeoImporter are Windows programs: on Linux the importer runs through Wine; on macOS the app edits
+  tracks but cannot export.
 
 ## Run the editor
 
