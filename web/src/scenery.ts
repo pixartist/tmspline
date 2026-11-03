@@ -149,6 +149,11 @@ export interface SceneryLandOptions extends SceneryOptions {
   mode: "fill" | "nestle";
   /** Nestle: cells of land beyond the shoulder. */
   band: number;
+  /**
+   * Nestle: where the land would have to climb more than a slope can (2 levels per cell, e.g. beside a steep road plus
+   * the hills), it steps instead of being pulled down; the columns close the steps.
+   */
+  steps: boolean;
   /** Hills: platform-base land and DecoHill slopes, up to just below the roads and rising away from them. */
   hills: boolean;
   /** Cells between a rise of the hills (2 levels) and the next. */
@@ -428,7 +433,8 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       const [x, z] = parse(k);
       let low = Infinity;
       for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if (dx || dz) low = Math.min(low, h(x + dx, z + dz) ?? Infinity);
-      if (v > low + 2) { height.set(k, low + 2); changed = true; }
+      // With steps allowed (nestle: its columns close them) the land keeps its height; otherwise at most one slope up.
+      if (v > low + 2 && !(options.mode === "nestle" && options.steps)) { height.set(k, low + 2); changed = true; }
     }
     for (const [k, v] of height) {
       if (fixed(k)) continue;
