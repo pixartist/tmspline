@@ -57,7 +57,8 @@ editor's sources changed, and the preview core (`npm run wasm`) whenever TmSplin
   `cloud-token.dat`, encrypted with the Windows account. Signed in, the open map is uploaded a moment after every
   change (☁ next to the account shows the state); if another PC saved the same track meanwhile, the editor asks which
   one to keep. Offline, it stays saved on the PC and goes up once the server is reachable again. **Open…** lists the
-  cloud tracks, opens files and share links (as a copy of one's own); **Share** makes a link every signed-in user can
+  cloud tracks, opens files and share links (as a copy of one's own); **Save** (Ctrl+S) saves to the cloud right away,
+  **Download** saves a .track.json file; **Share** makes a link every signed-in user can
   open. A newer release than the app shows a notice. The local server forwards `/api/cloud/api/…` to the service with
   the token (the editor never sees it) and only accepts requests with `X-TMSpline: 1` for localhost hosts.
 

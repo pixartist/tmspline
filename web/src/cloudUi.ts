@@ -12,6 +12,8 @@ export interface CloudUi {
   open(openFile: (opened: () => void) => void): void;
   /** The map was replaced by a new one (New, a file): it becomes a new cloud track. */
   replaced(): void;
+  /** Save: to the cloud now (signs in first when needed); shows the outcome on the button. */
+  save(button: HTMLButtonElement): Promise<void>;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -242,9 +244,37 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
 
   applyStatus(status);
 
+  async function save(button: HTMLButtonElement): Promise<void> {
+    const label = "Save";
+    const flash = (text: string) => {
+      button.textContent = text;
+      setTimeout(() => (button.textContent = label), 1800);
+    };
+    if (!status?.signedIn) {
+      account.click();
+      return;
+    }
+    if (sync.state === "conflict") {
+      flash("Pick a version first");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Saving…";
+    sync.flush(mapJson());
+    await waitUntil(() => sync.state !== "saving");
+    button.disabled = false;
+    if (sync.state === "saved") flash("Saved ✓");
+    else {
+      button.textContent = label;
+      if (sync.state === "offline") banner("Not connected: the map is saved on this PC and goes up as soon as the server is reachable.", [["OK", () => {}]]);
+      else if (sync.state === "error") banner(sync.message, [["OK", () => {}]]);
+    }
+  }
+
   return {
     sync,
     open,
+    save,
     replaced: () => {
       sync.detach();
       sync.changed(mapJson());

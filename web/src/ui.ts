@@ -53,7 +53,11 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   editor.onBeforeEdit = (snapshot) => history.push(snapshot);
   // The desktop app's cloud link (sign-in, sync, sharing); null in a plain browser.
   let cloud: CloudUi | null = null;
-  void createCloudUi(editor, toolbar.parentElement!, STORAGE_KEY).then((c) => (cloud = c), (err) => console.warn("Cloud link failed", err));
+  void createCloudUi(editor, toolbar.parentElement!, STORAGE_KEY).then((c) => {
+    cloud = c;
+    saveButton.hidden = !c;
+  }, (err) => console.warn("Cloud link failed", err));
+  const saveToCloud = () => void cloud?.save(saveButton);
 
   const button = (label: string, title: string, onClick: () => void) => {
     const b = document.createElement("button");
@@ -108,7 +112,10 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   });
   button("Open…", "Open one of your tracks, a .track.json file or a share link", () =>
     cloud ? cloud.open((opened) => openFile(editor, opened)) : openFile(editor));
-  button("Save", "Download the map (all tracks) as .track.json", () => download(editor.map));
+  // Save: to the cloud (the desktop app); the map is also saved on this PC after every change, and uploaded shortly after.
+  const saveButton = button("Save", "Save the map to your TMSpline account now (Ctrl+S); changes are also saved automatically", saveToCloud);
+  saveButton.hidden = true;
+  button("Download", "Download the map (all tracks) as a .track.json file", () => download(editor.map));
   button("Export map", "Generate a Trackmania .Map.Gbx", () => showExportDialog(editor.exportMap())).classList.add("primary");
   separator();
   button("Undo", "Undo (Ctrl+Z)", undo);
@@ -155,6 +162,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && key === "y") { e.preventDefault(); redo(); }
+    else if ((e.ctrlKey || e.metaKey) && key === "s") { e.preventDefault(); if (cloud) saveToCloud(); else download(editor.map); }
     else if (key === "n") addPoint();
     else if (key === "t") editor.addTrack();
     else if (key === "i") insertPoint();
