@@ -819,9 +819,7 @@ export class BlockLayer {
     item.matrixAutoUpdate = false;
     item.matrix.copy(blockMatrix(b, size));
     item.matrixWorldNeedsUpdate = true;
-    // Generated scenery goes without: hundreds of shadows and drop lines under a floating band only clutter the view
-    // (they help find single blocks placed by hand).
-    if (withShadow && !b.scenery) {
+    if (withShadow) {
       const shadow = this.shadowOf(item.matrix, size);
       this.shadows.add(shadow);
       item.userData.shadow = shadow;
