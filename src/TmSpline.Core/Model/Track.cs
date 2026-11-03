@@ -203,6 +203,8 @@ public sealed class TrackSegment
     public double BumpSize { get; set; } = 8;
     /// <summary>How finely the bumpy surface is cut, in meters between cross-sections and columns (smaller: more triangles).</summary>
     public double BumpDetail { get; set; } = 2;
+    /// <summary>Variant of the noise pattern: 0 is the segment's own, any other number gives another one.</summary>
+    public int BumpSeed { get; set; }
 
     /// <summary>The game's curve signs (chevrons) along this segment's borders; see SignBuilder.</summary>
     public RoadSignKind Signs { get; set; }
@@ -405,7 +407,7 @@ public sealed class Track
     {
         Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
         Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
-        Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail,
+        Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail, BumpSeed = s.BumpSeed,
         Signs = s.Signs, SignSide = s.SignSide, SignSpacing = s.SignSpacing, SignColor = s.SignColor,
     };
 }

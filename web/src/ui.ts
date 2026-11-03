@@ -480,7 +480,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
-    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
+    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint !== "None"}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
@@ -650,6 +650,12 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       rangeField(root, seg().bumps === "Noise" ? "Bump size m" : "Bump spacing m", 1, 64, 0.5, () => seg().bumpSize,
         (v) => setSeg("bumpSize", (x) => (x.bumpSize = Math.max(0.5, v))), 256);
       rangeField(root, "Bump detail m", 0.25, 8, 0.25, () => seg().bumpDetail, (v) => setSeg("bumpDetail", (x) => (x.bumpDetail = Math.max(0.25, v))), 16);
+      if (seg().bumps === "Noise")
+        rangeField(root, "Seed", 0, 100, 1, () => seg().bumpSeed ?? 0, (v) => setSeg("bumpSeed", (x) => {
+          const seed = Math.round(Math.max(0, Math.min(99999, v)));
+          if (seed === 0) delete x.bumpSeed;
+          else x.bumpSeed = seed;
+        }), 99999);
       hint(root, {
         Waves: "Rolling bumps across the whole width, one every spacing along the road (washboard). ",
         Noise: "Uneven ground: smooth random bumps of about this size. ",

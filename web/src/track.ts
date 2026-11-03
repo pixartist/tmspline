@@ -132,6 +132,8 @@ export interface TrackSegment {
   bumpSize: number;
   /** Meters between the cross-sections / columns of the bumpy surface (smaller: finer, more triangles). */
   bumpDetail: number;
+  /** Variant of the noise pattern (missing / 0: the segment's own; BumpSeed in the core). */
+  bumpSeed?: number;
   /** The game's curve signs along the borders (item name; RoadSign red, B yellow, C green), see SignBuilder in C#. */
   signs: RoadSignKind;
   signSide: SignSide;

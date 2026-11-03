@@ -72,7 +72,8 @@ public sealed class RoadBumps
             {
                 BumpPattern.Waves => 0.5 - 0.5 * Math.Cos(2 * Math.PI * along / size),
                 BumpPattern.Ridges => 0.5 - 0.5 * Math.Cos(2 * Math.PI * (across + half) / size),
-                BumpPattern.Noise => Noise(along / size, across / size, segment),
+                // Seed 0 keeps the pattern each segment always had (seeded by its index).
+                BumpPattern.Noise => Noise(along / size, across / size, unchecked(segment + seg.BumpSeed * 7919)),
                 _ => 0,
             };
             h += seg.BumpHeight * shape * ends;
