@@ -102,10 +102,16 @@ const parse = (k: string) => k.split(",").map(Number) as Cell;
 function spread(sources: Map<string, number>, within: (x: number, z: number) => boolean = inMap, reach = Infinity):
   { dist: Map<string, number>; base: Map<string, number> } {
   const dist = new Map<string, number>(), base = new Map<string, number>();
+  // The source each cell took its value from: among equally near sources (8-neighbour steps) the one closest in a
+  // straight line wins, then the lowest. Beside a sloping road that is the road right next to the cell; taking the
+  // lowest of all equally near ones reached further and further downhill with the distance, so the land dropped away.
+  const from = new Map<string, Cell>();
+  const far = (k: string, [sx, sz]: Cell) => { const [x, z] = parse(k); return (x - sx) ** 2 + (z - sz) ** 2; };
   let frontier: Cell[] = [];
   for (const [k, v] of sources) {
     dist.set(k, 0);
     base.set(k, v);
+    from.set(k, parse(k));
     frontier.push(parse(k));
   }
   for (let d = 1; frontier.length && d <= reach; d++) {
@@ -116,12 +122,19 @@ function spread(sources: Map<string, number>, within: (x: number, z: number) => 
           const [nx, nz] = [x + dx, z + dz];
           const k = key(nx, nz);
           if (!within(nx, nz)) continue;
-          const v = base.get(key(x, z))!;
+          const v = base.get(key(x, z))!, src = from.get(key(x, z))!;
           if (!dist.has(k)) {
             dist.set(k, d);
             base.set(k, v);
+            from.set(k, src);
             next.push([nx, nz]);
-          } else if (dist.get(k) === d && v < base.get(k)!) base.set(k, v);
+          } else if (dist.get(k) === d) {
+            const [a, b] = [far(k, src), far(k, from.get(k)!)];
+            if (a < b || (a === b && v < base.get(k)!)) {
+              base.set(k, v);
+              from.set(k, src);
+            }
+          }
         }
     frontier = next;
   }
