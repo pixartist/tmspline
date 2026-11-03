@@ -122,7 +122,7 @@ public static class MapExporter
                 // As the game stores free blocks: coord (-1, 0, -1), North, the free flag, the world position of the
                 // block's origin and yaw/pitch/roll in radians (checked against free blocks in maps saved by the game).
                 var at = origin + block.Position;
-                if (at.X < 0 || at.Z < 0 || at.X > map.Size.X * 32 || at.Z > map.Size.Z * 32)
+                if (OutsideWorld(map, at))
                 {
                     log?.Invoke($"Skipped free block {block.Name} outside the map at {at}");
                     continue;
@@ -160,7 +160,7 @@ public static class MapExporter
         foreach (var item in options.Items)
         {
             var at = origin + item.Position;
-            if (at.X < 0 || at.Z < 0 || at.X > map.Size.X * 32 || at.Z > map.Size.Z * 32)
+            if (OutsideWorld(map, at))
                 continue;
             var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
                 new Vec3((float)at.X, (float)at.Y, (float)at.Z),
@@ -192,6 +192,16 @@ public static class MapExporter
     /// to <see cref="MaxMapRows"/>. Items only tell where their pivot is, not how far their mesh reaches up, so they get a
     /// generous margin (a 128 m track chunk can climb a lot); blocks get a few rows for their own height.
     /// </summary>
+    /// <summary>How far beyond the grid's edges free blocks and items are kept (the editor allows up to this).</summary>
+    private const double OutsideMargin = 2048;
+
+    /// <summary>
+    /// Free blocks and items may stand outside the grid: the game keeps and drives them there (tested to 4 km past the
+    /// grid's corner, and behind its origin), only its editor's camera stays above the grid.
+    /// </summary>
+    private static bool OutsideWorld(CGameCtnChallenge map, Vec3d at) =>
+        at.X < -OutsideMargin || at.Z < -OutsideMargin || at.X > map.Size.X * 32 + OutsideMargin || at.Z > map.Size.Z * 32 + OutsideMargin;
+
     private static void FitHeight(CGameCtnChallenge map, Action<string>? log)
     {
         var rows = map.Size.Y;

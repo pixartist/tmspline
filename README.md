@@ -138,6 +138,10 @@ Controls:
   limit. With a local block library (below) the editor shows their real meshes, otherwise boxes of their size.
   `Tab` switches to free placement (the game's free block mode): the block stands on whatever is under the cursor, at any
   position, `R` turns it 15°, pitch and roll are in the inspector. `Tab` on a selected block converts it in place.
+- **Outside the grid:** track points, free blocks and items may go up to 2 km beyond the map's 48 × 48 grid
+  (±2816 m from the centre; the darker ground, edged by a gold line). The game keeps and drives them there; it has
+  no ground there, and its editor's camera stays above the grid unless a plugin such as Editor++ unlocks it. Grid
+  blocks and the generated scenery stay on the grid: maps with a wider grid crash the game.
 - **Snap** (`X`, step next to the button: 32 … 1 m) snaps track points (not their handles) and free blocks to the grid,
   vertically to the same step up to 8 m (one block level). `Ctrl` while dragging ignores it.
 - `W`/`S` fly along the view, `A`/`D` sideways, `Space`/`Shift` up/down (speed follows the distance to the road);

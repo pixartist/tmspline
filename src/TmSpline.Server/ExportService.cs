@@ -161,6 +161,11 @@ public sealed partial class ExportService
     /// <summary>Highest point of anything in meters above the ground, and highest block level: the map grows up to its
     /// largest size (MapExporter.MaxMapRows: 255 rows of 8 m, the ground at row 9) and keeps some room above.</summary>
     private const double MaxHeight = 1960;
+    /// <summary>
+    /// How far from the map's centre points, free blocks and items may be: 2 km beyond the 48 grid's edges (768 m).
+    /// The game keeps and drives them there; the grid itself cannot grow (wider maps crash the game).
+    /// </summary>
+    private const double MaxOffset = 768 + 2048;
     private const int MaxBlockLevel = 240;
     // Generated scenery (land, hills and their columns, trees) runs into thousands.
     private const int MaxBlocks = 20000;
@@ -181,7 +186,7 @@ public sealed partial class ExportService
         {
             if (block.Name is not { Length: > 0 and <= 100 } || !block.Name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
                 throw new ExportRejectedException("Block names may only contain letters, digits and _");
-            if (block.Free && (block.Position is not { Length: 3 } bp || !bp.All(double.IsFinite) || Math.Abs(bp[0]) > 768 || Math.Abs(bp[2]) > 768
+            if (block.Free && (block.Position is not { Length: 3 } bp || !bp.All(double.IsFinite) || Math.Abs(bp[0]) > MaxOffset || Math.Abs(bp[2]) > MaxOffset
                 || bp[1] is < -16 or > MaxHeight || !double.IsFinite(block.Yaw + block.Pitch + block.Roll)))
                 throw new ExportRejectedException($"Free block {block.Name} is outside the map");
             if (!block.Free && (Math.Abs(block.X) > 24 || Math.Abs(block.Z) > 24 || block.Y is < 0 or > MaxBlockLevel))
@@ -194,7 +199,7 @@ public sealed partial class ExportService
         {
             if (item.Name is not { Length: > 0 and <= 100 } || !item.Name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
                 throw new ExportRejectedException("Item names may only contain letters, digits and _");
-            if (item.Position is not { Length: 3 } ip || !ip.All(double.IsFinite) || Math.Abs(ip[0]) > 768 || Math.Abs(ip[2]) > 768
+            if (item.Position is not { Length: 3 } ip || !ip.All(double.IsFinite) || Math.Abs(ip[0]) > MaxOffset || Math.Abs(ip[2]) > MaxOffset
                 || ip[1] is < -16 or > MaxHeight || !double.IsFinite(item.Yaw))
                 throw new ExportRejectedException($"Item {item.Name} is outside the map");
         }
@@ -215,8 +220,8 @@ public sealed partial class ExportService
                 throw new ExportRejectedException("Point values must be finite numbers");
             if (Math.Abs(p.Bank) > 3600)
                 throw new ExportRejectedException("Bank must be within ±3600° (10 turns)");
-            if (Math.Abs(p.Position[0]) > 768 || Math.Abs(p.Position[2]) > 768 || p.Position[1] < -8 || p.Position[1] > MaxHeight)
-                throw new ExportRejectedException("Points must stay inside the map");
+            if (Math.Abs(p.Position[0]) > MaxOffset || Math.Abs(p.Position[2]) > MaxOffset || p.Position[1] < -8 || p.Position[1] > MaxHeight)
+                throw new ExportRejectedException($"Points must stay within {MaxOffset} m of the map's centre");
             if (p.Width is { } w && (!double.IsFinite(w) || w < 2 || w > 512))
                 throw new ExportRejectedException("Road width must be between 2 and 512 m");
             if (!double.IsFinite(p.Curve) || p.Curve < -360 || p.Curve > 360)

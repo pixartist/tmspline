@@ -281,8 +281,14 @@ export function wrapBank(degrees: number): number {
   return Math.round(a * 10) / 10;
 }
 
-/** Half the size of a 48×48 map; the editor keeps points inside these bounds. */
+/** Half the size of a 48×48 map: the game's grid and ground. Grid blocks and the generated scenery stay inside it. */
 export const MAP_HALF_EXTENT = 768;
+/**
+ * How far from the centre track points, free blocks and items may go: 2 km beyond each edge of the grid. The game
+ * keeps and drives items and free blocks out there (tested to 4 km from the grid's corner); only its editor's camera
+ * stays above the grid, and there is no ground. The grid itself cannot grow: maps wider than 48 crash the game.
+ */
+export const WORLD_HALF_EXTENT = MAP_HALF_EXTENT + 2048;
 
 export const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];

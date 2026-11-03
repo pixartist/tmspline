@@ -6,7 +6,7 @@ import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, 
 import { generateScenery, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import {
-  add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -266,8 +266,9 @@ export class Editor {
     container.appendChild(this.label);
 
     this.scene.background = new THREE.Color(0x9cc7ee);
-    this.scene.fog = new THREE.Fog(0x9cc7ee, 1500, 4000);
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.5, 8000);
+    // Far enough for tracks 2 km outside the grid (WORLD_HALF_EXTENT) to stay visible.
+    this.scene.fog = new THREE.Fog(0x9cc7ee, 3000, 9000);
+    this.camera = new THREE.PerspectiveCamera(55, 1, 0.5, 14000);
     this.camera.position.set(220, 180, 260);
 
     this.scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a6b3a, 1.6));
@@ -888,12 +889,16 @@ export class Editor {
 
   private createGround(): THREE.Mesh {
     const size = MAP_HALF_EXTENT * 2;
+    // The clickable ground reaches as far as tracks may go; beyond the grid it is darker: the game has no ground there.
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 3, size * 3),
-      new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }),
+      new THREE.PlaneGeometry(WORLD_HALF_EXTENT * 2 + 1024, WORLD_HALF_EXTENT * 2 + 1024),
+      new THREE.MeshStandardMaterial({ color: 0x46553f, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }));
+    inside.position.z = 0.01;
+    ground.add(inside);
 
     // 32 m block grid inside the map, plus a brighter map boundary.
     const grid = new THREE.GridHelper(size, size / 32, 0x5c8a40, 0x5c8a40);
@@ -912,6 +917,16 @@ export class Editor {
       new THREE.LineBasicMaterial({ color: 0xffffff }),
     );
     ground.add(border);
+    // How far tracks, free blocks and items may go outside the grid.
+    const w = WORLD_HALF_EXTENT;
+    const limit = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-w, -w, 0.1), new THREE.Vector3(w, -w, 0.1),
+        new THREE.Vector3(w, w, 0.1), new THREE.Vector3(-w, w, 0.1),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0xc9a86a, transparent: true, opacity: 0.7 }),
+    );
+    ground.add(limit);
     return ground;
   }
 
@@ -1780,8 +1795,8 @@ export class Editor {
         [dx, dy, dz] = [moved.x - p[0], dy === 0 ? 0 : moved.y - p[1], moved.z - p[2]];
       }
     }
-    // The largest step (towards the cursor) that keeps every block inside the map.
-    const half = MAP_HALF_EXTENT, top = MAX_BLOCK_LEVEL * BLOCK_LEVEL;
+    // The largest step (towards the cursor) that keeps every block inside the map: free blocks may leave the grid.
+    const half = WORLD_HALF_EXTENT, top = MAX_BLOCK_LEVEL * BLOCK_LEVEL;
     let [minX, maxX, minY, maxY, minZ, maxZ] = [-Infinity, Infinity, -Infinity, Infinity, -Infinity, Infinity];
     for (const m of moving) {
       if (m.position) {
@@ -2210,4 +2225,5 @@ function groupBySegment(indices: Uint32Array, segments: Int32Array): Map<number,
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-const clampMap = (v: number) => clamp(v, -MAP_HALF_EXTENT, MAP_HALF_EXTENT);
+/** Track points, free blocks and objects may leave the grid (see WORLD_HALF_EXTENT); grid blocks use clampCell. */
+const clampMap = (v: number) => clamp(v, -WORLD_HALF_EXTENT, WORLD_HALF_EXTENT);
