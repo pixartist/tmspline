@@ -91,7 +91,9 @@ export const DIRECTIONS = ["North", "East", "South", "West"] as const;
 /**
  * Block flag bit 21 ("hill ground variant" in GBX.NET): on a ground block, the game shows its version with the "column
  * below" adapter (a slope's pillar sides). Confirmed in game with all the scenery's slopes (2026-11-01); the game sets it
- * on ground slopes it saves (bit 22 only worked for the straight hill slope).
+ * on ground slopes it saves (bit 22 only worked for the straight hill slope). On free blocks the same bit toggles the
+ * adapter: it shows it on the 1-level platform slopes (which have a "column below" variant, airPillar) and hides it on the
+ * hill slopes, which show theirs without it (confirmed in game, 2026-11-04).
  */
 export const GROUND_ADAPTER_FLAG = 0x200000;
 
@@ -531,7 +533,8 @@ export function clipNeighbours(blocks: VanillaBlock[], lib: VanillaLibrary | nul
 /** The variant the game shows for a block (see VanillaLibrary.shownVariant): column below = a column piece right under it. */
 function blockVariant(b: VanillaBlock, lib: VanillaLibrary | null, owners: Map<string, VanillaBlock>): BlockVariant | null {
   if (!lib) return null;
-  if (b.free) return lib.variant(b.name, false);
+  // A free block with the adapter bit shows its "column below" variant (see GROUND_ADAPTER_FLAG).
+  if (b.free) return lib.shownVariant(b.name, false, ((b.extraFlags ?? 0) & GROUND_ADAPTER_FLAG) !== 0);
   if (isGroundBlock(b)) return lib.shownVariant(b.name, true, false);
   const m = blockMatrix(b, blockSize(lib, b));
   // A column under any of its bottom units (a loop's column stands under its second cell).

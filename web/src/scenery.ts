@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, wrapBank, type VanillaBlock, type VanillaItem } from "./track";
-import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
+import { blockMatrix, blockSize, cellOf, GROUND_ADAPTER_FLAG, type VanillaLibrary } from "./vanilla";
 
 /**
  * Scenery generator: surrounds the map's tracks with deco blocks. The cliff themes raise everything at least a few cells
@@ -255,7 +255,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     if (!land) return null;
     // Nestle floats: every piece becomes the same block placed freely (free blocks get no columns, and may stand outside
     // the grid).
-    blocks.push(...(nestle ? [...land.blocks, ...columns(lib, land.height, options.theme.id)].map((b) => freeBlock(lib, b)) : land.blocks));
+    blocks.push(...(nestle ? nestleBlocks(lib, land.blocks, land.height, options.theme.id) : land.blocks));
     surfaces = land.flat;
   } else
     for (let x = -HALF; x < HALF; x++)
@@ -298,6 +298,18 @@ function columns(lib: VanillaLibrary, height: Map<string, number>, theme: string
     for (let level = low; level < v; level++) out.push({ name: COLUMN, x, y: level, z, dir: 0, scenery: theme });
   }
   return out;
+}
+
+/**
+ * Nestle's pieces as free blocks, with the columns that close the steps. A 1-level slope standing on a column gets the
+ * adapter bit, which shows its "column below" version (its sides reach down to the column); hill slopes show theirs
+ * without it, and the bit would hide it (checked in game).
+ */
+function nestleBlocks(lib: VanillaLibrary, land: VanillaBlock[], height: Map<string, number>, theme: string): VanillaBlock[] {
+  const cols = columns(lib, height, theme);
+  const onColumn = new Set(cols.map((c) => `${c.x},${c.y + 1},${c.z}`));
+  const pieces = land.map((b) => onColumn.has(`${b.x},${b.y},${b.z}`) && lib.hasColumnAdapter(b.name) ? { ...b, extraFlags: GROUND_ADAPTER_FLAG } : b);
+  return [...pieces, ...cols].map((b) => freeBlock(lib, b));
 }
 
 /** The same block placed freely, exactly where it stands on the grid (as the editor's Tab converts it). */

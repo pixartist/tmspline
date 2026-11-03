@@ -136,6 +136,9 @@ public static class MapExporter
                 free.YawPitchRoll = new Vec3((float)(block.Yaw * Math.PI / 180), (float)(block.Pitch * Math.PI / 180), (float)(block.Roll * Math.PI / 180));
                 if (block.Color != ItemColor.Default)
                     free.Color = (DifficultyColor)(int)block.Color;
+                // On free blocks too: e.g. the "column below" adapter of a 1-level slope standing on free column pieces.
+                if (block.ExtraFlags != 0)
+                    free.Flags |= block.ExtraFlags & VanillaBlock.AllowedExtraFlags;
                 log?.Invoke($"Placed free block {block.Name} at {at} (yaw {block.Yaw}°, pitch {block.Pitch}°, roll {block.Roll}°), flags 0x{free.Flags:X8}");
                 continue;
             }
