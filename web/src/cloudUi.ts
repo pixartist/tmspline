@@ -53,7 +53,7 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
   let updateChecked = false;
   const applyStatus = (s: CloudStatus | null) => {
     status = s;
-    sync.setSignedIn(!!s?.signedIn, mapJson());
+    sync.setSignedIn(!!s?.signedIn, mapJson(), s?.user ?? null);
     render();
     if (s?.error && !s.signedIn) banner(s.error, [["OK", () => {}]]);
     // Releases are for signed-in users: checked once signed in (at startup or later).

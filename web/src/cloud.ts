@@ -175,6 +175,8 @@ interface Link {
   id: string;
   version: number | null;
   synced: string | null;
+  /** The account the track belongs to (missing: not uploaded yet, or saved by an older version). */
+  user?: string | null;
 }
 
 export type SyncState = "off" | "saved" | "saving" | "offline" | "conflict" | "error";
@@ -203,6 +205,7 @@ export class CloudSync {
   state: SyncState = "off";
   message = "";
   signedIn = false;
+  private user: string | null = null;
   private link: Link;
   private timer = 0;
   private busy = false;
@@ -236,10 +239,16 @@ export class CloudSync {
     this.onState();
   }
 
-  setSignedIn(signedIn: boolean, json: string): void {
+  setSignedIn(signedIn: boolean, json: string, user: string | null = null): void {
     this.signedIn = signedIn;
-    if (!signedIn) this.set("off");
-    else this.changed(json);
+    this.user = user;
+    if (!signedIn) {
+      this.set("off");
+      return;
+    }
+    // Another account than the one the track was saved for: the map becomes a new track of this account.
+    if (this.link.user && user && this.link.user !== user) this.detach();
+    this.changed(json);
   }
 
   /** The map is a new track (New, opened from a file or a share link): the next upload creates it in the cloud. */
@@ -250,7 +259,7 @@ export class CloudSync {
 
   /** The map was opened from the cloud. */
   attach(track: CloudTrack, json: string): void {
-    this.link = { id: track.id, version: track.version, synced: hash(json) };
+    this.link = { id: track.id, version: track.version, synced: hash(json), user: this.user };
     this.write();
     if (this.signedIn) this.set("saved");
   }
@@ -309,12 +318,17 @@ export class CloudSync {
         { name: map.name || "Untitled", data: map, baseVersion: this.link.version });
       if (response.ok) {
         const saved = (await response.json()) as CloudTrack;
-        this.link = { id: saved.id, version: saved.version, synced: hash(json) };
+        this.link = { id: saved.id, version: saved.version, synced: hash(json), user: this.user };
         this.write();
         this.set("saved");
       } else if (response.status === 409) {
         this.set("conflict", "Changed on another PC");
         this.onConflict((await response.json()) as CloudTrack);
+      } else if (response.status === 404) {
+        // The id is another account's track (e.g. after switching accounts): save the map as a new track instead.
+        this.detach();
+        this.pending ??= json;
+        this.set("saving");
       } else if (response.status === 401) {
         this.signedIn = false;
         this.set("off");
@@ -332,7 +346,7 @@ export class CloudSync {
     } finally {
       this.busy = false;
     }
-    if (this.pending !== null && this.state === "saved") void this.upload();
+    if (this.pending !== null && (this.state === "saved" || this.state === "saving")) void this.upload();
   }
 
   private retryLater(): void {
