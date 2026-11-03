@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- TMSpline's hosted service (src/TmSpline.Cloud) on the home Mac, as the service account _tmspline.
+     https://tmspline.ddns.pixartist.de: Caddy on the NAS → this Mac :5090; login through authentik (OpenID Connect,
+     application "tmspline") is done by the service itself. Settings: /opt/tmspline/app/appsettings.json, overridden
+     here. Data (database, login keys): /opt/tmspline/data, owned by _tmspline. Releases: /opt/tmspline/releases.
+     Install: deploy/mac/setup.sh. Update: deploy/mac/deploy.ps1. Restart: sudo launchctl kickstart -k system/de.pixartist.tmspline -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>de.pixartist.tmspline</string>
+  <key>UserName</key><string>_tmspline</string>
+  <key>Umask</key><integer>63</integer>
+  <key>WorkingDirectory</key><string>/opt/tmspline/app</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ASPNETCORE_ENVIRONMENT</key><string>Production</string>
+    <key>HOME</key><string>/opt/tmspline/data</string>
+    <key>Cloud__DataDir</key><string>/opt/tmspline/data</string>
+    <key>Cloud__ReleasesDir</key><string>/opt/tmspline/releases</string>
+    <key>Urls</key><string>http://0.0.0.0:5090</string>
+    <key>TZ</key><string>Europe/Berlin</string>
+  </dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/tmspline/app/TmSpline.Cloud</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/opt/tmspline/logs/tmspline.log</string>
+  <key>StandardErrorPath</key><string>/opt/tmspline/logs/tmspline.log</string>
+</dict>
+</plist>
