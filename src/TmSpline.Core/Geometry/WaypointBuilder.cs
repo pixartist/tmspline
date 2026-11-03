@@ -39,6 +39,22 @@ public static class WaypointBuilder
     public static List<(int Point, Waypoint Type)> Resolve(Track track) =>
         track.Points.Select((p, i) => (Point: i, Type: p.Waypoint)).Where(w => w.Type != Waypoint.None).ToList();
 
+    /// <summary>
+    /// Where along the track (distance from its start) the gates stand, as <see cref="RingAt"/> places them: at their
+    /// points, the start and finish of an open track <see cref="EndInset"/> inwards.
+    /// </summary>
+    public static List<double> GateDistances(Track track, double[] segmentStarts)
+    {
+        var length = segmentStarts[^1];
+        var last = track.Points.Count - 1;
+        var inset = Math.Min(EndInset, length / 3);
+        return Resolve(track).Select(w =>
+            !track.Closed && w.Point == 0 && w.Type == Waypoint.Start ? inset
+            : !track.Closed && w.Point == last && w.Type == Waypoint.Finish ? length - inset
+            : !track.Closed && w.Point == last ? length
+            : segmentStarts[Math.Min(w.Point, segmentStarts.Length - 1)]).ToList();
+    }
+
     /// <param name="namePrefix">Item name prefix, so several tracks can share one item folder (tools).</param>
     public static List<MeshChunk> Build(Track track, IReadOnlyList<Ring> rings, Vec3d origin, RoadMeshSettings settings, string namePrefix = "Gate")
     {

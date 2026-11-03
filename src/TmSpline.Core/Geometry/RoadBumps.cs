@@ -7,16 +7,21 @@ namespace TmSpline.Core.Geometry;
 /// along the track and a position across the road. Real geometry, so cars feel it. Sources: the segments' patterns
 /// (waves along, ridges across, smooth noise) and placed bump objects (cos² humps or dips). Everything fades to zero
 /// towards a pattern segment's ends (no step where the next segment is plain) and towards the road's edges (the curbs and
-/// sides meet the surface where they always did).
+/// sides meet the surface where they always did), and the road stays flat around the gates (start, checkpoints, finish):
+/// the car spawns and respawns on the plain surface there, not under a bump.
 /// </summary>
 public sealed class RoadBumps
 {
     private readonly Track _track;
     private readonly double[] _starts;
     private readonly List<(double Distance, TrackObject Object)> _objects;
+    private readonly List<double> _gates;
 
     /// <summary>Width of the fade towards the road's edges, meters.</summary>
     public const double EdgeFade = 1.5;
+
+    /// <summary>The road is flat this far before and after a gate, then the bumps grow back over the same length.</summary>
+    public const double GateFlat = 8;
 
     public RoadBumps(Track track, double[] segmentStarts)
     {
@@ -26,6 +31,21 @@ public sealed class RoadBumps
             .Where(o => o.Kind == TrackObjectKind.Bump && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1)
             .Select(o => (segmentStarts[o.Segment] + o.At * (segmentStarts[o.Segment + 1] - segmentStarts[o.Segment]), o))
             .ToList();
+        _gates = WaypointBuilder.GateDistances(track, segmentStarts);
+    }
+
+    /// <summary>1 away from the gates, 0 within <see cref="GateFlat"/> of one, smoothly in between (closed tracks wrap).</summary>
+    private double GateFade(double distance)
+    {
+        var f = 1.0;
+        var total = _starts[^1];
+        foreach (var g in _gates)
+        {
+            var d = Math.Abs(distance - g);
+            if (_track.Closed && total > 0) d = Math.Min(d, total - d);
+            f = Math.Min(f, SmoothStep(Math.Clamp((d - GateFlat) / GateFlat, 0, 1)));
+        }
+        return f;
     }
 
     /// <summary>Whether anything bumps the road at all (most tracks: nothing, no extra cost).</summary>
@@ -37,7 +57,7 @@ public sealed class RoadBumps
     /// </summary>
     public double At(int segment, double distance, double across, double half)
     {
-        var edge = SmoothStep(Math.Clamp((half - Math.Abs(across)) / EdgeFade, 0, 1));
+        var edge = SmoothStep(Math.Clamp((half - Math.Abs(across)) / EdgeFade, 0, 1)) * GateFade(distance);
         if (edge <= 0) return 0;
         var h = 0.0;
         if (segment >= 0 && segment < _track.Segments.Count && _track.Segments[segment] is { Bumps: not BumpPattern.None } seg)
