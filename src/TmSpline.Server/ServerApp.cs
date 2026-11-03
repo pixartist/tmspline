@@ -39,8 +39,15 @@ public static class ServerApp
         app.UseRateLimiter();
 
         // In production the built editor (web/dist) is served from wwwroot.
+        // Vite fingerprints the files in assets/ (a new build gets new names), so those may be cached for good. Everything
+        // else (index.html, the preview core in _framework) keeps its name across builds: the browser has to revalidate
+        // it, or it keeps an old index.html that loads an old editor against the new core.
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = c => c.Context.Response.Headers.CacheControl =
+                c.Context.Request.Path.StartsWithSegments("/assets") ? "public, max-age=31536000, immutable" : "no-cache",
+        });
 
         // Vanilla block meshes for the editor preview (tools/VanillaLib output). These are the game's own assets, extracted
         // locally: only served when a folder is configured, which is the case in appsettings.Development.json only.
