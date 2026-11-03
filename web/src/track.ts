@@ -75,6 +75,8 @@ export interface TrackPoint {
   borders: boolean;
   /** Race gate at this point. */
   waypoint: Waypoint;
+  /** How high its gate stands over the road, meters (missing: DEFAULT_GATE_HEIGHT, as in the core). */
+  gateHeight?: number;
 }
 
 /** Border height of new points: as the game's road curbs (matched in game by the user). */
@@ -86,6 +88,8 @@ const LEGACY_BORDER_HEIGHT = 0.8;
  * matches theirs exactly, checked in game by the user). The curbs sit outside the width.
  */
 export const DEFAULT_ROAD_WIDTH = 25.61;
+/** Gate height over the road when a point sets none (TrackPoint.DefaultGateHeight in the core). */
+export const DEFAULT_GATE_HEIGHT = 6;
 /**
  * Until file version 3 the curbs stood this far inside a point's width (TrackPoint.LegacyCurbInset in the core): older
  * files' points with borders are read with their width less twice this, so curbs and road stay where they were.

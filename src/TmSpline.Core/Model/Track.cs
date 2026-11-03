@@ -136,6 +136,11 @@ public sealed class TrackPoint
     /// <summary>Race gate at this point (start, checkpoint, finish).</summary>
     public Waypoint Waypoint { get; set; }
 
+    /// <summary>How high the gate at this point stands over the road, meters (its arch; the trigger reaches as high).</summary>
+    public double GateHeight { get; set; } = DefaultGateHeight;
+
+    public const double DefaultGateHeight = 6;
+
     /// <summary>Border height of new points: as the game's road curbs (matched in game by the user).</summary>
     public const double DefaultBorderHeight = 1.0;
 

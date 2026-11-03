@@ -109,6 +109,9 @@ public static class TrackJson
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public bool? Borders { get; set; }
         public Waypoint Waypoint { get; set; }
+        /// <summary>Gate height in meters (see TrackPoint.GateHeight); missing = the default.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? GateHeight { get; set; }
     }
 
     public sealed class SegmentDto
@@ -202,7 +205,8 @@ public static class TrackJson
             var width = p.Width ?? LegacyPointWidth(dto, i);
             track.Points.Add(new TrackPoint(V(p.Position), V(p.HandleOut), p.Bank, width) { HandleIn = V(p.HandleIn), Curve = p.Curve, Flat = Math.Clamp(p.Flat, 0, 0.9),
                 Sausage = Math.Clamp(p.Sausage, 0, 1), EdgeAnchor = Math.Clamp(p.EdgeAnchor ?? legacyAnchor, 0, 1),
-                BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Borders = p.Borders, Waypoint = p.Waypoint });
+                BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
+                GateHeight = Math.Clamp(p.GateHeight ?? TrackPoint.DefaultGateHeight, 1, 100) });
         }
         foreach (var s in dto.Segments)
             track.Segments.Add(new TrackSegment
@@ -232,6 +236,7 @@ public static class TrackJson
         Points = track.Points.Select(p => new PointDto
         {
             Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, EdgeAnchor = p.EdgeAnchor > 0 ? p.EdgeAnchor : null, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
+            GateHeight = p.GateHeight == TrackPoint.DefaultGateHeight ? null : p.GateHeight,
         }).ToList(),
         Segments = track.Segments.Select(s => new SegmentDto
         {

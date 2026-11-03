@@ -11,6 +11,7 @@ namespace TmSpline.Core.Geometry;
 public static class WaypointBuilder
 {
     private const double PostSize = 1.2;
+    /// <summary>Clearance of the gate on pipes driven on their outside (their arch is round the outside of the tube).</summary>
     private const double ClearanceAbove = 6;
     /// <summary>Gate beam cross-section in the road plane, and depth along the road.</summary>
     private const double BeamWidth = 0.9, BeamDepth = 1.0;
@@ -99,13 +100,14 @@ public static class WaypointBuilder
 
         var (minX, maxX, minY, maxY) = RoadMeshBuilder.SurfaceExtents(ring);
         var bottom = Math.Min(minY, 0) - settings.Thickness - 0.5;
-        var top = Math.Max(maxY, 0) + ClearanceAbove;
+        var height = Math.Clamp(track.Points[point].GateHeight, 1, 100);
+        var top = Math.Max(maxY, 0) + height;
         var left = minX - settings.BorderThickness - 1.0 - PostSize / 2;
         var right = maxX + settings.BorderThickness + 1.0 + PostSize / 2;
 
         // The gate follows the road's cross-section: posts on the borders and an arch at a constant distance over the
         // surface, or a ring around the outside of pipes. It is a chain of beams along that outline.
-        var outline = GateOutline(ring, track.Segments[segment], settings);
+        var outline = GateOutline(ring, track.Segments[segment], settings, height);
         var gate = chunk.MaterialIndex(Surfaces.Gate(type));
         // One lightmap row per beam, plus one for the see-through plane.
         var place = new BoxPlacer(ring, itemOrigin, frame, outline.Count + 1);
@@ -117,7 +119,7 @@ public static class WaypointBuilder
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
-            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings), outline.Count, segment);
+            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, height), outline.Count, segment);
             chunk.NotCollidable.Add(plane);
         }
 
@@ -146,7 +148,8 @@ public static class WaypointBuilder
     /// roads get posts from the borders (or road edges) up to an arch that runs at a constant distance over the
     /// surface. On tight concave bends the distance shrinks so the arch cannot fold over itself.
     /// </summary>
-    private static List<(double X, double Y)> GateOutline(Ring ring, TrackSegment segment, RoadMeshSettings settings)
+    /// <param name="height">How high the arch runs over the surface, meters.</param>
+    private static List<(double X, double Y)> GateOutline(Ring ring, TrackSegment segment, RoadMeshSettings settings, double height)
     {
         var half = ring.Width / 2;
         var points = new List<(double X, double Y)>();
@@ -168,7 +171,7 @@ public static class WaypointBuilder
         }
 
         var curvature = RoadMeshBuilder.SurfaceSample(ring, half).Curvature;
-        var clearance = curvature > 1e-6 ? Math.Min(ClearanceAbove, 0.6 / curvature) : ClearanceAbove;
+        var clearance = curvature > 1e-6 ? Math.Min(height, 0.6 / curvature) : height;
         var borders = segment.Borders;
         // On the border, also where it is still growing (see Ring.BorderScale).
         var baseLift = borders ? ring.BorderHeight * ring.BorderScale : 0;
@@ -197,7 +200,7 @@ public static class WaypointBuilder
     /// Pairs of points (road surface, top) spanning the see-through plane. For pipes the top is the pipe's center, so
     /// the plane becomes a disc filling the tube; otherwise it reaches from the surface up to the arch.
     /// </summary>
-    private static List<((double X, double Y) Bottom, (double X, double Y) Top)> CurtainOutline(Ring ring, RoadMeshSettings settings)
+    private static List<((double X, double Y) Bottom, (double X, double Y) Top)> CurtainOutline(Ring ring, RoadMeshSettings settings, double height)
     {
         var half = ring.Width / 2;
         var pairs = new List<((double, double), (double, double))>();
@@ -228,7 +231,7 @@ public static class WaypointBuilder
         }
 
         var curvature = RoadMeshBuilder.SurfaceSample(ring, half).Curvature;
-        var clearance = curvature > 1e-6 ? Math.Min(ClearanceAbove, 0.6 / curvature) : ClearanceAbove;
+        var clearance = curvature > 1e-6 ? Math.Min(height, 0.6 / curvature) : height;
         for (var i = 0; i <= ArchSegments; i++)
         {
             var s = half - ring.Width * i / ArchSegments;

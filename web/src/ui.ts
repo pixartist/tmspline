@@ -6,7 +6,7 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 /** Scenery panel settings (kept while the page is open). */
 const scenery = { theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
-  appendPoint, BORDER_MATERIALS, clampShape, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
@@ -553,6 +553,12 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     const waypoints = WAYPOINTS.filter((w) => editor.track.closed || w !== "StartFinish");
     selectField(root, "Waypoint", waypoints, () => p().waypoint, (v) => editor.edit((tr) => (tr.points[s.index].waypoint = v as Waypoint), true),
       false, { StartFinish: "Start / finish (laps)" });
+    if (p().waypoint !== "None")
+      rangeField(root, "Gate height m", 2, 30, 0.5, () => p().gateHeight ?? DEFAULT_GATE_HEIGHT, (v) => editor.edit((tr) => {
+        const h = Math.max(1, Math.min(100, v));
+        if (h === DEFAULT_GATE_HEIGHT) delete tr.points[s.index].gateHeight;
+        else tr.points[s.index].gateHeight = h;
+      }, false, `gateHeight:${s.index}`), 100);
     buttonRow(root, SHAPE_PRESETS.map((preset) => ({
       label: preset.label,
       onClick: () => editor.edit((tr) => {
