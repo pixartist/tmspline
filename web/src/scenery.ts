@@ -255,7 +255,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     if (!land) return null;
     // Nestle floats: every piece becomes the same block placed freely (free blocks get no columns, and may stand outside
     // the grid).
-    blocks.push(...(nestle ? land.blocks.map((b) => freeBlock(lib, b)) : land.blocks));
+    blocks.push(...(nestle ? [...land.blocks, ...columns(lib, land.height, options.theme.id)].map((b) => freeBlock(lib, b)) : land.blocks));
     surfaces = land.flat;
   } else
     for (let x = -HALF; x < HALF; x++)
@@ -273,6 +273,31 @@ function gridCells(): string[] {
   const cells: string[] = [];
   for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) cells.push(key(x, z));
   return cells;
+}
+
+/** The column piece the game puts under land tiles in the air (the same for grass, dirt and ice). */
+const COLUMN = "DecoWallBasePillar";
+
+/**
+ * Nestle's free blocks get no columns from the game, so where a cell is higher than a neighbour the step would stay open.
+ * Each cell gets column pieces from the level of its lowest neighbour (all eight) up to just below its own tile: the
+ * piece under level v reaches v's floor, the tile's plate sits 2 m above it, and the lowest piece starts below the
+ * neighbour's plate (checked in game: stacked free DecoWallBasePillar close such a step).
+ */
+function columns(lib: VanillaLibrary, height: Map<string, number>, theme: string): VanillaBlock[] {
+  if (!lib.has(COLUMN)) return [];
+  const out: VanillaBlock[] = [];
+  for (const [k, v] of height) {
+    const [x, z] = parse(k);
+    let low = v;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) {
+        const n = height.get(key(x + dx, z + dz));
+        if (n !== undefined && n < low) low = n;
+      }
+    for (let level = low; level < v; level++) out.push({ name: COLUMN, x, y: level, z, dir: 0, scenery: theme });
+  }
+  return out;
 }
 
 /** The same block placed freely, exactly where it stands on the grid (as the editor's Tab converts it). */
@@ -296,7 +321,8 @@ interface Cliffs { high: Set<string>; front: Set<string>; top: number; leaning: 
  * inner and outer corners the curved ones.
  */
 function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string, number>, base: Map<string, number>,
-  cliff: Cliffs | null, options: SceneryLandOptions, cells: Iterable<string>): { blocks: VanillaBlock[]; flat: Map<string, number> } | null {
+  cliff: Cliffs | null, options: SceneryLandOptions, cells: Iterable<string>):
+  { blocks: VanillaBlock[]; flat: Map<string, number>; height: Map<string, number> } | null {
   const flatCells = new Map<string, number>();
   const cliffHigh = cliff?.high ?? new Set<string>(), cliffFront = cliff?.front ?? new Set<string>();
   const toCliff = cliff ? spread(new Map([...cliff.high].map((k) => [k, 0]))).dist : null;
@@ -423,7 +449,7 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       }
     }
   }
-  return { blocks, flat: flatCells };
+  return { blocks, flat: flatCells, height };
 }
 
 const even2 = (n: number) => Math.max(0, 2 * Math.floor(n / 2));

@@ -567,8 +567,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     ]);
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
       ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "
-        + "hills rising by 2 levels every hill step, as free blocks without columns (the land floats, e.g. along a ski "
-        + "slope high up), also outside the grid. Where the road climbs faster than 2 levels per cell, the land steps. "
+        + "hills rising by 2 levels every hill step, as free blocks (the land floats, e.g. along a ski slope high up), "
+        + "also outside the grid. Where neighbouring cells differ in height, columns close the step down to the lower one. "
         + "Generating again replaces what was generated."
       : "Builds land round the tracks: up to just below the roads (they run on it instead of columns), a flat shoulder "
       + "beside them, then hills rising by 2 levels every hill step, and cliff walls further out as a backdrop (also "
