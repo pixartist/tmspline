@@ -19,6 +19,8 @@ public sealed class MapExportOptions
     public bool ClearTemplate { get; init; } = true;
     /// <summary>Laps for multilap maps (used when one of the items is a start/finish).</summary>
     public int Laps { get; init; } = 3;
+    /// <summary>Use the decoration without the stadium (the template's has it).</summary>
+    public bool NoStadium { get; init; }
     /// <summary>Account login (the 22-character account id) to put in as map author. Null keeps the template's.</summary>
     public string? AuthorLogin { get; init; }
     public string? AuthorNickname { get; init; }
@@ -37,6 +39,16 @@ public static class MapExporter
     public const int GroundBlockY = 9;
     /// <summary>The game's collection number of Stadium (2020), as its maps store it for vanilla items.</summary>
     public const int StadiumCollection = 26;
+
+    /// <summary>The template's decoration (stadium, day) and the same without the stadium (seen in maps saved by the game).</summary>
+    public const string StadiumDecoration = "48x48Screen155Day", NoStadiumDecoration = "NoStadium48x48Day";
+
+    /// <summary>The mood names the game writes into the map's header for its decorations.</summary>
+    private static readonly Dictionary<string, string> Moods = new()
+    {
+        [StadiumDecoration] = "Day",
+        [NoStadiumDecoration] = "Day (no stadium)",
+    };
 
     static MapExporter()
     {
@@ -83,6 +95,9 @@ public static class MapExporter
             foreach (var item in items)
                 zip.CreateEntryFromFile(item.ItemGbxPath, ("Items/" + item.RelativeItemPath).Replace('\\', '/'));
         });
+
+        if (options.NoStadium)
+            map.Decoration = new Ident(NoStadiumDecoration, map.Decoration.Collection, map.Decoration.Author);
 
         var origin = options.Placement ?? new Vec3d(map.Size.X * 32 / 2.0, GroundY, map.Size.Z * 32 / 2.0);
         log?.Invoke($"Map size {map.Size}, placing track origin at {origin}");
@@ -214,6 +229,8 @@ public static class MapExporter
             ident.SetAttributeValue("author", map.AuthorLogin);
             ident.SetAttributeValue("authorzone", map.AuthorZone ?? "World");
         }
+        if (doc.Root?.Element("desc") is { } desc && Moods.TryGetValue(map.Decoration.Id, out var mood))
+            desc.SetAttributeValue("mood", mood);
         map.Xml = doc.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
     }
 

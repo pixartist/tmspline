@@ -200,6 +200,8 @@ export interface TrackMap {
   name: string;
   /** Laps when the map has a start/finish. */
   laps: number;
+  /** Without the stadium around the map (the game's "Day (no stadium)" decoration); missing = with. */
+  noStadium?: true;
   tracks: Track[];
   /** Vanilla game blocks on the map grid (exported by name; their meshes come from the game). */
   blocks: VanillaBlock[];
@@ -592,7 +594,7 @@ export function parseMap(json: string): TrackMap {
       name: i.name, position: i.position.map(Number) as Vec3, yaw: Number(i.yaw) || 0,
       ...(typeof i.scenery === "string" && i.scenery ? { scenery: i.scenery } : {}),
     }));
-  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}) };
+  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

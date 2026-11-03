@@ -279,6 +279,9 @@ public sealed class TrackMap
     /// <summary>Number of laps when the map has a start/finish (multilap).</summary>
     public int Laps { get; set; } = 3;
 
+    /// <summary>Without the stadium around the map (the game's "Day (no stadium)" decoration).</summary>
+    public bool NoStadium { get; set; }
+
     /// <summary>Vanilla game blocks placed on the map grid (written into the map by name, not as custom items).</summary>
     public List<VanillaBlock> Blocks { get; } = new();
 

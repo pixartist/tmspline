@@ -456,6 +456,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   textField(root, "Name", () => editor.map.name, (v) => editor.editMap((m) => (m.name = v)));
   if (map.tracks.some((tr) => tr.points.some((p) => p.waypoint === "StartFinish")))
     numberField(root, "Laps", () => editor.map.laps, (v) => editor.editMap((m) => (m.laps = Math.max(1, Math.min(99, Math.round(v))))), 1);
+  checkbox(root, "Stadium", () => !editor.map.noStadium, (v) => editor.editMap((m) => {
+    if (v) delete m.noStadium;
+    else m.noStadium = true;
+  }));
 
   section(map.tracks.length > 1 ? `Track ${editor.active + 1} of ${map.tracks.length}` : "Track");
   checkbox(root, "Closed loop", () => editor.track.closed, (v) => editor.edit((tr) => (tr.closed = v), true), t.points.length < 3);
@@ -591,7 +595,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (seg().bumps !== "None") {
       const setSeg = (key: string, fn: (segment: Track["segments"][number]) => void) =>
         editor.edit((tr) => fn(tr.segments[s.index]), false, `${key}:${s.index}`);
-      rangeField(root, "Bump height m", -3, 3, 0.05, () => seg().bumpHeight, (v) => setSeg("bumpHeight", (x) => (x.bumpHeight = v)), 8);
+      rangeField(root, "Bump height m", -10, 10, 0.05, () => seg().bumpHeight, (v) => setSeg("bumpHeight", (x) => (x.bumpHeight = v)), 10);
       rangeField(root, seg().bumps === "Noise" ? "Bump size m" : "Bump spacing m", 1, 64, 0.5, () => seg().bumpSize,
         (v) => setSeg("bumpSize", (x) => (x.bumpSize = Math.max(0.5, v))), 256);
       rangeField(root, "Bump detail m", 0.25, 8, 0.25, () => seg().bumpDetail, (v) => setSeg("bumpDetail", (x) => (x.bumpDetail = Math.max(0.25, v))), 16);
@@ -745,7 +749,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       rangeField(root, "Width m", 0.5, 32, 0.1, () => o().width, (v) => set("Width", (x) => (x.width = Math.max(0.1, v))), 256);
       rangeField(root, "Offset m", -32, 32, 0.1, () => o().offset, (v) => set("Offset", (x) => (x.offset = v)), 64);
       if (obj.kind === "Bump")
-        rangeField(root, "Height m", -4, 4, 0.05, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(-8, Math.min(8, v)))), 8);
+        rangeField(root, "Height m", -10, 10, 0.05, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(-10, Math.min(10, v)))), 10);
     } else {
       rangeField(root, "Length m", 1, 128, 0.5, () => o().length, (v) => set("Length", (x) => (x.length = Math.max(0.1, v))), 1024);
     }

@@ -86,10 +86,16 @@ public static class MapMerge
             }
         });
 
-        // TMSpline decides the name and the race settings; the rest (mood, medals, map info) stays as saved in the game.
+        // TMSpline decides the name and the race settings; the rest (medals, map info) stays as saved in the game. The map
+        // is as tall as the taller of the two (the new export grows to fit its content), and the decoration (stadium or
+        // not) follows TMSpline when it changed there since the previous export; otherwise the game's stays.
         map.MapName = add.MapName;
         map.IsLapRace = add.IsLapRace;
         map.NbLaps = add.NbLaps;
+        if (add.Size.Y > map.Size.Y)
+            map.Size = new Int3(map.Size.X, add.Size.Y, map.Size.Z);
+        if (add.Decoration.Id != old.Decoration.Id)
+            map.Decoration = add.Decoration;
         MapExporter.SyncHeaderXml(map);
         gbx.Save(output);
 

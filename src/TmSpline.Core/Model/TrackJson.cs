@@ -24,6 +24,9 @@ public static class TrackJson
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ShapeAnchor? ShapeAnchor { get; set; }
         public int Laps { get; set; } = 3;
+        /// <summary>Map without the stadium (see TrackMap.NoStadium); missing = with.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? NoStadium { get; set; }
         public List<PointDto> Points { get; set; } = new();
         public List<SegmentDto> Segments { get; set; } = new();
         public List<ObjectDto> Objects { get; set; } = new();
@@ -149,7 +152,7 @@ public static class TrackJson
     {
         if (dto.Version > CurrentVersion)
             throw new JsonException($"Track version {dto.Version} is newer than supported ({CurrentVersion})");
-        var map = new TrackMap { Name = dto.Name, Laps = Math.Clamp(dto.Laps, 1, 99) };
+        var map = new TrackMap { Name = dto.Name, Laps = Math.Clamp(dto.Laps, 1, 99), NoStadium = dto.NoStadium == true };
         map.Tracks.AddRange(Parts(dto).Select(ToTrack));
         if (dto.Version < 3)
             foreach (var track in map.Tracks)
@@ -206,7 +209,7 @@ public static class TrackJson
             {
                 Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
                 Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
-                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -8, 8), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
+                Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -10, 10), BumpSize = Math.Clamp(s.BumpSize, 0.5, 256),
                 BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16),
                 Signs = s.Signs, SignSide = s.SignSide, SignSpacing = Math.Clamp(s.SignSpacing, 2, 256), SignColor = s.SignColor,
             });
@@ -216,7 +219,7 @@ public static class TrackJson
                 Kind = o.Kind, Segment = o.Segment, At = Math.Clamp(o.At, 0, 1), Offset = o.Offset, Shape = o.Shape,
                 Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width),
                 // Bumps may be dips (negative height).
-                Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -8, 8) : Math.Max(0.1, o.Height), Color = o.Color,
+                Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -10, 10) : Math.Max(0.1, o.Height), Color = o.Color,
             });
         track.SyncSegments();
         return track;
