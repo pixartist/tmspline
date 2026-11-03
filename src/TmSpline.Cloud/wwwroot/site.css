@@ -37,6 +37,19 @@ main { max-width: 1040px; margin: 0 auto; padding: 4vh clamp(16px, 4vw, 48px) 48
 .hero h1 span { color: var(--accent); }
 .lead { max-width: 640px; font-size: 18px; color: #d6d9e6; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8); }
 
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 34px 0 0; }
+.gallery[hidden] { display: none; }
+.gallery figure {
+  margin: 0; cursor: zoom-in; border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease;
+}
+.gallery figure:hover { transform: translateY(-3px); }
+.gallery img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.gallery figcaption { padding: 9px 12px 11px; font-size: 13.5px; color: #d6d9e6; }
+.lightbox { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; cursor: zoom-out; }
+.lightbox::backdrop { background: rgba(5, 6, 16, 0.85); }
+.lightbox img { display: block; max-width: 96vw; max-height: 88vh; border-radius: 10px; }
+.lightbox p { color: #eef0f6; text-align: center; margin: 10px 0 0; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin: 40px 0; }
 .cards.single { grid-template-columns: minmax(300px, 640px); justify-content: center; margin-top: 12vh; }
 .card {

@@ -75,6 +75,9 @@ dotnet run --project src/TmSpline.Cloud   # http://localhost:5090, development: 
 - API (`/api`, login cookie or bearer token; changes with the cookie need the header `X-TMSpline: 1`):
   `GET /me`, `GET /tracks`, `GET|PUT|DELETE /tracks/{id}` (PUT with `baseVersion`: 409 with the stored version when
   another machine saved meanwhile), `POST|DELETE /tracks/{id}/share`, `GET /shared/{share}`, `GET /app/latest`.
+- Screenshots on the start page: `Cloud:MediaDir` (default `media` next to the data folder, `/opt/tmspline/media` on
+  the Mac) with `gallery.json` (`[{ "image", "thumb", "caption" }]`) and the images, served to signed-in users only.
+  They stay out of the repository, as they show the game's textures and blocks from a converted block library.
 - Releases: `Cloud:ReleasesDir` (default `data/releases`) holds the files and `latest.json`
   (`{ "version", "app", "plugin", "notes" }`); only the files it names are downloadable (`/download/{file}`).
 - Production settings: `Auth:Authority` (the provider's OpenID issuer, `https://<authentik>/application/o/<slug>/`),

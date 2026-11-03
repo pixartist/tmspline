@@ -16,6 +16,9 @@ var config = builder.Configuration;
 
 var dataDir = Path.GetFullPath(config["Cloud:DataDir"] ?? "data", builder.Environment.ContentRootPath);
 var releasesDir = Path.GetFullPath(config["Cloud:ReleasesDir"] ?? Path.Combine(dataDir, "releases"), builder.Environment.ContentRootPath);
+// Screenshots for the start page (gallery.json + images): next to the data folder, not in the repository, as they show
+// the game's own textures and blocks (from the user's block library).
+var mediaDir = Path.GetFullPath(config["Cloud:MediaDir"] ?? Path.Combine(dataDir, "..", "media"), builder.Environment.ContentRootPath);
 Directory.CreateDirectory(releasesDir);
 // Who runs the site (Impressum, privacy page): site.json next to the data folder, kept out of the repository.
 var siteFile = Path.GetFullPath(config["Cloud:SiteFile"] ?? Path.Combine(dataDir, "..", "site.json"), builder.Environment.ContentRootPath);
@@ -138,6 +141,11 @@ app.MapPost("/logout", async (HttpContext c) =>
     await c.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.Redirect("/");
 }).RequireAuthorization("web");
+app.MapGet("/media/{file}", (string file) =>
+    MediaFiles.IsImage(file) && File.Exists(Path.Combine(mediaDir, file))
+        ? Results.File(Path.Combine(mediaDir, file), MediaFiles.ContentType(file))
+        : Results.NotFound())
+    .RequireAuthorization("web");
 app.MapGet("/download/{file}", (string file, Releases releases) =>
     releases.PathOf(file) is { } path ? Results.File(path, "application/octet-stream", file) : Results.NotFound())
     .RequireAuthorization("api");
@@ -163,6 +171,20 @@ api.AddEndpointFilter(async (context, next) =>
 
 api.MapGet("/me", (ClaimsPrincipal user) => new { id = Users.Id(user), name = Users.Name(user) });
 api.MapGet("/app/latest", (Releases releases) => releases.Latest() is { } r ? Results.Ok(r) : Results.NoContent());
+// The start page's screenshots: gallery.json in the media folder, [{ "image", "thumb", "caption" }], images that exist.
+api.MapGet("/gallery", () =>
+{
+    var file = Path.Combine(mediaDir, "gallery.json");
+    if (!File.Exists(file)) return Results.Ok(Array.Empty<GalleryImage>());
+    var list = JsonSerializer.Deserialize<GalleryImage[]>(File.ReadAllText(file), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+    return Results.Ok(list
+        .Where(g => MediaFiles.IsImage(g.Image) && File.Exists(Path.Combine(mediaDir, g.Image)))
+        .Select(g => g with
+        {
+            Image = "/media/" + g.Image,
+            Thumb = g.Thumb is { } t && MediaFiles.IsImage(t) && File.Exists(Path.Combine(mediaDir, t)) ? "/media/" + t : "/media/" + g.Image,
+        }));
+});
 
 api.MapGet("/tracks", (ClaimsPrincipal user, TrackStore store) => store.List(Users.Id(user)));
 api.MapGet("/tracks/{id}", (string id, ClaimsPrincipal user, TrackStore store) =>
@@ -209,6 +231,23 @@ app.Run();
 static string Json<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
 /// <summary>PUT /api/tracks/{id}: the track file, its name and the version the client last loaded (null: new or overwrite).</summary>
+internal sealed record GalleryImage(string Image, string? Thumb, string? Caption);
+
+internal static partial class MediaFiles
+{
+    public static bool IsImage(string name) => Pattern().IsMatch(name);
+
+    public static string ContentType(string name) => Path.GetExtension(name).ToLowerInvariant() switch
+    {
+        ".webp" => "image/webp",
+        ".png" => "image/png",
+        _ => "image/jpeg",
+    };
+
+    [GeneratedRegex(@"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.(webp|png|jpe?g)$", RegexOptions.IgnoreCase)]
+    private static partial Regex Pattern();
+}
+
 internal sealed record SaveTrackRequest(string? Name, JsonElement Data, long? BaseVersion);
 
 internal static partial class TrackIds

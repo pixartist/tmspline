@@ -26,6 +26,24 @@
     }, () => (app.innerHTML = `<span class="muted">Could not load the release.</span>`));
   }
 
+  const gallery = $("gallery"), lightbox = $("lightbox");
+  if (gallery) {
+    get("/api/gallery").then((images) => {
+      if (!images?.length) return;
+      gallery.innerHTML = images.map((g, i) => `
+        <figure data-i="${i}"><img src="${esc(g.thumb)}" alt="${esc(g.caption ?? "Screenshot")}" loading="lazy" />
+          ${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ""}</figure>`).join("");
+      gallery.hidden = false;
+      gallery.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => {
+        const g = images[Number(f.dataset.i)];
+        lightbox.querySelector("img").src = g.image;
+        lightbox.querySelector("p").textContent = g.caption ?? "";
+        lightbox.showModal();
+      }));
+      lightbox.addEventListener("click", () => lightbox.close());
+    }, () => {});
+  }
+
   const shared = $("shared");
   if (shared) {
     const id = location.pathname.split("/").pop();
