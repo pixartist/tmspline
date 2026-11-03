@@ -27,7 +27,7 @@ void Render()
 
 void RenderMenu()
 {
-    if (UI::BeginMenu("\\$f80TMSpline")) {
+    if (UI::BeginMenu("TMSpline")) {
         RenderLiveMenu();
         UI::Separator();
         RenderLibraryMenu();
