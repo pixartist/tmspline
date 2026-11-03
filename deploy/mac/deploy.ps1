@@ -47,5 +47,5 @@ if ($Setup) {
 # this file's CRLF line endings to the Mac's shell.
 scp $tar (Join-Path $PSScriptRoot "update.sh") "${Mac}:/tmp/"
 if ($LASTEXITCODE -ne 0) { throw "copying to the Mac failed" }
-ssh $Mac "sh /tmp/update.sh; status=`$?; rm -f /tmp/update.sh; exit `$status"
+ssh $Mac "sh /tmp/update.sh; rc=`$?; rm -f /tmp/update.sh; exit `$rc"
 if ($LASTEXITCODE -ne 0) { throw "updating the Mac failed (see the output above)" }
