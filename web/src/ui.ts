@@ -6,7 +6,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { mode: "fill" as "fill" | "nestle", band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 4, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle", band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -540,7 +540,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       if (scenery.cliffs === 0 || nestle)
         numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
       if (scenery.cliffs === 0 || nestle)
-        numberField(root, "Rise over distance (cells per level, 0 = off)", () => scenery.farRise, (v) => (scenery.farRise = int(v, 0, 32)), 1);
+        numberField(root, "Rise over distance (levels per cell, 0 = off)", () => scenery.farRise,
+          (v) => (scenery.farRise = Math.max(0, Math.min(4, Math.round(v * 100) / 100))), 0.25);
     }
     if (!nestle)
       numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => { scenery.cliffs = int(v, 0, 24); relayout(); }, 1);
