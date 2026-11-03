@@ -896,7 +896,9 @@ export class Editor {
     // The clickable ground reaches as far as tracks may go; beyond the grid it is darker: the game has no ground there.
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_HALF_EXTENT * 2 + 1024, WORLD_HALF_EXTENT * 2 + 1024),
-      new THREE.MeshStandardMaterial({ color: 0x46553f, roughness: 1 }),
+      // Pushed back in depth: the grid's own ground lies right on top of it and must win at every distance
+      // (1 cm apart, the two would flicker against each other far from the camera).
+      new THREE.MeshStandardMaterial({ color: 0x46553f, roughness: 1, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 16 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
