@@ -138,6 +138,11 @@ public sealed class TrackPoint
 
     /// <summary>How high the gate at this point stands over the road, meters (its arch; the trigger reaches as high).</summary>
     public double GateHeight { get; set; } = DefaultGateHeight;
+    /// <summary>
+    /// Linked checkpoint group (Checkpoint waypoints only): checkpoints with the same number, on any track of the map,
+    /// count as one, so passing any of them is enough (the game's LinkedCheckpoint with that order). 0: not linked.
+    /// </summary>
+    public int CheckpointGroup { get; set; }
 
     public const double DefaultGateHeight = 6;
 

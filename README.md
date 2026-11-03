@@ -127,7 +127,8 @@ Controls:
   pieces are exported as separate 8 m items rotated so their local Z axis points along the effect (Direction / Tilt).
   NadeoImporter 2022_07_12 only accepts the reactor boosts as `ReactorBoost_Legacy` / `ReactorBoost2_Legacy`.
 - Race gates: set a point's **Waypoint** to Start, Checkpoint, Finish or (closed tracks) Start/finish (**Gate height**: how high its
-  arch and trigger reach over the road, 6 m by default), with **Laps** in the
+  arch and trigger reach over the road, 6 m by default; checkpoints can be **Linked** into groups, on any track of
+  the map: the game counts a group as one checkpoint, and green bars join its gates in the editor), with **Laps** in the
   map settings. Nothing is placed automatically: without waypoints the map gets no gates (add them in the game's editor).
   Files from before maps had several tracks get their old automatic start and finish as explicit waypoints.
 - A map can hold several tracks (**New track** or `T`), e.g. pieces of a route the car jumps between. The other tracks'

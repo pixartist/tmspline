@@ -1,4 +1,4 @@
-﻿using System.Security;
+using System.Security;
 using System.Text;
 using TmSpline.Core.Geometry;
 using TmSpline.Core.Model;
@@ -8,8 +8,9 @@ namespace TmSpline.Export;
 /// <param name="Offset">Item pivot relative to the track origin.</param>
 /// <param name="PitchYawRoll">Rotation to store in the map (see RotationConvention).</param>
 /// <param name="Waypoint">Race waypoint the item is (start, checkpoint ...), None for road pieces.</param>
+/// <param name="WaypointOrder">Linked checkpoint group of a checkpoint (0: not linked).</param>
 public sealed record ImportedItem(string Name, string ItemGbxPath, string RelativeItemPath, Vec3d Offset = default, Vec3d PitchYawRoll = default,
-    Waypoint Waypoint = Waypoint.None, ItemColor Color = ItemColor.Default);
+    Waypoint Waypoint = Waypoint.None, ItemColor Color = ItemColor.Default, int WaypointOrder = 0);
 
 public static class ItemExporter
 {
@@ -42,6 +43,7 @@ public static class ItemExporter
                 Offset = m.ItemOffset,
                 PitchYawRoll = m.Frame.StoredPitchYawRoll,
                 Waypoint = m.Waypoint,
+                WaypointOrder = m.WaypointOrder,
                 Color = m.Color,
             };
         }).ToList();

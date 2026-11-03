@@ -96,7 +96,11 @@ public static class WaypointBuilder
         var offset = settings.WorldSpace ? Vec3d.Zero : ring.Position - origin;
         var itemOrigin = origin + offset;
         var segment = Math.Min(point, Math.Max(0, track.SegmentCount - 1));
-        var chunk = new MeshChunk { Name = $"{namePrefix}_{point:D2}", ItemOffset = offset, Frame = frame, Waypoint = type };
+        var chunk = new MeshChunk
+        {
+            Name = $"{namePrefix}_{point:D2}", ItemOffset = offset, Frame = frame, Waypoint = type,
+            WaypointOrder = type == Waypoint.Checkpoint ? Math.Max(0, track.Points[point].CheckpointGroup) : 0,
+        };
 
         var (minX, maxX, minY, maxY) = RoadMeshBuilder.SurfaceExtents(ring);
         var bottom = Math.Min(minY, 0) - settings.Thickness - 0.5;

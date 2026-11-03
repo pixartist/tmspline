@@ -480,7 +480,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
-    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint !== "None"}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
+    + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
@@ -604,6 +604,24 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         if (h === DEFAULT_GATE_HEIGHT) delete tr.points[s.index].gateHeight;
         else tr.points[s.index].gateHeight = h;
       }, false, `gateHeight:${s.index}`), 100);
+    if (p().waypoint === "Checkpoint") {
+      // Groups in use anywhere on the map (linked checkpoints may sit on different tracks).
+      const groups = [...new Set(editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).filter((g) => g > 0))].sort((a, b) => a - b);
+      const mine = p().checkpointGroup ?? 0;
+      const options = ["0", ...groups.map(String), "new"];
+      const labels: Record<string, string> = { "0": "Not linked", new: "New group" };
+      for (const g of groups) {
+        const count = editor.map.tracks.reduce((n, tr) => n + tr.points.filter((q) => q.checkpointGroup === g).length, 0);
+        labels[String(g)] = `Group ${g} (${count - (g === mine ? 1 : 0)} other${count - (g === mine ? 1 : 0) === 1 ? "" : "s"})`;
+      }
+      selectField(root, "Linked", options, () => String(p().checkpointGroup ?? 0), (v) => editor.edit((tr) => {
+        const point = tr.points[s.index];
+        const group = v === "new" ? Math.max(0, ...groups) + 1 : Number(v);
+        if (group > 0) point.checkpointGroup = group;
+        else delete point.checkpointGroup;
+      }, true), false, labels);
+      hint(root, "Linked checkpoints count as one: passing any checkpoint of the group is enough (e.g. on alternative routes, also on other tracks). Green lines join them in the editor.");
+    }
     buttonRow(root, SHAPE_PRESETS.map((preset) => ({
       label: preset.label,
       onClick: () => editor.edit((tr) => {

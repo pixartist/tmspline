@@ -109,9 +109,12 @@ public static class MapExporter
             var placed = map.PlaceAnchoredObject(ident, new Vec3((float)p.X, (float)p.Y, (float)p.Z), new Vec3((float)r.X, (float)r.Y, (float)r.Z), Vec3.Zero);
             if (item.Color != ItemColor.Default)
                 placed.Color = (DifficultyColor)(int)item.Color;
-            if (WaypointTag(item.Waypoint) is { } tag)
+            // Linked checkpoints: tag LinkedCheckpoint with the group as order (as the game's editor stores them).
+            if (item.Waypoint == Waypoint.Checkpoint && item.WaypointOrder > 0)
+                placed.WaypointSpecialProperty = WaypointProperty("LinkedCheckpoint", item.WaypointOrder);
+            else if (WaypointTag(item.Waypoint) is { } tag)
                 placed.WaypointSpecialProperty = WaypointProperty(tag);
-            log?.Invoke($"Placed {ident.Id} at {p}{(item.Waypoint == Waypoint.None ? "" : $" ({item.Waypoint})")}");
+            log?.Invoke($"Placed {ident.Id} at {p}{(item.Waypoint == Waypoint.None ? "" : $" ({item.Waypoint}{(item.WaypointOrder > 0 ? $", linked group {item.WaypointOrder}" : "")})")}");
         }
 
         // Vanilla blocks: cell 0 starts at the map center (where the track origin is), level 0 is the ground.
@@ -245,13 +248,13 @@ public static class MapExporter
     }
 
     /// <summary>A waypoint property built like the game's own: chunk 2E009000 (version 2) and 2E009001.</summary>
-    private static CGameWaypointSpecialProperty WaypointProperty(string tag)
+    private static CGameWaypointSpecialProperty WaypointProperty(string tag, int order = 0)
     {
         var property = new CGameWaypointSpecialProperty();
         property.CreateChunk<CGameWaypointSpecialProperty.Chunk2E009000>().Version = 2;
         property.CreateChunk<CGameWaypointSpecialProperty.Chunk2E009001>();
         property.Tag = tag;
-        property.Order = 0;
+        property.Order = order;
         return property;
     }
 

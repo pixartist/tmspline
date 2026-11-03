@@ -6,7 +6,7 @@ import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, 
 import { generateScenery, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import {
-  add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -191,6 +191,9 @@ export class Editor {
   /** Vertical lines from every track point down to the ground, with a small cross where they land. */
   private readonly dropLines = new THREE.LineSegments(new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: 0x1c2228, transparent: true, opacity: 0.55 }));
+  /** Green bars joining the tops of the gates of each linked checkpoint group (across all tracks). */
+  private readonly checkpointLinks = new THREE.Group();
+  private readonly checkpointLinkMaterial = new THREE.MeshBasicMaterial({ color: 0x3fe07a, transparent: true, opacity: 0.85 });
   private blockTarget: VanillaBlock | null = null;
   private lastBlockPlace: Editor["blockPlace"] = null;
 
@@ -285,6 +288,7 @@ export class Editor {
     this.dropLines.raycast = () => {};
     this.dropLines.frustumCulled = false;
     this.scene.add(this.dropLines);
+    this.scene.add(this.checkpointLinks);
     void VanillaLibrary.load().then((lib) => {
       this.library = lib;
       this.blocks.setLibrary(lib);
@@ -1260,10 +1264,36 @@ export class Editor {
     geo.computeBoundingSphere();
   }
 
+  /** Joins the gates of each linked checkpoint group with green bars, in track order, at the tops of the gates. */
+  private updateCheckpointLinks(): void {
+    const groups = new Map<number, THREE.Vector3[]>();
+    for (const t of this.map.tracks)
+      for (const p of t.points)
+        if (p.waypoint === "Checkpoint" && (p.checkpointGroup ?? 0) > 0) {
+          const list = groups.get(p.checkpointGroup!) ?? [];
+          list.push(new THREE.Vector3(p.position[0], p.position[1] + (p.gateHeight ?? DEFAULT_GATE_HEIGHT), p.position[2]));
+          groups.set(p.checkpointGroup!, list);
+        }
+    for (const child of this.checkpointLinks.children) (child as THREE.Mesh).geometry.dispose();
+    this.checkpointLinks.clear();
+    const up = new THREE.Vector3(0, 1, 0);
+    for (const list of groups.values())
+      for (let i = 1; i < list.length; i++) {
+        const [a, b] = [list[i - 1], list[i]];
+        const length = a.distanceTo(b);
+        if (length < 0.01) continue;
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, length, 8, 1, true), this.checkpointLinkMaterial);
+        bar.position.copy(a).add(b).multiplyScalar(0.5);
+        bar.quaternion.setFromUnitVectors(up, b.clone().sub(a).normalize());
+        this.checkpointLinks.add(bar);
+      }
+  }
+
   /** Updates positions/colors of the control meshes from the track (cheap; called on every change). */
   private updateControls(): void {
     this.updateObjectMarkers();
     this.updateDropLines();
+    this.updateCheckpointLinks();
     const s = this.selection;
     this.track.points.forEach((p, i) => {
       const m = this.pointMeshes[i];

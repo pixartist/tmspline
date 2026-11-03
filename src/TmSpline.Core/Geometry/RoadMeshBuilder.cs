@@ -25,6 +25,8 @@ public sealed class MeshChunk
 
     /// <summary>Race waypoint this item is (Item.xml Waypoint type), or None for road pieces.</summary>
     public Waypoint Waypoint { get; init; }
+    /// <summary>Linked checkpoint group of a checkpoint gate (TrackPoint.CheckpointGroup), 0 when not linked.</summary>
+    public int WaypointOrder { get; init; }
     /// <summary>Color of the placed item (the game's palette); what it tints depends on the materials.</summary>
     public ItemColor Color { get; set; }
     /// <summary>Invisible trigger meshes (exported as "_trigger_…" objects without materials).</summary>
