@@ -1,7 +1,7 @@
 // Live update: reloads the map editor when TMSpline exports a new version of the map ("Export to game").
-// The TMSpline server (local dev setup) writes the map into Maps/TMSpline and tells us about it at /api/game/latest;
-// we leave the editor, open the new file in the editor and put the camera back where it was.
-// What was added in the game's editor stays: before reloading we save the open map, and the server merges the new export
+// The TMSpline app writes the map into Maps/TMSpline and reports it at /api/game/latest, which we poll once a second.
+// To reload, we leave the editor, open the new file in it and put the camera back where it was.
+// What was added in the game's editor stays: before reloading we save the open map, and the app merges the new export
 // into it (it replaces only what its previous export put there).
 
 [Setting category="Live update" name="Reload automatically" description="Reload the editor as soon as a new export arrives, without asking (the open map is saved first)."]
@@ -102,7 +102,7 @@ void Reload()
 
     if (!g_latestApplied) {
         // Save the open map (when it is this one), so the edits made in the game are in the file the export merges into.
-        if (EditingLatest() && !SaveOpenMap()) { g_busy = false; return; }
+        if (EditingLatest()) SaveOpenMap();
         if (!ApplyExport()) { g_busy = false; return; }
     }
     g_error = "";
@@ -127,11 +127,11 @@ void Reload()
     g_busy = false;
 }
 
-/// Saves the open map under its own file name and waits until the file on disk changed.
-bool SaveOpenMap()
+/// Saves the open map under its own file name and waits (up to 10 s) until the file on disk changed.
+void SaveOpenMap()
 {
     auto editor = Editor();
-    if (editor is null || editor.PluginMapType is null || editor.Challenge is null) return true;
+    if (editor is null || editor.PluginMapType is null || editor.Challenge is null) return;
     string fileName = editor.Challenge.MapInfo.FileName;
     string full = IO::FromUserGameFolder("Maps/" + g_latestPath);
     int64 before = IO::FileExists(full) ? IO::FileModifiedTime(full) : 0;
@@ -144,10 +144,9 @@ bool SaveOpenMap()
     }
     if (Time::Now - start >= 10000) warn("Saving took over 10 s or did not change " + full + "; merging anyway");
     sleep(500);   // let the game finish writing
-    return true;
 }
 
-/// Asks the server to merge the waiting export into the (saved) map file.
+/// Asks the app to merge the waiting export into the (saved) map file.
 bool ApplyExport()
 {
     auto req = Net::HttpPost(S_Server + "/api/game/apply?id=" + g_latestId, "", "application/json");
@@ -213,7 +212,7 @@ void RenderLive()
 
 void RenderLiveMenu()
 {
-    string state = g_serverDown ? " \\$f66(server not reachable)" : g_latestPath == "" ? " \\$888(no export yet)" : "";
+    string state = g_serverDown ? " \\$f66(TMSpline app not reachable)" : g_latestPath == "" ? " \\$888(no export yet)" : "";
     if (UI::MenuItem("Open latest export in editor" + state, "", false, g_latestPath != "" && !g_busy))
         startnew(Reload);
 }

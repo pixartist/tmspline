@@ -1,8 +1,8 @@
 // Block library: extracts the game files TMSpline's editor needs to show vanilla blocks (meshes, materials, textures,
-// icons) and has the TMSpline server convert them (tools/VanillaLib, into its Vanilla:Dir).
+// icons) into OpenplanetNext/Extract and has the TMSpline app convert them into its block preview.
 // One run does everything: the block definitions and prefabs the game knows by name first, then, round by round, the
 // files the conversion still misses (the game finds any file by its path, even ones Openplanet has no name for).
-// LOCAL USE ONLY: the files are Nadeo's game data. Never redistribute them.
+// LOCAL USE ONLY: the files are Nadeo's game data. They stay on this PC; never redistribute them.
 
 /// Folders extracted as a whole before the first conversion (everything in them the game knows by name).
 const array<string> LIBRARY_FOLDERS = { "GameData/Stadium/GameCtnBlockInfo", "GameData/Stadium/Media/Prefab" };
@@ -30,14 +30,14 @@ void BuildLibraryMissing() { BuildLibrary(false); }
 
 void BuildLibraryRun(bool again)
 {
-    // The server must have a library folder (local setups only).
-    g_libStatus = "Asking the TMSpline server";
+    // The app must be running and able to build the library.
+    g_libStatus = "Asking the TMSpline app";
     auto check = Net::HttpGet(S_Server + "/api/vanilla/build");
     while (!check.Finished()) yield();
     if (check.ResponseCode() != 200) {
         g_libError = check.ResponseCode() == 404
-            ? "The TMSpline server has no block library folder (Vanilla:Dir), or is too old."
-            : "The TMSpline server is not reachable at " + S_Server + ".";
+            ? "This TMSpline app cannot build the block library (update it)."
+            : "The TMSpline app is not reachable at " + S_Server + ". Start it, then try again.";
         return;
     }
 
@@ -108,20 +108,20 @@ void ExtractPaths(const array<string> &in paths, bool again)
     g_libTotal = 0;
 }
 
-/// Has the server convert the extracted files; its result (blocks, missing files), or null (g_libError says why).
+/// Has the app convert the extracted files; its result (blocks, missing files), or null (g_libError says why).
 Json::Value@ RunConversion()
 {
     auto start = Net::HttpPost(S_Server + "/api/vanilla/build", "", "application/json");
     while (!start.Finished()) yield();
     if (start.ResponseCode() != 200 && start.ResponseCode() != 202) {
-        g_libError = "The server could not start the conversion (" + start.ResponseCode() + "): " + start.String();
+        g_libError = "The app could not start the conversion (" + start.ResponseCode() + "): " + start.String();
         return null;
     }
     while (true) {
         sleep(1000);
         auto req = Net::HttpGet(S_Server + "/api/vanilla/build");
         while (!req.Finished()) yield();
-        if (req.ResponseCode() != 200) { g_libError = "Lost the server during the conversion (" + req.ResponseCode() + ")."; return null; }
+        if (req.ResponseCode() != 200) { g_libError = "Lost the app during the conversion (" + req.ResponseCode() + ")."; return null; }
         auto json = Json::Parse(req.String());
         if (json.GetType() != Json::Type::Object) continue;
         if (json.HasKey("running") && bool(json["running"])) {
@@ -135,7 +135,7 @@ Json::Value@ RunConversion()
         }
         return json;
     }
-    return null;
+    return null;   // not reached; keeps the compiler sure every path returns
 }
 
 void RenderLibrary()
@@ -158,6 +158,5 @@ void RenderLibraryMenu()
 {
     if (UI::MenuItem("Build block library", "", false, !g_libRunning)) startnew(BuildLibraryMissing);
     if (UI::MenuItem("Rebuild block library (extract everything again)", "", false, !g_libRunning)) startnew(BuildLibraryAgain);
-    if (g_libRunning) UI::TextDisabled(g_libStatus);
-    else if (g_libStatus != "") UI::TextDisabled(g_libStatus);
+    if (g_libStatus != "") UI::TextDisabled(g_libStatus);
 }
