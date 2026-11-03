@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    TMSpline's hosted service (runs on the home Mac behind Caddy): login through Authentik (OpenID Connect), the
+    website with the app download, and the API the desktop app uses for cloud tracks, share links and update checks.
+    Nothing of Nadeo's runs or is stored here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.33" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.33" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The pages need a login, so they are served by endpoints, not from wwwroot. -->
+    <Content Include="Pages\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

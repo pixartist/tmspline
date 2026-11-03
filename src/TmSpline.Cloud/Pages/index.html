@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TMSpline</title>
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body>
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <header class="bar">
+    <span class="brand">TMSpline</span>
+    <span class="user"><span id="user"></span>
+      <form method="post" action="/logout"><button class="link">Sign out</button></form></span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Draw the track.<br /><span>Drive it in Trackmania.</span></h1>
+      <p class="lead">TMSpline builds Trackmania roads from splines: drag points, bank the road, bend it into
+        half-pipes and tubes, set width and borders per point, and send it straight into the game's editor.</p>
+    </section>
+
+    <section class="cards">
+      <article class="card primary">
+        <h2>The app</h2>
+        <p>The editor for Windows. It exports maps on your own PC with Nadeo's NadeoImporter, which it downloads from
+          Nadeo the first time you export.</p>
+        <div id="app-download" class="download"><span class="muted">Looking for the current version…</span></div>
+      </article>
+
+      <article class="card">
+        <h2>The Openplanet plugin</h2>
+        <p>Optional, inside Trackmania: reloads your track in the game's editor after every export (live update), and
+          builds the block library so the app shows the game's real blocks and textures.</p>
+        <div id="plugin-download" class="download"><span class="muted">…</span></div>
+        <p class="small">It runs in Openplanet's developer mode (Openplanet menu → Developer → Signature mode). Unzip it
+          into <code>%USERPROFILE%\OpenplanetNext\Plugins\TMSpline</code>.</p>
+      </article>
+    </section>
+
+    <section class="steps">
+      <h2>Getting started</h2>
+      <ol>
+        <li><b>Install the app</b> and sign in with this account: your tracks are saved here and follow you between PCs.</li>
+        <li><b>Draw a track.</b> Ctrl+click the ground to add points, drag them and their handles, Q/E banks.</li>
+        <li><b>Export.</b> Export map downloads a .Map.Gbx; Export to game puts it into your Maps folder.</li>
+        <li><b>With the plugin:</b> open the map in the game's editor once. After that every export reloads it there,
+          and what you placed in the game's editor stays.</li>
+        <li><b>Share</b> a track from the app: everyone with an account can open the link and take a copy.</li>
+      </ol>
+    </section>
+
+    <footer>
+      TMSpline is not affiliated with Nadeo or Ubisoft. Trackmania is a trademark of Ubisoft Entertainment.
+      Nothing of the game is hosted here: the app works with your own installation.
+    </footer>
+  </main>
+
+  <script src="/background.js"></script>
+  <script src="/site.js"></script>
+</body>
+</html>

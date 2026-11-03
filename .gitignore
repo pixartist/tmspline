@@ -23,3 +23,6 @@ artifacts/
 # Local scratch: screenshots and test tracks in the repo root
 /*.png
 /*.track.json
+
+# The hosted service's data (database, login keys, releases) when run from its project folder
+src/TmSpline.Cloud/data/

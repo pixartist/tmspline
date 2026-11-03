@@ -13,6 +13,7 @@ whose road is made of custom items generated with Nadeo's NadeoImporter.
 | `src/TmSpline.Cli` | `track.json` → `.Map.Gbx` using a local NadeoImporter. |
 | `src/TmSpline.Server` | ASP.NET Core: `POST /api/export` (track → map), serves the built editor in production. |
 | `src/TmSpline.Desktop` | The desktop app (`TMSpline.exe`): the editor in a window (Photino), the server inside it on localhost. |
+| `src/TmSpline.Cloud` | The hosted service: Authentik login, website with the app download, API for cloud tracks, share links and updates. |
 | `web/` | Editor: Vite + TypeScript + Three.js. |
 | `Dockerfile` | Production image: server + editor + Wine. |
 | `docker/importer` | Importer-only Wine image (used by the server's `Docker` importer mode). |
@@ -51,6 +52,25 @@ editor's sources changed, and the preview core (`npm run wasm`) whenever TmSplin
 - The block library is converted by the app itself (`TMSpline.exe --vanilla-lib <extract> <out>`), no SDK needed.
 - Trackmania and NadeoImporter are Windows programs: on Linux the importer runs through Wine; on macOS the app edits
   tracks but cannot export.
+
+## Hosted service (TmSpline.Cloud)
+
+Nothing of Nadeo's runs or is stored here. Sign-in is Authentik's (OpenID Connect): the website keeps a cookie, the
+desktop app sends Authentik's access token. SQLite (`Cloud:DataDir/tmspline.db`) holds users, tracks and share links.
+
+```sh
+dotnet run --project src/TmSpline.Cloud   # http://localhost:5090, development: everyone is signed in as "dev"
+```
+
+- Website: `/` (app and plugin download, getting started), `/s/{share}` (a shared track). Both need a login.
+- API (`/api`, login cookie or bearer token; changes with the cookie need the header `X-TMSpline: 1`):
+  `GET /me`, `GET /tracks`, `GET|PUT|DELETE /tracks/{id}` (PUT with `baseVersion`: 409 with the stored version when
+  another machine saved meanwhile), `POST|DELETE /tracks/{id}/share`, `GET /shared/{share}`, `GET /app/latest`.
+- Releases: `Cloud:ReleasesDir` (default `data/releases`) holds the files and `latest.json`
+  (`{ "version", "app", "plugin", "notes" }`); only the files it names are downloadable (`/download/{file}`).
+- Production settings: `Auth:Authority` (the provider's OpenID issuer, `https://<authentik>/application/o/<slug>/`),
+  `Auth:ClientId`, optionally `Auth:ClientSecret`, `Proxy:KnownProxies` (Caddy's address, for X-Forwarded-Proto).
+- In development, the header `X-Dev-User: name` signs a request in as another user (to try sharing).
 
 ## Run the editor
 
