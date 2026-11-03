@@ -58,6 +58,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     saveButton.hidden = !c;
   }, (err) => console.warn("Cloud link failed", err));
   const saveToCloud = () => void cloud?.save(saveButton);
+  void hintBlockLibrary(editor.renderer.domElement.parentElement!);
 
   const button = (label: string, title: string, onClick: () => void) => {
     const b = document.createElement("button");
@@ -248,6 +249,34 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     saveTimer = window.setTimeout(() => save(), 300);
   };
   editor.onChange();
+}
+
+const LIBRARY_HINT_KEY = "tmspline.libraryHintDismissed";
+
+/**
+ * Where the plugin can have the block library built (the desktop app) but there is none yet: blocks show as boxes and
+ * the road without the game's textures, which is easy to take for a bug. Says once how to build it.
+ */
+async function hintBlockLibrary(container: HTMLElement): Promise<void> {
+  if (localStorage.getItem(LIBRARY_HINT_KEY)) return;
+  const health = await fetch("/api/health").then((r) => r.json()).catch(() => null);
+  if (!health?.blockLibraryBuilder || health.blockLibrary) return;
+  const banner = document.createElement("div");
+  banner.className = "conflict-banner";
+  banner.append(Object.assign(document.createElement("span"), {
+    innerHTML: "No block library yet, so blocks show as boxes and the road without the game's textures. To build it: "
+      + "in Trackmania, <b>F3 → TMSpline → Build block library</b> (with the Openplanet plugin), then reload here (F5).",
+  }));
+  const close = (dismiss: boolean) => {
+    if (dismiss) localStorage.setItem(LIBRARY_HINT_KEY, "1");
+    banner.remove();
+  };
+  const ok = Object.assign(document.createElement("button"), { textContent: "OK", className: "primary" });
+  ok.addEventListener("click", () => close(false));
+  const never = Object.assign(document.createElement("button"), { textContent: "Don't show again" });
+  never.addEventListener("click", () => close(true));
+  banner.append(ok, never);
+  container.appendChild(banner);
 }
 
 /** Banner shown when another tab saved the track; returns the banner element. */

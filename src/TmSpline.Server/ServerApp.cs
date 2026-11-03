@@ -78,6 +78,9 @@ public static class ServerApp
             importer = exports.ImporterMode,
             importerInstalled = importerSetup.Status.Installed,
             exportToGame = gameMaps.MapsDir is not null,
+            // The plugin can have the block library built here; whether one exists yet.
+            blockLibraryBuilder = app.Services.GetRequiredService<VanillaBuilder>().Enabled,
+            blockLibrary = app.Services.GetRequiredService<VanillaBuilder>().OutDir is { } dir && File.Exists(Path.Combine(dir, "index.json")),
         }));
 
         // NadeoImporter, and in the desktop app its download from Nadeo (on the user's request).

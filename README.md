@@ -207,6 +207,18 @@ dotnet run --project src/TmSpline.Cli -- path/to/My_Track.track.json [--game <TM
 The map is written to `<TM user dir>\Maps\TMSpline\`. Track coordinates are meters relative to the map center
 at ground level (map Y = 8).
 
-## Licensing note
+## Releases
 
-`GBX.NET.LZO` is GPL v3. Running it on a server is fine; distributing binaries that include it requires GPL v3.
+```powershell
+.\deploy\release.ps1 -Version 0.2.0 -Notes "What changed."            # builds artifacts/release
+.\deploy\release.ps1 -Version 0.2.0 -Notes "What changed." -Publish   # and puts it on the website
+```
+
+The app (win-x64, .NET runtime included, ~56 MB zipped), the plugin (`TMSpline.op`) and `latest.json`, which the
+website links and the app checks for updates. Deploy the service itself with `.\deploy\mac\deploy.ps1`.
+
+## License
+
+TMSpline is free software under the GNU General Public License v3 (`LICENSE`). It uses `GBX.NET.LZO`, which is
+GPL v3 as well. Nadeo's NadeoImporter and the game's files are not part of it: the app downloads the importer from
+Nadeo, and the block library is converted from the user's own game.
