@@ -4,39 +4,115 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The terrain grid (TerrainGrid) as items: the grid simplified to as few triangles as keep within
-/// <see cref="Tolerance"/> of it (a right-triangulated irregular network, as Mapbox's Martini builds it: halving right
-/// triangles where they stray, so neighbours always share their edges and there are no cracks), with smooth normals from
-/// the whole grid and a skirt hanging from the land's outer edge, cut into square chunks (one item each).
+/// The terrain (TerrainGrid, the editor's height map) as items, built from the roads outwards:
+/// <list type="bullet">
+/// <item>Rows of points along every road edge, densest at the road: the first on the edge itself (the curb's top, or the
+/// surface's edge: RoadMeshBuilder.EdgeContact), the others at the land's height a little further out.</item>
+/// <item>Beyond them the height map's grid, thinned out with the distance from the roads (the land relaxes).</item>
+/// <item>One Delaunay triangulation of all of them, without the triangles on the roads, so the land ends exactly at their
+/// edges; a skirt hangs from its outer edge. Cut into square chunks (one item each).</item>
+/// </list>
 /// </summary>
 public static class TerrainMeshBuilder
 {
-    /// <summary>How far the simplified land may stray from the height map, metres.</summary>
-    public const double Tolerance = 0.2;
     /// <summary>Size of a chunk (one item), metres.</summary>
     private const double ChunkSize = 128;
+    /// <summary>The rows along a road's edge: metres out from it (0: on the edge).</summary>
+    private static readonly double[] RowOffsets = [0, 0.75, 2, 4, 7, 11, 16];
+    /// <summary>Metres between the rows' points along the road (the outer rows every other one).</summary>
+    private const double AlongSpacing = 2;
+    /// <summary>Beyond the rows: the grid's full density for this many metres, then every second vertex, then every fourth.</summary>
+    private const double DenseGrid = 24, MediumGrid = 72;
+    /// <summary>No triangle longer than this on a side (the triangulation's hull fills what is no land).</summary>
+    private const double MaxEdge = 48;
+
+    /// <summary>A point of a road's edge every couple of metres: its centre, both edges (null: no land meets it there).</summary>
+    private sealed record EdgeSample(Vec3d Centre, Vec3d Right, Vec3d? Left, Vec3d? RightEdge, double RoomLeft, double RoomRight);
 
     public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain")
     {
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
-        var cell = grid.Cell;
-        var count = grid.Columns * grid.Rows;
-        // The grid's vertices: where they stand and how high, the ones next to the roads moved onto their edges.
-        var xs = new double[count];
-        var zs = new double[count];
-        var heights = (double[])grid.Heights.Clone();
-        for (var i = 0; i < count; i++)
+        var samples = map is null ? [] : RoadSamples(map);
+        var lastRow = RowOffsets[^1];
+
+        // The points: the rows along the edges...
+        var xs = new List<double>();
+        var ys = new List<double>();
+        var zs = new List<double>();
+        var onEdge = new List<bool>();
+        void Add(double x, double y, double z, bool edge) { xs.Add(x); ys.Add(y); zs.Add(z); onEdge.Add(edge); }
+        for (var s = 0; s < samples.Count; s++)
         {
-            xs[i] = grid.X0 + i % grid.Columns * cell;
-            zs[i] = grid.Z0 + i / grid.Columns * cell;
+            var sample = samples[s];
+            foreach (var (edge, sign, room) in new[] { (sample.Left, -1, sample.RoomLeft), (sample.RightEdge, 1, sample.RoomRight) })
+            {
+                if (edge is not { } e) continue;
+                var outward = new Vec3d(sample.Right.X * sign, 0, sample.Right.Z * sign);
+                Add(e.X, e.Y, e.Z, true);
+                for (var row = 1; row < RowOffsets.Length; row++)
+                {
+                    var offset = RowOffsets[row];
+                    if (offset > room || (offset >= 7 && s % 2 == 1)) continue;
+                    double x = e.X + outward.X * offset, z = e.Z + outward.Z * offset;
+                    var y = Sample(grid, x, z);
+                    if (double.IsNaN(y)) continue;
+                    // From the edge's own height into the height map's over the rows (the map is coarser than the
+                    // road: on a steep one its height beside the edge is off by up to a metre or two).
+                    var w = offset / lastRow;
+                    Add(x, e.Y + (y - e.Y) * w * w * (3 - 2 * w), z, false);
+                }
+            }
         }
-        var snapped = new bool[count];
-        if (map is not null) SnapToRoadEdges(grid, map, xs, zs, heights, snapped);
-        var triangles = Simplify(grid, heights, snapped);
+        // ...and the grid beyond them, sparser with the distance from the roads (and at full density along the land's
+        // outer edge, so its shape stays).
+        var fromRoad = DistanceFromRoads(grid, samples, lastRow + MediumGrid);
+        for (var r = 0; r < grid.Rows; r++)
+            for (var c = 0; c < grid.Columns; c++)
+            {
+                var k = r * grid.Columns + c;
+                var h = grid.Heights[k];
+                if (double.IsNaN(h)) continue;
+                var d = fromRoad[k];
+                if (d < lastRow + 1) continue;
+                var step = d < lastRow + DenseGrid ? 1 : d < lastRow + MediumGrid ? 2 : 4;
+                var border = double.IsNaN(grid.Height(c - 1, r)) || double.IsNaN(grid.Height(c + 1, r)) || double.IsNaN(grid.Height(c, r - 1)) || double.IsNaN(grid.Height(c, r + 1));
+                if (!border && (c % step != 0 || r % step != 0)) continue;
+                Add(grid.X0 + c * grid.Cell, h, grid.Z0 + r * grid.Cell, false);
+            }
+        if (xs.Count < 3) return chunks;
+
+        var coords = new double[xs.Count * 2];
+        for (var i = 0; i < xs.Count; i++) { coords[2 * i] = xs[i]; coords[2 * i + 1] = zs[i]; }
+        var all = new Delaunay(coords).Triangles;
+
+        // Land only: not on a road, not longer than the land's points are apart, not where the height map has none.
+        var onRoad = RoadTest(samples);
+        var triangles = new List<(int A, int B, int C)>();
+        for (var t = 0; t + 2 < all.Length; t += 3)
+        {
+            int a = all[t], b = all[t + 1], c = all[t + 2];
+            double cx = (xs[a] + xs[b] + xs[c]) / 3, cz = (zs[a] + zs[b] + zs[c]) / 3;
+            if (Long(a, b) || Long(b, c) || Long(c, a) || onRoad(cx, cz) || double.IsNaN(Sample(grid, cx, cz))) continue;
+            triangles.Add((a, b, c));
+        }
+        bool Long(int a, int b) => (xs[a] - xs[b]) * (xs[a] - xs[b]) + (zs[a] - zs[b]) * (zs[a] - zs[b]) > MaxEdge * MaxEdge;
         if (triangles.Count == 0) return chunks;
 
-        // Outer edges (used by one triangle only) get a skirt, on the side away from their triangle.
+        // Normals: the triangles' round each point, by area.
+        var normals = new Vector3[xs.Count];
+        foreach (var (a, b, c) in triangles)
+        {
+            var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
+                new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
+            if (n.Y < 0) n = -n;
+            normals[a] += n;
+            normals[b] += n;
+            normals[c] += n;
+        }
+        for (var i = 0; i < normals.Length; i++) normals[i] = normals[i].LengthSquared() > 0 ? Vector3.Normalize(normals[i]) : Vector3.UnitY;
+
+        // Outer edges (one triangle only) get a skirt, except along the roads (there the land ends at their edge).
         var edgeUse = new Dictionary<(int, int), int>();
         foreach (var (a, b, c) in triangles)
             foreach (var (u, v) in new[] { (a, b), (b, c), (c, a) })
@@ -62,10 +138,9 @@ public static class TerrainMeshBuilder
         {
             if (vertexOf.TryGetValue((chunk, i), out var v)) return v;
             var o = chunk.ItemOffset;
-            var normal = Normal(grid, heights, i % grid.Columns, i / grid.Columns);
-            chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(heights[i] - o.Y), (float)(zs[i] - o.Z)));
-            chunk.Normals.Add(normal);
-            chunk.Uv0.Add(MaskUv(normal.Y));
+            chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - o.Y), (float)(zs[i] - o.Z)));
+            chunk.Normals.Add(normals[i]);
+            chunk.Uv0.Add(MaskUv(normals[i].Y));
             // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
             chunk.Uv1.Add(new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1))));
             vertexOf[(chunk, i)] = chunk.Positions.Count - 1;
@@ -79,7 +154,7 @@ public static class TerrainMeshBuilder
             if (grid.Skirt <= 0) continue;
             foreach (var (u, v, w) in new[] { (a, b, c), (b, c, a), (c, a, b) })
             {
-                if (edgeUse[u < v ? (u, v) : (v, u)] != 1) continue;
+                if (edgeUse[u < v ? (u, v) : (v, u)] != 1 || (onEdge[u] && onEdge[v])) continue;
                 // Outward: across the edge, away from the triangle's third corner.
                 var outward = new Vector3((float)(zs[v] - zs[u]), 0, (float)(xs[u] - xs[v]));
                 if (outward.X * (xs[w] - xs[u]) + outward.Z * (zs[w] - zs[u]) > 0) outward = -outward;
@@ -91,11 +166,10 @@ public static class TerrainMeshBuilder
                 var o = chunk.ItemOffset;
                 foreach (var (i, down) in new[] { (u, 0.0), (v, 0.0), (u, grid.Skirt), (v, grid.Skirt) })
                 {
-                    chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(heights[i] - down - o.Y), (float)(zs[i] - o.Z)));
+                    chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - down - o.Y), (float)(zs[i] - o.Z)));
                     chunk.Normals.Add(outward);
                     // The hill's side (dirt), as on the hill pieces' flanks.
                     chunk.Uv0.Add(MaskUv(0));
-                    // Each skirt piece its own little stretch of the lightmap strip.
                     chunk.Uv1.Add(new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256));
                 }
                 MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, 0), outward);
@@ -103,6 +177,152 @@ public static class TerrainMeshBuilder
             }
         }
         return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
+    }
+
+    /// <summary>
+    /// The roads' edges every <see cref="AlongSpacing"/> metres or so (between the sampled rings, edges and directions
+    /// interpolated): no edge where a road is steeply banked or upside down, and how far land may reach out on each side
+    /// before it folds over itself on the inside of a bend.
+    /// </summary>
+    private static List<EdgeSample> RoadSamples(TrackMap map)
+    {
+        var samples = new List<EdgeSample>();
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
+            if (rings.Count < 2) continue;
+            Vec3d? Edge(int i, int side)
+            {
+                if (rings[i].Up.Y < 0.5) return null;
+                var segment = track.Segments[Math.Clamp(rings[i].Segment, 0, track.Segments.Count - 1)];
+                return RoadMeshBuilder.EdgeContact(rings[i], segment, side);
+            }
+            for (var i = 0; i + 1 < rings.Count; i++)
+            {
+                Ring a = rings[i], b = rings[i + 1];
+                var steps = Math.Max(1, (int)Math.Ceiling((b.Distance - a.Distance) / AlongSpacing));
+                Vec3d? la = Edge(i, -1), lb = Edge(i + 1, -1), ra = Edge(i, 1), rb = Edge(i + 1, 1);
+                double roomL = Math.Min(InnerRoom(rings, i, -1), InnerRoom(rings, i + 1, -1));
+                double roomR = Math.Min(InnerRoom(rings, i, 1), InnerRoom(rings, i + 1, 1));
+                // The last ring's own sample comes with the next interval (or after the loop for the track's end).
+                for (var j = 0; j < steps; j++)
+                {
+                    var t = (double)j / steps;
+                    samples.Add(new EdgeSample(Lerp(a.Position, b.Position, t), Lerp(a.Right, b.Right, t).Normalized(),
+                        la is { } l0 && lb is { } l1 ? Lerp(l0, l1, t) : null, ra is { } r0 && rb is { } r1 ? Lerp(r0, r1, t) : null, roomL, roomR));
+                }
+            }
+            var last = rings.Count - 1;
+            samples.Add(new EdgeSample(rings[last].Position, rings[last].Right, Edge(last, -1), Edge(last, 1),
+                InnerRoom(rings, last, -1), InnerRoom(rings, last, 1)));
+        }
+        return samples;
+    }
+
+    private static Vec3d Lerp(Vec3d a, Vec3d b, double t) => a + (b - a) * t;
+
+    /// <summary>
+    /// How far land may reach out at ring i before it folds over itself on the inside of a bend: 0.7 times the bend's radius
+    /// there (unlimited on the outside and on straights).
+    /// </summary>
+    private static double InnerRoom(IReadOnlyList<Ring> rings, int i, int side)
+    {
+        var a = rings[Math.Max(0, i - 1)];
+        var b = rings[Math.Min(rings.Count - 1, i + 1)];
+        var ta = new Vec3d(a.Tangent.X, 0, a.Tangent.Z);
+        var tb = new Vec3d(b.Tangent.X, 0, b.Tangent.Z);
+        if (ta.Length < 1e-6 || tb.Length < 1e-6) return double.PositiveInfinity;
+        ta = ta.Normalized();
+        tb = tb.Normalized();
+        var turn = Math.Acos(Math.Clamp(ta.X * tb.X + ta.Z * tb.Z, -1, 1));
+        var length = b.Distance - a.Distance;
+        if (turn < 1e-4 || length <= 0) return double.PositiveInfinity;
+        var right = rings[i].Right;
+        var towards = (tb.X - ta.X) * right.X * side + (tb.Z - ta.Z) * right.Z * side;
+        return towards > 0 ? 0.7 * length / turn : double.PositiveInfinity;
+    }
+
+    /// <summary>
+    /// Per grid vertex its distance from the nearest road's edge (from the centre, less the road's half width there),
+    /// metres, up to <paramref name="reach"/> beyond the edges (further: infinity).
+    /// </summary>
+    private static double[] DistanceFromRoads(TerrainGrid grid, List<EdgeSample> samples, double reach)
+    {
+        var d = new double[grid.Columns * grid.Rows];
+        Array.Fill(d, double.PositiveInfinity);
+        foreach (var s in samples)
+        {
+            var half = Math.Max(Half(s.Centre, s.Left), Half(s.Centre, s.RightEdge));
+            var radius = half + reach;
+            var c0 = Math.Max(0, (int)Math.Floor((s.Centre.X - radius - grid.X0) / grid.Cell));
+            var c1 = Math.Min(grid.Columns - 1, (int)Math.Ceiling((s.Centre.X + radius - grid.X0) / grid.Cell));
+            var r0 = Math.Max(0, (int)Math.Floor((s.Centre.Z - radius - grid.Z0) / grid.Cell));
+            var r1 = Math.Min(grid.Rows - 1, (int)Math.Ceiling((s.Centre.Z + radius - grid.Z0) / grid.Cell));
+            for (var r = r0; r <= r1; r++)
+                for (var c = c0; c <= c1; c++)
+                {
+                    double dx = grid.X0 + c * grid.Cell - s.Centre.X, dz = grid.Z0 + r * grid.Cell - s.Centre.Z;
+                    var v = Math.Sqrt(dx * dx + dz * dz) - half;
+                    var k = r * grid.Columns + c;
+                    if (v < d[k]) d[k] = v;
+                }
+        }
+        return d;
+    }
+
+    private static double Half(Vec3d centre, Vec3d? edge) =>
+        edge is { } e ? Math.Sqrt((e.X - centre.X) * (e.X - centre.X) + (e.Z - centre.Z) * (e.Z - centre.Z)) : 0;
+
+    /// <summary>
+    /// Whether a point (x, z) lies on a road: across its nearest edge sample, between the two edges (a little inside them,
+    /// so the triangles along an edge stay).
+    /// </summary>
+    private static Func<double, double, bool> RoadTest(List<EdgeSample> samples)
+    {
+        const double cell = 8;
+        var hash = new Dictionary<(int, int), List<int>>();
+        for (var i = 0; i < samples.Count; i++)
+        {
+            var k = ((int)Math.Floor(samples[i].Centre.X / cell), (int)Math.Floor(samples[i].Centre.Z / cell));
+            if (!hash.TryGetValue(k, out var list)) hash[k] = list = [];
+            list.Add(i);
+        }
+        return (x, z) =>
+        {
+            int hx = (int)Math.Floor(x / cell), hz = (int)Math.Floor(z / cell);
+            var best = -1;
+            var bestD = double.PositiveInfinity;
+            for (var dx = -3; dx <= 3; dx++)
+                for (var dz = -3; dz <= 3; dz++)
+                {
+                    if (!hash.TryGetValue((hx + dx, hz + dz), out var list)) continue;
+                    foreach (var i in list)
+                    {
+                        var c = samples[i].Centre;
+                        var d = (c.X - x) * (c.X - x) + (c.Z - z) * (c.Z - z);
+                        if (d < bestD) { bestD = d; best = i; }
+                    }
+                }
+            if (best < 0) return false;
+            var s = samples[best];
+            var lateral = (x - s.Centre.X) * s.Right.X + (z - s.Centre.Z) * s.Right.Z;
+            var right = s.RightEdge is { } re ? (re.X - s.Centre.X) * s.Right.X + (re.Z - s.Centre.Z) * s.Right.Z : Half(s.Centre, s.Left);
+            var left = s.Left is { } le ? -((le.X - s.Centre.X) * s.Right.X + (le.Z - s.Centre.Z) * s.Right.Z) : Half(s.Centre, s.RightEdge);
+            return lateral < right - 0.05 && -lateral < left - 0.05;
+        };
+    }
+
+    /// <summary>The height map's height at (x, z), bilinear between its vertices; NaN where a vertex round it has none.</summary>
+    private static double Sample(TerrainGrid grid, double x, double z)
+    {
+        var fx = (x - grid.X0) / grid.Cell;
+        var fz = (z - grid.Z0) / grid.Cell;
+        var c = (int)Math.Floor(fx);
+        var r = (int)Math.Floor(fz);
+        double u = fx - c, v = fz - r;
+        double h00 = grid.Height(c, r), h10 = grid.Height(c + 1, r), h01 = grid.Height(c, r + 1), h11 = grid.Height(c + 1, r + 1);
+        return h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
     }
 
     /// <summary>
@@ -115,148 +335,6 @@ public static class TerrainMeshBuilder
         var steep = Math.Clamp((0.9f - normalY) / 0.3f, 0, 1);
         return new Vector2(0.5f, 0.55f - 0.4f * steep);
     }
-
-    /// <summary>
-    /// Moves the grid's vertices next to the roads onto their edges, at the edges' height (RoadMeshBuilder.EdgeContact:
-    /// the curb's top, or the surface's edge), so the land's mesh itself runs along every road's edge: per vertex the
-    /// nearest edge within half a cell across it. Not where the road is steeply banked or upside down.
-    /// </summary>
-    private static void SnapToRoadEdges(TerrainGrid grid, TrackMap map, double[] xs, double[] zs, double[] heights, bool[] snapped)
-    {
-        var cell = grid.Cell;
-        var best = new double[xs.Length];
-        Array.Fill(best, double.PositiveInfinity);
-        var target = new (double X, double Y, double Z)[xs.Length];
-        foreach (var track in map.Tracks)
-        {
-            track.SyncSegments();
-            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
-            if (rings.Count < 2) continue;
-            foreach (var side in new[] { -1, 1 })
-            {
-                var edge = new Vec3d?[rings.Count];
-                for (var i = 0; i < rings.Count; i++)
-                {
-                    if (rings[i].Up.Y < 0.5) continue;
-                    var segment = track.Segments[Math.Clamp(rings[i].Segment, 0, track.Segments.Count - 1)];
-                    edge[i] = RoadMeshBuilder.EdgeContact(rings[i], segment, side);
-                }
-                for (var i = 0; i + 1 < rings.Count; i++)
-                {
-                    if (edge[i] is not { } p || edge[i + 1] is not { } q) continue;
-                    double dx = q.X - p.X, dz = q.Z - p.Z;
-                    var length2 = dx * dx + dz * dz;
-                    if (length2 < 1e-9) continue;
-                    var c0 = (int)Math.Floor((Math.Min(p.X, q.X) - cell - grid.X0) / cell);
-                    var c1 = (int)Math.Ceiling((Math.Max(p.X, q.X) + cell - grid.X0) / cell);
-                    var r0 = (int)Math.Floor((Math.Min(p.Z, q.Z) - cell - grid.Z0) / cell);
-                    var r1 = (int)Math.Ceiling((Math.Max(p.Z, q.Z) + cell - grid.Z0) / cell);
-                    for (var r = Math.Max(0, r0); r <= Math.Min(grid.Rows - 1, r1); r++)
-                        for (var c = Math.Max(0, c0); c <= Math.Min(grid.Columns - 1, c1); c++)
-                        {
-                            var k = r * grid.Columns + c;
-                            if (double.IsNaN(heights[k]) && !snapped[k]) continue;
-                            double vx = grid.X0 + c * cell, vz = grid.Z0 + r * cell;
-                            var t = Math.Clamp(((vx - p.X) * dx + (vz - p.Z) * dz) / length2, 0, 1);
-                            double ex = p.X + dx * t, ez = p.Z + dz * t;
-                            var d = Math.Sqrt((vx - ex) * (vx - ex) + (vz - ez) * (vz - ez));
-                            if (d > cell * 0.5 || d >= best[k]) continue;
-                            // Only from outside the road (a vertex under it, raised to the edge, would poke through
-                            // the surface beside the curb).
-                            var right = rings[i].Right + rings[i + 1].Right;
-                            if (((vx - ex) * right.X + (vz - ez) * right.Z) * side < -0.25) continue;
-                            best[k] = d;
-                            target[k] = (ex, p.Y + (q.Y - p.Y) * t, ez);
-                        }
-                }
-            }
-        }
-        for (var k = 0; k < xs.Length; k++)
-        {
-            if (double.IsPositiveInfinity(best[k])) continue;
-            (xs[k], heights[k], zs[k]) = target[k];
-            snapped[k] = true;
-        }
-    }
-
-    /// <summary>
-    /// The land's triangles (grid vertex indices), simplified: the grid padded to a square of 2^k + 1 vertices is split
-    /// into right triangles, each halved while the height map strays more than <see cref="Tolerance"/> from it, or while
-    /// it holds both land and no land (down to the grid's own triangles, kept where all three corners are land).
-    /// </summary>
-    private static List<(int A, int B, int C)> Simplify(TerrainGrid grid, double[] heights, bool[] keep)
-    {
-        var size = 2;
-        while (size + 1 < Math.Max(grid.Columns, grid.Rows)) size *= 2;
-        var n = size + 1;
-        var h = new double[n * n];
-        Array.Fill(h, double.NaN);
-        for (var r = 0; r < grid.Rows; r++)
-            for (var c = 0; c < grid.Columns; c++)
-                h[r * n + c] = heights[r * grid.Columns + c];
-
-        // Errors at every triangle's hypotenuse midpoint, smallest triangles first, each also its children's (Martini).
-        var errors = new double[n * n];
-        var smallest = size * size * 2;
-        var count = smallest * 2 - 2;
-        var parents = count - smallest;
-        for (var t = count - 1; t >= 0; t--)
-        {
-            var id = t + 2;
-            int ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
-            if ((id & 1) != 0) { bx = by = cx = size; }
-            else { ax = ay = cy = size; }
-            while ((id >>= 1) > 1)
-            {
-                var hx = (ax + bx) >> 1;
-                var hy = (ay + by) >> 1;
-                if ((id & 1) != 0) { bx = ax; by = ay; ax = cx; ay = cy; }
-                else { ax = bx; ay = by; bx = cx; by = cy; }
-                cx = hx;
-                cy = hy;
-            }
-            var mx = (ax + bx) >> 1;
-            var my = (ay + by) >> 1;
-            var m = my * n + mx;
-            double ha = h[ay * n + ax], hb = h[by * n + bx], hm = h[m], hc = h[cy * n + cx];
-            var nan = (double.IsNaN(ha) ? 1 : 0) + (double.IsNaN(hb) ? 1 : 0) + (double.IsNaN(hm) ? 1 : 0) + (double.IsNaN(hc) ? 1 : 0);
-            // Land and no land in one triangle: always split (an all-empty one never matters).
-            var error = nan == 0 ? Math.Abs((ha + hb) / 2 - hm) : nan == 4 ? 0 : double.PositiveInfinity;
-            // Full detail round the vertices on the roads' edges (the edge lines must stay as they are).
-            if (Kept(keep, grid, ax, ay) || Kept(keep, grid, bx, by) || Kept(keep, grid, mx, my) || Kept(keep, grid, cx, cy)) error = double.PositiveInfinity;
-            errors[m] = Math.Max(errors[m], error);
-            if (t < parents)
-            {
-                var left = ((ay + cy) >> 1) * n + ((ax + cx) >> 1);
-                var right = ((by + cy) >> 1) * n + ((bx + cx) >> 1);
-                errors[m] = Math.Max(errors[m], Math.Max(errors[left], errors[right]));
-            }
-        }
-
-        var triangles = new List<(int, int, int)>();
-        var stack = new Stack<(int Ax, int Ay, int Bx, int By, int Cx, int Cy)>();
-        stack.Push((0, 0, size, size, size, 0));
-        stack.Push((size, size, 0, 0, 0, size));
-        while (stack.Count > 0)
-        {
-            var (ax, ay, bx, by, cx, cy) = stack.Pop();
-            var mx = (ax + bx) >> 1;
-            var my = (ay + by) >> 1;
-            if (Math.Abs(ax - cx) + Math.Abs(ay - cy) > 1 && errors[my * n + mx] > Tolerance)
-            {
-                stack.Push((cx, cy, ax, ay, mx, my));
-                stack.Push((bx, by, cx, cy, mx, my));
-                continue;
-            }
-            int a = ay * n + ax, b = by * n + bx, c = cy * n + cx;
-            if (double.IsNaN(h[a]) || double.IsNaN(h[b]) || double.IsNaN(h[c])) continue;
-            triangles.Add((ay * grid.Columns + ax, by * grid.Columns + bx, cy * grid.Columns + cx));
-        }
-        return triangles;
-    }
-
-    private static bool Kept(bool[] keep, TerrainGrid grid, int c, int r) =>
-        c < grid.Columns && r < grid.Rows && keep[r * grid.Columns + c];
 
     /// <summary>
     /// The map's terrain (its chunks) as the export builds it, in world space, packed for the editor:
@@ -293,16 +371,5 @@ public static class TerrainMeshBuilder
         foreach (var i in indices) w.Write(i);
         w.Flush();
         return stream.ToArray();
-    }
-
-    /// <summary>The surface normal at a grid vertex from its neighbours' heights (one-sided at the land's edge).</summary>
-    private static Vector3 Normal(TerrainGrid grid, double[] heights, int c, int r)
-    {
-        double H(int cc, int rr) => cc < 0 || rr < 0 || cc >= grid.Columns || rr >= grid.Rows ? double.NaN : heights[rr * grid.Columns + cc];
-        var h = H(c, r);
-        double At(int dc, int dr) { var v = H(c + dc, r + dr); return double.IsNaN(v) ? h : v; }
-        var dx = (At(1, 0) - At(-1, 0)) / (2 * grid.Cell);
-        var dz = (At(0, 1) - At(0, -1)) / (2 * grid.Cell);
-        return Vector3.Normalize(new Vector3((float)-dx, 1, (float)-dz));
     }
 }
