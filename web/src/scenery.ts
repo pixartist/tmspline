@@ -150,7 +150,7 @@ export interface SceneryLandOptions extends SceneryOptions {
    */
   mode: "fill" | "nestle" | "terrain";
   /** Terrain: look of the 2-level slopes. */
-  look?: "smooth" | "hill";
+  look?: "smooth" | "hill" | "alone";
   /** Terrain: what cells away from the roads do when they fit no piece (see TerrainOptions.far). */
   far?: "steps" | "lower" | "fit";
   /** Nestle: cells of land beyond the shoulder. */

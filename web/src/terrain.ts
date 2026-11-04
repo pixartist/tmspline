@@ -28,7 +28,7 @@ import {
 
 export interface TerrainOptions {
   /** Look of the 2-level slopes: "smooth" (DecoPlatform) or "hill" (DecoHill, terraced) where its pieces fit. */
-  look: "smooth" | "hill";
+  look: "smooth" | "hill" | "alone";
   /** Metres between a road's lowest point and the land below it. */
   clearance: number;
   /**
@@ -260,8 +260,16 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
   const hill = new Set<string>();
   const hillFor = (k: string): Placed | undefined => {
     const open = EDGE_NAMES.filter((e) => sloped2(k, e) && !joined(k, e)).sort().join();
-    return shapes.get(pattern(k))?.find((p) => p.shape.family === "hill" && p.open.join() === open);
+    const hills = shapes.get(pattern(k))?.filter((p) => p.shape.family === "hill") ?? [];
+    // Alone (no sloped edge meets a neighbour) no profile has to match: the plain hill piece where no Deadend has
+    // exactly these open edges (both sides of a straight, say).
+    return hills.find((p) => p.open.join() === open) ?? (terrain.look === "alone" ? hills.find((p) => p.open.length === 0) : undefined);
   };
+  // "alone": hill pieces only for 2-level slopes none of whose sloped edges meets a neighbour (they stand alone, between
+  // steps); every run that connects stays smooth.
+  if (terrain.look === "alone")
+    for (const k of corners.keys())
+      if (EDGE_NAMES.some((e) => sloped2(k, e)) && !EDGE_NAMES.some((e) => sloped2(k, e) && joined(k, e)) && hillFor(k)) hill.add(k);
   if (terrain.look === "hill") {
     for (const k of corners.keys()) if (shapes.get(pattern(k))?.some((p) => p.shape.family === "hill")) hill.add(k);
     for (let round = 0; round < 100; round++) {
