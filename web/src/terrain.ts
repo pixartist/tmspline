@@ -35,7 +35,7 @@ export interface TerrainOptions {
    * Cells away from the roads that fit no piece: "steps" keep their own corners (a step to their neighbours, closed by
    * columns), "lower" bring the highest corner down (no steps; beside climbing roads the hills flatten).
    */
-  far?: "steps" | "lower";
+  far?: "steps" | "lower" | "fit";
 }
 
 export interface TerrainDebug {
@@ -191,7 +191,7 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
   const final = new Map(target);
   // (Lifting the lowest corner instead was tried: it kept no more of the hills.)
   const far = terrain.far ?? "lower";
-  for (let round = 0; round < 200; round++) {
+  for (let round = 0; far !== "fit" && round < 200; round++) {
     let changed = false;
     for (const [x, z] of cells) {
       if (far === "steps" && !near(x, z)) continue;
@@ -208,7 +208,30 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
   // Each cell's corners: the shared ones, or its own (a step) where those fit no piece.
   const corners = new Map<string, number[]>();
   const stepped = new Map<string, number[]>();
+  // "fit": every cell on its own takes the shape closest to its four wishes (least squares; corners a road or block
+  // holds down never above it). Neighbours that end up apart get a step, so the steps are many and small, where the
+  // wishes cannot be met, instead of few and big.
+  const patterns = [...shapes.keys()].map((k) => k.split(",").map(Number));
+  const bestFit = (ks: string[]): number[] => {
+    const want = ks.map((k) => target.get(k)!);
+    let best = want.map(() => Math.min(...want)), bestCost = Infinity;
+    for (const p of patterns)
+      for (let m = Math.min(...want) - 2; m <= Math.max(...want); m++) {
+        const hs = p.map((v) => m + v);
+        if (hs.some((v, i) => v < 0 || v > TOP_LEVEL || (caps.has(ks[i]) && v > caps.get(ks[i])!))) continue;
+        // Below the wish costs a little more than above, so the land rather stays up than sinks.
+        const cost = hs.reduce((s, v, i) => s + (v - want[i]) ** 2 * (v < want[i] ? 1.1 : 1), 0);
+        if (cost < bestCost) { bestCost = cost; best = hs; }
+      }
+    return best;
+  };
   for (const [x, z] of cells) {
+    if (far === "fit") {
+      const hs = bestFit(cornerKeys(x, z));
+      corners.set(key(x, z), hs);
+      if (hs.some((v, i) => v !== target.get(cornerKeys(x, z)[i]))) stepped.set(key(x, z), hs);
+      continue;
+    }
     const hs = cornerKeys(x, z).map((k) => final.get(k)!);
     while (!fits(hs)) {
       let top = 0;

@@ -152,7 +152,7 @@ export interface SceneryLandOptions extends SceneryOptions {
   /** Terrain: look of the 2-level slopes. */
   look?: "smooth" | "hill";
   /** Terrain: what cells away from the roads do when they fit no piece (see TerrainOptions.far). */
-  far?: "steps" | "lower";
+  far?: "steps" | "lower" | "fit";
   /** Nestle: cells of land beyond the shoulder. */
   band: number;
   /**

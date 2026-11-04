@@ -6,7 +6,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "smooth" as "smooth" | "hill", far: "lower" as "lower" | "steps", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, steps: true, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "smooth" as "smooth" | "hill", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, steps: true, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -536,8 +536,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (terrain) {
       selectField(root, "2-level slopes", ["smooth", "hill"], () => scenery.look, (v) => (scenery.look = v as typeof scenery.look), false,
         { smooth: "Smooth (platform slopes)", hill: "Hill (terraced, where it fits)" });
-      selectField(root, "Away from the roads", ["lower", "steps"], () => scenery.far, (v) => (scenery.far = v as typeof scenery.far), false,
-        { lower: "Lower to fit (no steps)", steps: "Steps where nothing fits" });
+      selectField(root, "Fitting the pieces", ["fit", "lower", "steps"], () => scenery.far, (v) => (scenery.far = v as typeof scenery.far), false,
+        { fit: "Best fit per cell (small steps)", lower: "Lower to fit (no steps)", steps: "Steps away from the roads" });
       checkbox(root, "Show height map", () => scenery.showHeightMap, (v) => { scenery.showHeightMap = v; editor.showHeightMap(v); });
     }
     if (!nestle) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
