@@ -28,7 +28,7 @@ export interface OwnTerrainOptions {
   rockAngle: number;
 }
 
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 40 };
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50 };
 
 /** Grid spacing, metres (also the size of the road squares for the caps and distances). */
 const CELL = 4;
