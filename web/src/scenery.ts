@@ -203,8 +203,8 @@ export const FORESTS: { id: string; label: string; trees: string[] }[] = [
   { id: "firsnow", label: "Snowy firs", trees: ["FirSnowMedium", "FirSnowTall"] },
   { id: "palm", label: "Palms", trees: ["PalmTreeSmall", "PalmTreeMedium"] },
   { id: "frozen", label: "Frozen trees", trees: ["FrozenTreeVerySmall", "FrozenTreeSmall", "FrozenTreeMedium", "FrozenTreeBig", "FrozenTreeTall"] },
-  // Names from the game's files (Static\Vegetation\Cactus..E); not yet checked in game.
-  { id: "cacti", label: "Cacti", trees: ["Cactus", "CactusB", "CactusC", "CactusD", "CactusE"] },
+  // Confirmed from a map saved by the game: these are the only two cactus items.
+  { id: "cacti", label: "Cacti", trees: ["CactusVerySmall", "CactusMedium"] },
   { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
 ];
 
