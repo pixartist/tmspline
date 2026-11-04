@@ -297,12 +297,17 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
     const [x, z] = parse(k);
     const hs = corners.get(k)!;
     const low = Math.min(...hs);
-    let columnsFrom = low;
+    // A side stands out over a neighbour where either of its corners is above the neighbour's there (a sloped side may
+    // be above it at one end only): the piece then shows its sides down to its floor (the adapter), and columns go
+    // from the neighbour's lower corner on that side up to the floor.
+    let columnsFrom = low, exposed = false;
     for (const e of EDGE_NAMES) {
       const n = across(k, e);
       if (!corners.has(n) || joined(k, e)) continue;
-      const theirs = edgeHeights(n, EDGES[e].facing);
-      if (Math.min(...theirs) < Math.min(...edgeHeights(k, e))) columnsFrom = Math.min(columnsFrom, Math.min(...corners.get(n)!));
+      const mine = edgeHeights(k, e), theirs = edgeHeights(n, EDGES[e].facing);
+      if (mine[0] <= theirs[0] && mine[1] <= theirs[1]) continue;
+      exposed = true;
+      columnsFrom = Math.min(columnsFrom, Math.min(...theirs));
     }
     const hasColumns = columnsFrom < low && lib.has(COLUMN);
     const isFlat = hs.every((v) => v === low);
@@ -310,8 +315,8 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
     if (isFlat && low === 0 && inMap(x, z)) { flat.set(k, 0); continue; }
     const b: VanillaBlock = { name: placed.shape.name, x, y: low, z, dir: placed.dir, scenery: id };
     if (placed.shape.subVariant) b.subVariant = placed.shape.subVariant;
-    // A 1-level slope on columns shows its "column below" sides with the adapter bit (see nestle).
-    if (hasColumns && lib.hasColumnAdapter(b.name)) b.extraFlags = GROUND_ADAPTER_FLAG;
+    // The platform slopes show their "column below" sides with the adapter bit (see nestle); the hill's reach down anyway.
+    if (exposed && lib.hasColumnAdapter(b.name)) b.extraFlags = GROUND_ADAPTER_FLAG;
     blocks.push(freeBlock(lib, b));
     if (isFlat) flat.set(k, low);
     else slopes.set(k, blocks[blocks.length - 1]);
