@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
-import { clearOfRoads, plantForest, roadColumns, sampleRoads, type SceneryLandOptions, type SceneryTheme } from "./scenery";
+import { clearOfRoads, FOOTPRINT_CELL, plantForest, roadColumns, roadFootprint, sampleRoads, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
@@ -32,8 +32,12 @@ export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 
 const CELL = 4;
 /** Over this many metres from a road the land blends from the road's shape into the smoothed, noisy land. */
 const BLEND = 32;
-/** Metres between the roads' lowest point and the land under them. */
-const CLEARANCE = 0.5;
+/**
+ * Metres between the roads' lowest point and the land under them: deep enough that a triangle from a vertex on a road's
+ * edge (the curb's top, see TerrainMeshBuilder's snapping) to one under the road stays inside the curb and below the
+ * surface.
+ */
+const CLEARANCE = 2.5;
 /** Skirt under the land's outer edge, metres. */
 const SKIRT = 16;
 
@@ -151,8 +155,13 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
 
-  // Blend and noise, and the caps: under the roads (a road square within a cell of the vertex) no higher than their
-  // lowest point.
+  // The roads' footprint (2 m squares they cover at any height): a vertex is under a road where a square round it is.
+  const footprint = roadFootprint(meshes);
+  const under = (x: number, z: number) => {
+    const fx = Math.round(x / FOOTPRINT_CELL), fz = Math.round(z / FOOTPRINT_CELL);
+    return footprint.has(key(fx, fz)) || footprint.has(key(fx - 1, fz)) || footprint.has(key(fx, fz - 1)) || footprint.has(key(fx - 1, fz - 1));
+  };
+  // Blend and noise, and under the roads the caps.
   const heights: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     if (!valid[i] || distance[i] > width) continue;
@@ -161,13 +170,17 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
     const w = smooth(distance[i] / BLEND);
     let h = extended[i] * (1 - w) + smoothed[i] * w;
     h += own.noise * w * fractal(x, z, own.noiseSize);
-    let cap = Infinity;
-    for (let dx = -1; dx <= 0; dx++)
-      for (let dz = -1; dz <= 0; dz++) {
-        const y = lows.get(key(c + sx0 + dx, r + sz0 + dz));
-        if (y !== undefined) cap = Math.min(cap, y - CLEARANCE);
-      }
-    h = Math.min(h, cap);
+    // Under a road (the roads' footprint at the vertex) no higher than the lowest point of the road there; the land beside
+    // the roads is free (the export moves the vertices next to them onto their edges).
+    if (under(x, z)) {
+      let cap = Infinity;
+      for (let dx = -1; dx <= 0; dx++)
+        for (let dz = -1; dz <= 0; dz++) {
+          const y = lows.get(key(c + sx0 + dx, r + sz0 + dz));
+          if (y !== undefined) cap = Math.min(cap, y - CLEARANCE);
+        }
+      h = Math.min(h, cap);
+    }
     // On the stadium's grid the ground is there: land at its height would flicker with it.
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT && h < 0.5) continue;
     heights[i] = Math.max(0.05, h);

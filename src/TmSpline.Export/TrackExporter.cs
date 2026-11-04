@@ -25,14 +25,12 @@ public static class TrackExporter
         var (length, meshes) = MeshQualities.BuildExport(request.Map, request.Quality, request.MaxChunkLength);
         if (meshes.Count == 0)
             throw new ArgumentException("The map has no road (every track needs at least two points)");
-        // Own terrain: the grid's chunks and the strips that meet the roads' edges, as items like the road.
+        // Own terrain: its chunks (the roads' edges built in), as items like the road.
         if (request.Map.Terrain is { } terrain)
         {
-            var land = TerrainMeshBuilder.Build(terrain);
-            var fillets = TerrainMeshBuilder.BuildFillets(request.Map, terrain);
+            var land = TerrainMeshBuilder.Build(terrain, request.Map);
             meshes.AddRange(land);
-            meshes.AddRange(fillets);
-            log?.Invoke($"Terrain: {land.Count} chunk(s), {fillets.Count} edge strip(s), {land.Concat(fillets).Sum(m => m.Triangles.Count)} triangles");
+            log?.Invoke($"Terrain: {land.Count} chunk(s), {land.Sum(m => m.Triangles.Count)} triangles");
         }
         log?.Invoke($"Built {meshes.Count} item(s) at {request.Quality} quality, {meshes.Sum(m => m.Triangles.Count)} triangles, {meshes.Sum(m => m.Positions.Count)} vertices, {MeshQualities.SurfaceArea(meshes):0} m2, {request.Map.Tracks.Count} track(s), {length:0} m, "
             + $"gates: {string.Join(", ", meshes.Where(m => m.Waypoint != Waypoint.None).Select(g => g.Waypoint))}");
