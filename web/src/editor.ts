@@ -783,7 +783,7 @@ export class Editor {
     const occupied = occupiedCells(own, lib);
     const input = { roads, footprint, occupied, surface, roadsFine: roadColumns(meshes, BLOCK_CELL / 2) };
     const terrain = options.mode === "terrain"
-      ? generateTerrain(lib, input, options, { look: options.look ?? "smooth", clearance: 0.5 }) : null;
+      ? generateTerrain(lib, input, options, { look: options.look ?? "smooth", clearance: 0.5, far: options.far ?? "lower" }) : null;
     const generated = options.mode === "terrain" ? terrain : generateScenery(lib, input, options);
     if (!generated) return null;
     this.lastHeightMap = terrain?.debug ?? null;

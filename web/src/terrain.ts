@@ -31,6 +31,11 @@ export interface TerrainOptions {
   look: "smooth" | "hill";
   /** Metres between a road's lowest point and the land below it. */
   clearance: number;
+  /**
+   * Cells away from the roads that fit no piece: "steps" keep their own corners (a step to their neighbours, closed by
+   * columns), "lower" bring the highest corner down (no steps; beside climbing roads the hills flatten).
+   */
+  far?: "steps" | "lower";
 }
 
 export interface TerrainDebug {
@@ -184,10 +189,12 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
   const follow = Math.max(0, options.gap) + 1;
   const near = (x: number, z: number) => cornerKeys(x, z).some((k) => (dist.get(k) ?? Infinity) <= follow);
   const final = new Map(target);
+  // (Lifting the lowest corner instead was tried: it kept no more of the hills.)
+  const far = terrain.far ?? "lower";
   for (let round = 0; round < 200; round++) {
     let changed = false;
     for (const [x, z] of cells) {
-      if (!near(x, z)) continue;
+      if (far === "steps" && !near(x, z)) continue;
       const ks = cornerKeys(x, z);
       const hs = ks.map((k) => final.get(k)!);
       if (fits(hs)) continue;
