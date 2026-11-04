@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
-import { clearOfRoads, plantForest, roadColumns, sampleRoads, spread, type SceneryLandOptions, type SceneryTheme } from "./scenery";
+import { clearOfRoads, plantForest, roadColumns, sampleRoads, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
@@ -64,8 +64,46 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
   });
   const shoulder = Math.max(0, options.gap) * BLOCK_CELL;
   const reach = shoulder + Math.max(1, options.band) * BLOCK_CELL;
-  // Distance to the nearest road square and its top, over the squares (the nearest in a straight line wins).
-  const { base, from } = spread(tops, () => true, Math.ceil(reach / SQUARE) + 2);
+  // The nearest road square in a straight line, and its top (a step-counting spread picked squares far up or down a steep
+  // road, so the land beside it sank or rose): a two-pass Euclidean distance transform over the squares round the roads,
+  // each square passing on its neighbours' nearest road square where that is nearer.
+  let sx0 = Infinity, sz0 = Infinity, sx1 = -Infinity, sz1 = -Infinity;
+  for (const k of tops.keys()) {
+    const [x, z] = k.split(",").map(Number);
+    sx0 = Math.min(sx0, x); sz0 = Math.min(sz0, z); sx1 = Math.max(sx1, x); sz1 = Math.max(sz1, z);
+  }
+  const pad = Math.ceil(reach / SQUARE) + 2;
+  sx0 -= pad; sz0 -= pad; sx1 += pad; sz1 += pad;
+  const w = sx1 - sx0 + 1, hgt = sz1 - sz0 + 1;
+  const srcX = new Int32Array(w * hgt).fill(-1), srcZ = new Int32Array(w * hgt).fill(-1);
+  for (const k of tops.keys()) {
+    const [x, z] = k.split(",").map(Number);
+    srcX[(z - sz0) * w + (x - sx0)] = x - sx0;
+    srcZ[(z - sz0) * w + (x - sx0)] = z - sz0;
+  }
+  const dist2 = (i: number, x: number, z: number) => srcX[i] < 0 ? Infinity : (srcX[i] - x) ** 2 + (srcZ[i] - z) ** 2;
+  const relax = (x: number, z: number, dx: number, dz: number) => {
+    const nx = x + dx, nz = z + dz;
+    if (nx < 0 || nz < 0 || nx >= w || nz >= hgt) return;
+    const i = z * w + x, j = nz * w + nx;
+    if (dist2(j, x, z) < dist2(i, x, z)) { srcX[i] = srcX[j]; srcZ[i] = srcZ[j]; }
+  };
+  for (let z = 0; z < hgt; z++) {
+    for (let x = 0; x < w; x++) { relax(x, z, -1, 0); relax(x, z, 0, -1); relax(x, z, -1, -1); relax(x, z, 1, -1); }
+    for (let x = w - 1; x >= 0; x--) relax(x, z, 1, 0);
+  }
+  for (let z = hgt - 1; z >= 0; z--) {
+    for (let x = w - 1; x >= 0; x--) { relax(x, z, 1, 0); relax(x, z, 0, 1); relax(x, z, 1, 1); relax(x, z, -1, 1); }
+    for (let x = 0; x < w; x++) relax(x, z, -1, 0);
+  }
+  const nearest = (x: number, z: number): { d: number; top: number } | null => {
+    const gx = Math.floor(x / SQUARE) - sx0, gz = Math.floor(z / SQUARE) - sz0;
+    if (gx < 0 || gz < 0 || gx >= w || gz >= hgt) return null;
+    const i = gz * w + gx;
+    if (srcX[i] < 0) return null;
+    const rx = srcX[i] + sx0, rz = srcZ[i] + sz0;
+    return { d: Math.hypot((rx + 0.5) * SQUARE - x, (rz + 0.5) * SQUARE - z), top: tops.get(key(rx, rz))! };
+  };
 
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const k of roads.keys()) {
@@ -89,11 +127,9 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
     for (let c = 0; c < columns; c++) {
       const x = x0 + c * cell, z = z0 + r * cell;
       const sx = Math.floor(x / SQUARE), sz = Math.floor(z / SQUARE);
-      const k = key(sx, sz);
-      const src = from.get(k);
-      if (!src) continue;
-      const d = Math.hypot((src[0] + 0.5) * SQUARE - x, (src[1] + 0.5) * SQUARE - z);
-      if (d > reach) continue;
+      const near = nearest(x, z);
+      if (!near || near.d > reach) continue;
+      const d = near.d;
       // Under the roads the land stays below their lowest point: every vertex of a triangle that reaches under a road
       // (the road within a cell of the vertex). Beyond that it may rise above the road: the strips from the roads' edges
       // reach over this zone onto the land.
@@ -104,22 +140,23 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
           if (y !== undefined) cap = Math.min(cap, y);
         }
       const out = Math.max(0, d - shoulder);
-      let h = base.get(k)!;
+      let h = near.top;
       h += hillHeight * smooth(out / hillLength);
       if (options.farRise > 0) h += options.farRise * BLOCK_LEVEL * out / BLOCK_CELL;
       h += own.noise * smooth(out / BLOCK_CELL) * noise2(x, z, 64);
       if (cap < Infinity) caps[r * columns + c] = cap - own.clearance;
       heights[r * columns + c] = h;
     }
-  // A little smoothing (the hills' foot, the noise), never above the caps.
+  // A little smoothing (the hills' foot, the noise) of the free land only: the vertices held below the roads neither
+  // move nor pull their neighbours down (that dug a ditch beside the strips).
   for (let pass = 0; pass < 2; pass++) {
     const next = heights.slice();
     for (let r = 1; r < rows - 1; r++)
       for (let c = 1; c < columns - 1; c++) {
         const i = r * columns + c;
-        const n = [heights[i - 1], heights[i + 1], heights[i - columns], heights[i + columns]];
-        if (heights[i] === null || n.some((v) => v === null)) continue;
-        next[i] = (heights[i]! * 2 + n.reduce((s, v) => s! + v!, 0)!) / 6;
+        if (heights[i] === null || caps[i] !== null) continue;
+        const n = [i - 1, i + 1, i - columns, i + columns].filter((j) => heights[j] !== null && caps[j] === null).map((j) => heights[j]!);
+        next[i] = (heights[i]! * 2 + n.reduce((s, v) => s + v, 0)) / (2 + n.length);
       }
     for (let i = 0; i < next.length; i++) heights[i] = next[i];
   }

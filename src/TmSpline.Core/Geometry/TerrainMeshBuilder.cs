@@ -153,7 +153,7 @@ public static class TerrainMeshBuilder
     /// How far a road edge's strip reaches out, in grid cells: past the vertices held below the road (those within a cell
     /// of it) and the triangles round them, onto land at its own height (less on the inside of tight bends).
     /// </summary>
-    private const double FilletCells = 2.25;
+    private const double FilletCells = 3;
     /// <summary>
     /// The strip's cross-section: from the road's edge it climbs steeply, then levels into the land (shares of its width and
     /// of the height to the land), as land rising from a curb's top.
