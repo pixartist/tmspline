@@ -490,8 +490,10 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
     }
     // Slopes rise to higher neighbours, 1 or 2 levels (track cells stay flat under the road).
     const up = ORTHO.filter(([dx, dz]) => (h(x + dx, z + dz) ?? -1) > v);
-    const rise = up.length ? h(x + up[0][0], z + up[0][1])! - v : 0;
-    const set = !track.has(k) && up.every(([dx, dz]) => h(x + dx, z + dz)! - v === rise) ? slopes[rise] : undefined;
+    // At the foot of a higher neighbour a slope always goes in: 2 levels high where every higher side rises at least 2
+    // (a step: the higher cells' columns cover what is above it), the 1-level slope where one rises just 1.
+    const rise = up.length ? Math.min(2, ...up.map(([dx, dz]) => h(x + dx, z + dz)! - v)) : 0;
+    const set = !track.has(k) && rise > 0 ? slopes[rise] : undefined;
     if (set && up.length === 1) {
       blocks.push(at(set.straight, x, z, v, dirFor((d) => same(turn(d, [0, 1]), up[0]))));
     } else if (set && up.length === 2 && !same(up[0], [-up[1][0], -up[1][1]])) {
@@ -500,9 +502,9 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
     } else {
       const corner = !track.has(k) && up.length === 0
         ? ([[1, 1], [-1, -1], [1, -1], [-1, 1]] as Cell[]).map(([dx, dz]) => ({ c: [dx, dz] as Cell, d: (h(x + dx, z + dz) ?? -1) - v }))
-          .find((o) => o.d === 1 || o.d === 2) : undefined;
+          .find((o) => o.d >= 1) : undefined;
       // The outer corner is modelled high at its (-X, +Z) corner.
-      if (corner) blocks.push(at(slopes[corner.d].outer, x, z, v, dirFor((d) => same(turn(d, [-1, 1]), corner.c))));
+      if (corner) blocks.push(at(slopes[Math.min(2, corner.d)].outer, x, z, v, dirFor((d) => same(turn(d, [-1, 1]), corner.c))));
       else {
         // On the grid the ground is there at level 0; outside it (nestle) the land needs its own floor.
         if (v > 0 || !inMap(x, z)) blocks.push(at(flat, x, z, v, 0));
