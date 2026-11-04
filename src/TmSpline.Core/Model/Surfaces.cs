@@ -33,6 +33,18 @@ public static class Surfaces
         _ => new("TerrainGrass", "DecoHill"),
     };
 
+    /// <summary>
+    /// Own terrain's steep faces and skirts: the cliff walls' rock (grass, dirt or ice version). Not in the importer's
+    /// material library: imported as the hill material (same UV layers) and then made the game's own material
+    /// (<see cref="TmMaterial.GamePath"/>), which also gives it the cliffs' surface.
+    /// </summary>
+    public static TmMaterial TerrainRock(TerrainSurface surface) => surface switch
+    {
+        TerrainSurface.Dirt => new("TerrainRockDirt", "PlatformDirt_DecoHill", GamePath: @"Stadium\Media\Modifier\PlatformDirt\DecoCliff"),
+        TerrainSurface.Ice => new("TerrainRockIce", "PlatformIce_DecoHill", GamePath: @"Stadium\Media\Modifier\PlatformIce\DecoCliff"),
+        _ => new("TerrainRock", "DecoHill", GamePath: @"Stadium\Media\Material\DecoCliff"),
+    };
+
     /// <summary>Pillars under the road: light grey concrete.</summary>
     public static readonly TmMaterial Pillar = new("Pillar", "CustomConcrete", Color: "8C9096");
 

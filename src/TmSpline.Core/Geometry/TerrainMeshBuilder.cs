@@ -162,6 +162,10 @@ public static class TerrainMeshBuilder
             }
 
         var material = Surfaces.Terrain(grid.Surface);
+        // Rock: faces steeper than the rock angle, and the skirts (cliff faces under the land's edge).
+        var rocky = grid.RockAngle < 90;
+        var rock = Surfaces.TerrainRock(grid.Surface);
+        var rockBelow = (float)Math.Cos(grid.RockAngle * Math.PI / 180);
         var byChunk = new Dictionary<(int, int), MeshChunk>();
         var vertexOf = new Dictionary<(MeshChunk, int), int>();
         MeshChunk ChunkAt(double x, double z)
@@ -190,7 +194,10 @@ public static class TerrainMeshBuilder
         foreach (var (a, b, c) in triangles)
         {
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
-            MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, a), Vertex(chunk, b), Vertex(chunk, c), 0), Vector3.UnitY);
+            var face = Vector3.Normalize(Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
+                new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a]))));
+            var m = rocky && Math.Abs(face.Y) < rockBelow ? chunk.MaterialIndex(rock) : 0;
+            MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, a), Vertex(chunk, b), Vertex(chunk, c), m), Vector3.UnitY);
             if (grid.Skirt <= 0) continue;
             foreach (var (u, v, w) in new[] { (a, b, c), (b, c, a), (c, a, b) })
             {
@@ -212,8 +219,9 @@ public static class TerrainMeshBuilder
                     chunk.Uv0.Add(MaskUv(0));
                     chunk.Uv1.Add(new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256));
                 }
-                MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, 0), outward);
-                MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, 0), outward);
+                var sm = rocky ? chunk.MaterialIndex(rock) : 0;
+                MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, sm), outward);
+                MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, sm), outward);
             }
         }
         return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
@@ -397,8 +405,8 @@ public static class TerrainMeshBuilder
     /// <summary>
     /// The map's terrain (its chunks) as the export builds it, in world space, packed for the editor:
     /// <code>
-    /// int32 vertexCount, int32 triangleCount, float32[vertexCount*3] positions, float32[vertexCount*3] normals,
-    /// float32[vertexCount*2] uv0, int32[triangleCount*3] indices
+    /// int32 vertexCount, int32 triangleCount, int32 rockTriangles, float32[vertexCount*3] positions,
+    /// float32[vertexCount*3] normals, float32[vertexCount*2] uv0, int32[triangleCount*3] indices (the rock's last)
     /// </code>
     /// Empty (both counts 0) without terrain.
     /// </summary>
@@ -410,6 +418,7 @@ public static class TerrainMeshBuilder
         var normals = new List<Vector3>();
         var uvs = new List<Vector2>();
         var indices = new List<int>();
+        var rockIndices = new List<int>();
         foreach (var c in chunks)
         {
             var o = new Vector3((float)c.ItemOffset.X, (float)c.ItemOffset.Y, (float)c.ItemOffset.Z);
@@ -417,12 +426,16 @@ public static class TerrainMeshBuilder
             positions.AddRange(c.Positions.Select(p => p + o));
             normals.AddRange(c.Normals);
             uvs.AddRange(c.Uv0);
-            foreach (var t in c.Triangles) indices.AddRange([first + t.A, first + t.B, first + t.C]);
+            foreach (var t in c.Triangles)
+                (c.Materials[t.Material].GamePath is null ? indices : rockIndices).AddRange([first + t.A, first + t.B, first + t.C]);
         }
+        var rockTriangles = rockIndices.Count / 3;
+        indices.AddRange(rockIndices);
         using var stream = new MemoryStream();
         using var w = new BinaryWriter(stream);
         w.Write(positions.Count);
         w.Write(indices.Count / 3);
+        w.Write(rockTriangles);
         foreach (var p in positions) { w.Write(p.X); w.Write(p.Y); w.Write(p.Z); }
         foreach (var n in normals) { w.Write(n.X); w.Write(n.Y); w.Write(n.Z); }
         foreach (var u in uvs) { w.Write(u.X); w.Write(u.Y); }

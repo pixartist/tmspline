@@ -255,6 +255,8 @@ public sealed partial class ExportService
             if (!double.IsFinite(terrain.X0) || !double.IsFinite(terrain.Z0) || Math.Abs(terrain.X0) > MaxOffset + 512 || Math.Abs(terrain.Z0) > MaxOffset + 512
                 || Math.Abs(terrain.X0 + terrain.Cell * (terrain.Columns - 1)) > MaxOffset + 512 || Math.Abs(terrain.Z0 + terrain.Cell * (terrain.Rows - 1)) > MaxOffset + 512)
                 throw new ExportRejectedException($"The terrain must stay within {MaxOffset} m of the map's centre");
+            if (terrain.RockAngle is { } rockAngle && (!double.IsFinite(rockAngle) || rockAngle < 0 || rockAngle > 90))
+                throw new ExportRejectedException("The terrain's rock angle must be 0 to 90°");
             if (terrain.Heights.Any(h => h is { } v && (!double.IsFinite(v) || v < -16 || v > MaxHeight)))
                 throw new ExportRejectedException($"Terrain heights must be between -16 and {MaxHeight:0} m");
         }

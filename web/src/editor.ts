@@ -756,16 +756,44 @@ export class Editor {
     if (!grid) { this.setTerrainMesh(null); return; }
     void buildTerrain(this.map).then((mesh) => {
       if (build !== this.terrainBuild) return;
+      // The game projects both materials' textures by position: from above for the land, from the side for the rock
+      // (each rock triangle on its own vertices, projected along its steeper side).
+      const triangles = mesh.indices.length / 3, land = triangles - mesh.rockTriangles;
+      const positions: number[] = [], normals: number[] = [], uvs: number[] = [];
+      for (let t = 0; t < triangles; t++) {
+        const rock = t >= land;
+        const [a, b, c] = [0, 1, 2].map((k) => mesh.indices[t * 3 + k]);
+        const p = (i: number, k: number) => mesh.positions[i * 3 + k];
+        const ux = (p(b, 1) - p(a, 1)) * (p(c, 2) - p(a, 2)) - (p(b, 2) - p(a, 2)) * (p(c, 1) - p(a, 1));
+        const uz = (p(b, 0) - p(a, 0)) * (p(c, 1) - p(a, 1)) - (p(b, 1) - p(a, 1)) * (p(c, 0) - p(a, 0));
+        for (const i of [a, b, c]) {
+          positions.push(p(i, 0), p(i, 1), p(i, 2));
+          normals.push(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
+          if (!rock) uvs.push(p(i, 0) / 32, p(i, 2) / 32);
+          else if (Math.abs(ux) > Math.abs(uz)) uvs.push(p(i, 2) / 32, p(i, 1) / 32);
+          else uvs.push(p(i, 0) / 32, p(i, 1) / 32);
+        }
+      }
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
-      geo.setAttribute("uv", new THREE.BufferAttribute(mesh.uvs, 2));
-      geo.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-      const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
-      const texture = this.library?.textureOf(TERRAIN_MATERIALS[grid.surface]);
-      if (texture) material.map = this.library!.textureImage(texture);
-      else material.color.setHex(grid.surface === "Ice" ? 0xdfe8ee : grid.surface === "Dirt" ? 0xb08a5a : 0x5f9a45);
-      const m = new THREE.Mesh(geo, material);
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geo.addGroup(0, land * 3, 0);
+      geo.addGroup(land * 3, mesh.rockTriangles * 3, 1);
+      const textured = (name: string, fallback: number) => {
+        const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
+        const texture = this.library?.textureOf(name);
+        if (texture) {
+          m.map = this.library!.textureImage(texture);
+          m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping;
+        } else m.color.setHex(fallback);
+        return m;
+      };
+      const materials = [
+        textured(TERRAIN_MATERIALS[grid.surface], grid.surface === "Ice" ? 0xdfe8ee : grid.surface === "Dirt" ? 0xb08a5a : 0x5f9a45),
+        textured(ROCK_MATERIALS[grid.surface], 0x8a8076),
+      ];
+      const m = new THREE.Mesh(geo, materials);
       m.receiveShadow = true;
       m.castShadow = true;
       this.setTerrainMesh(m);
@@ -776,7 +804,7 @@ export class Editor {
     if (this.terrainMesh) {
       this.scene.remove(this.terrainMesh);
       this.terrainMesh.geometry.dispose();
-      (this.terrainMesh.material as THREE.Material).dispose();
+      for (const m of [this.terrainMesh.material].flat()) m.dispose();
     }
     this.terrainMesh = mesh;
     if (mesh) this.scene.add(mesh);
@@ -2365,6 +2393,8 @@ export class Editor {
  */
 /** The own terrain's game materials (TmSpline.Core Surfaces.Terrain), where the block library has their textures. */
 const TERRAIN_MATERIALS: Record<TerrainSurface, string> = { Grass: "DecoHill", Dirt: "PlatformDirt/DecoHill", Ice: "PlatformIce/DecoHill" };
+/** The own terrain's rock (Surfaces.TerrainRock: the cliffs' material). */
+const ROCK_MATERIALS: Record<TerrainSurface, string> = { Grass: "DecoCliff", Dirt: "PlatformDirt/DecoCliff", Ice: "PlatformIce/DecoCliff" };
 
 const GAME_MATERIALS: Record<string, string> = {
   RoadTech: "RoadTech", RoadDirt: "RoadDirt", RoadBump: "RoadBump", RoadIce: "RoadIce", PlatformTech: "PlatformTech",

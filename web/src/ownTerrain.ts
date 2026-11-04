@@ -24,9 +24,11 @@ export interface OwnTerrainOptions {
   noise: number;
   /** Size of the noise's bumps, metres. */
   noiseSize: number;
+  /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
+  rockAngle: number;
 }
 
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96 };
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 40 };
 
 /** Grid spacing, metres (also the size of the road squares for the caps and distances). */
 const CELL = 4;
@@ -160,7 +162,7 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT && h < 0.5) continue;
     heights[i] = Math.max(0.05, h);
   }
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

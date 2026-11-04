@@ -84,8 +84,8 @@ export async function buildPreview(track: Track, quality: PreviewQuality = 1): P
   return decode(bytes);
 }
 
-/** The map's own terrain (grid and road edge strips) as the export builds it, in world space. */
-export interface TerrainMesh { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint32Array }
+/** The map's own terrain as the export builds it, in world space; the last `rockTriangles` triangles are rock. */
+export interface TerrainMesh { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint32Array; rockTriangles: number }
 
 export async function buildTerrain(map: TrackMap): Promise<TerrainMesh> {
   await loadCore();
@@ -96,13 +96,13 @@ export async function buildTerrain(map: TrackMap): Promise<TerrainMesh> {
   });
   const buffer = bytes.slice().buffer;
   const view = new DataView(buffer);
-  const vertexCount = view.getInt32(0, true), triangleCount = view.getInt32(4, true);
-  let o = 8;
+  const vertexCount = view.getInt32(0, true), triangleCount = view.getInt32(4, true), rockTriangles = view.getInt32(8, true);
+  let o = 12;
   const positions = new Float32Array(buffer, o, vertexCount * 3); o += vertexCount * 12;
   const normals = new Float32Array(buffer, o, vertexCount * 3); o += vertexCount * 12;
   const uvs = new Float32Array(buffer, o, vertexCount * 2); o += vertexCount * 8;
   const indices = new Uint32Array(new Int32Array(buffer, o, triangleCount * 3));
-  return { positions, normals, uvs, indices };
+  return { positions, normals, uvs, indices, rockTriangles };
 }
 
 function decode(bytes: Uint8Array): PreviewMesh {

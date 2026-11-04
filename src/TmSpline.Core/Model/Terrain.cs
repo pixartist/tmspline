@@ -19,6 +19,8 @@ public sealed class TerrainGrid
     public int Rows { get; set; }
     public double[] Heights { get; set; } = [];
     public double Skirt { get; set; } = 16;
+    /// <summary>Land steeper than this (degrees) is rock (Surfaces.TerrainRock), as are the skirts; 90: never.</summary>
+    public double RockAngle { get; set; } = 90;
 
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 
