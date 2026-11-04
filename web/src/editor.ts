@@ -783,7 +783,7 @@ export class Editor {
     const occupied = occupiedCells(own, lib);
     const input = { roads, footprint, occupied, surface, roadsFine: roadColumns(meshes, BLOCK_CELL / 2) };
     const terrain = options.mode === "terrain"
-      ? generateTerrain(lib, input, options, { look: options.look ?? "hill", clearance: 0.5, fix: options.fix ?? "nearest" }) : null;
+      ? generateTerrain(lib, input, options, { look: options.look ?? "smooth", clearance: 0.5 }) : null;
     const generated = options.mode === "terrain" ? terrain : generateScenery(lib, input, options);
     if (!generated) return null;
     this.lastHeightMap = terrain?.debug ?? null;
@@ -849,7 +849,17 @@ export class Editor {
       l.renderOrder = 9;
       return l;
     };
-    this.heightMap.add(lines(grid, 0xffffff), lines(wish, 0xff3020), points);
+    // Cells with their own corners (steps): their outline at those heights, a little inside the cell, in purple.
+    const steps: number[] = [];
+    for (const [k, hs] of map.stepped) {
+      const [i, j] = k.split(",").map(Number);
+      const at = (n: number) => {
+        const [dx, dz] = [[0, 0], [1, 0], [0, 1], [1, 1]][n];
+        return [i * BLOCK_CELL + (dx ? BLOCK_CELL - 3 : 3), y(hs[n]), j * BLOCK_CELL + (dz ? BLOCK_CELL - 3 : 3)];
+      };
+      for (const [a, b] of [[0, 1], [1, 3], [3, 2], [2, 0]]) steps.push(...at(a), ...at(b));
+    }
+    this.heightMap.add(lines(grid, 0xffffff), lines(wish, 0xff3020), lines(steps, 0xc040ff), points);
 
   }
 

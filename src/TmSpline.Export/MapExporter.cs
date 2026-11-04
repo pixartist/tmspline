@@ -130,7 +130,7 @@ public static class MapExporter
                     log?.Invoke($"Skipped free block {block.Name} outside the map at {at}");
                     continue;
                 }
-                var free = map.PlaceBlock(block.Name, new Int3(-1, 0, -1), Direction.North, isGround: false, variant: 0, subVariant: 0);
+                var free = map.PlaceBlock(block.Name, new Int3(-1, 0, -1), Direction.North, isGround: false, variant: (byte)block.Variant, subVariant: (byte)block.SubVariant);
                 free.IsFree = true;
                 free.AbsolutePositionInMap = new Vec3((float)at.X, (float)at.Y, (float)at.Z);
                 free.YawPitchRoll = new Vec3((float)(block.Yaw * Math.PI / 180), (float)(block.Pitch * Math.PI / 180), (float)(block.Roll * Math.PI / 180));
@@ -148,7 +148,7 @@ public static class MapExporter
                 log?.Invoke($"Skipped block {block.Name} outside the map at {coord}");
                 continue;
             }
-            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: block.Y == 0, variant: (byte)block.Variant, subVariant: 0);
+            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: block.Y == 0, variant: (byte)block.Variant, subVariant: (byte)block.SubVariant);
             // Columns under air blocks are pillar blocks with the pillar flag, as the game's editor saves them.
             if (block.Pillar)
                 placed.IsPillar = true;

@@ -348,6 +348,9 @@ public sealed class VanillaBlock
     /// <summary>The block's variant as the game numbers them (0: base, 1..: the additional ones).</summary>
     public int Variant { get; set; }
 
+    /// <summary>The variant's sub-variant (e.g. 1 on the hill's outer corner, the one that meets its straights).</summary>
+    public int SubVariant { get; set; }
+
     /// <summary>
     /// Extra block flag bits the game sets on some blocks (only <see cref="AllowedExtraFlags"/>; e.g. 0x400000 on ground hill
     /// slopes in maps it saved, meaning not yet known).
