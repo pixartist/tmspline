@@ -194,7 +194,7 @@ export class Editor {
     new THREE.LineBasicMaterial({ color: 0x1c2228, transparent: true, opacity: 0.55 }));
   /** Green bars joining the tops of the gates of each linked checkpoint group (across all tracks). */
   private readonly checkpointLinks = new THREE.Group();
-  /** Terrain mode's height map (debug view), see showHeightMap. */
+  /** Nestle's height map (debug view), see showHeightMap. */
   private readonly heightMap = new THREE.Group();
   private lastHeightMap: TerrainDebug | null = null;
   private heightMapShown = false;
@@ -782,9 +782,9 @@ export class Editor {
     // The blocks themselves, not their columns: land may rise under an air block (its columns then stop on it).
     const occupied = occupiedCells(own, lib);
     const input = { roads, footprint, occupied, surface, roadsFine: roadColumns(meshes, BLOCK_CELL / 2) };
-    const terrain = options.mode === "terrain"
-      ? generateTerrain(lib, input, options, { look: options.look ?? "smooth", clearance: 0.5, far: options.far ?? "lower" }) : null;
-    const generated = options.mode === "terrain" ? terrain : generateScenery(lib, input, options);
+    const terrain = options.mode === "nestle"
+      ? generateTerrain(lib, input, options, { look: options.look ?? "alone", clearance: 0.5, far: options.far ?? "fit" }) : null;
+    const generated = options.mode === "nestle" ? terrain : generateScenery(lib, input, options);
     if (!generated) return null;
     this.lastHeightMap = terrain?.debug ?? null;
     this.drawHeightMap();

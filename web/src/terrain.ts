@@ -6,7 +6,8 @@ import {
 } from "./scenery";
 
 /**
- * Terrain: land round the tracks in two steps.
+ * Nestle scenery: a band of land round the tracks at their own height, as free blocks (on the grid and outside it), in
+ * two steps.
  *
  * 1. A height map on the grid's corners (corner i, j at x = 32 i, z = 32 j; heights in levels, a level's top is 2 m above
  *    its floor). Corners within 16 m of a road may reach just below it (they are capped by the road's lowest point
@@ -104,7 +105,7 @@ function pieceShapes(theme: SceneryTheme): Shape[] {
   ];
 }
 
-/** Every piece terrain mode may place (e.g. to load their meshes for SceneryInput.surface). */
+/** Every piece nestle may place (e.g. to load their meshes for SceneryInput.surface). */
 export function terrainPieces(theme: SceneryTheme): string[] {
   return pieceShapes(theme).map((s) => s.name);
 }
@@ -171,7 +172,8 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
   for (const [k, d] of dist) {
     if (caps.has(k)) { target.set(k, caps.get(k)!); continue; }
     let rise = 0;
-    if (options.hills && d > options.gap) {
+    // (Nestle always has hills; a hill height of 0 turns them off.)
+    if (d > options.gap) {
       rise = Math.min(2 * (Math.floor((d - options.gap - 1) / step) + 1), Math.max(0, 2 * Math.floor(options.hillRise / 2)));
       if (options.farRise > 0) rise += Math.round(options.farRise * (d - options.gap - 1));
     }
@@ -315,7 +317,8 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
     if (isFlat && low === 0 && inMap(x, z)) { flat.set(k, 0); continue; }
     const b: VanillaBlock = { name: placed.shape.name, x, y: low, z, dir: placed.dir, scenery: id };
     if (placed.shape.subVariant) b.subVariant = placed.shape.subVariant;
-    // The platform slopes show their "column below" sides with the adapter bit (see nestle); the hill's reach down anyway.
+    // The platform slopes show their "column below" sides with the adapter bit (GROUND_ADAPTER_FLAG, checked in game);
+    // the hill's reach down anyway.
     if (exposed && lib.hasColumnAdapter(b.name)) b.extraFlags = GROUND_ADAPTER_FLAG;
     blocks.push(freeBlock(lib, b));
     if (isFlat) flat.set(k, low);
