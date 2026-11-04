@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
-import { clearOfRoads, plantForest, roadColumns, spread, type SceneryLandOptions, type SceneryTheme } from "./scenery";
+import { clearOfRoads, plantForest, roadColumns, sampleRoads, spread, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
@@ -20,7 +20,7 @@ export interface OwnTerrainOptions {
   skirt: number;
 }
 
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { cell: 16, clearance: 0.5, noise: 4, skirt: 16 };
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { cell: 8, clearance: 0.5, noise: 4, skirt: 16 };
 
 /** The road squares' size for the caps and distances, metres. */
 const SQUARE = 4;
@@ -53,12 +53,19 @@ function noise2(x: number, z: number, size: number): number {
  * come from the scenery options (cells of 32 m, levels of 8 m), as for the block scenery.
  */
 export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
+  // Per road square its lowest point (the land under the road stays below it) and its highest (the curbs' tops or the
+  // surface's edge: the land beside the road starts there, as the strips to the road's edges do).
   const roads = roadColumns(meshes, SQUARE);
   if (roads.size === 0) return null;
+  const tops = new Map<string, number>();
+  sampleRoads(meshes, 1, (v) => {
+    const k = key(Math.floor(v.x / SQUARE), Math.floor(v.z / SQUARE));
+    tops.set(k, Math.max(tops.get(k) ?? -Infinity, v.y));
+  });
   const shoulder = Math.max(0, options.gap) * BLOCK_CELL;
   const reach = shoulder + Math.max(1, options.band) * BLOCK_CELL;
-  // Distance to the nearest road square and its lowest point, over the squares (the nearest in a straight line wins).
-  const { base, from } = spread(roads, () => true, Math.ceil(reach / SQUARE) + 2);
+  // Distance to the nearest road square and its top, over the squares (the nearest in a straight line wins).
+  const { base, from } = spread(tops, () => true, Math.ceil(reach / SQUARE) + 2);
 
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const k of roads.keys()) {
@@ -76,7 +83,7 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
   const hillHeight = Math.max(0, options.hillRise) * BLOCK_LEVEL;
   const hillLength = Math.max(1, options.hillStep) * BLOCK_CELL * Math.max(1, options.hillRise) / 2;
   const heights: (number | null)[] = new Array(columns * rows).fill(null);
-  const capRadius = Math.ceil((cell * 1.5) / SQUARE);
+  const capRadius = Math.ceil(cell / SQUARE);
   const caps: (number | null)[] = new Array(columns * rows).fill(null);
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < columns; c++) {
@@ -87,8 +94,9 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
       if (!src) continue;
       const d = Math.hypot((src[0] + 0.5) * SQUARE - x, (src[1] + 0.5) * SQUARE - z);
       if (d > reach) continue;
-      // No road's lowest point within a cell and a half may be below the land (the triangles round the vertex reach that
-      // far).
+      // Under the roads the land stays below their lowest point: every vertex of a triangle that reaches under a road
+      // (the road within a cell of the vertex). Beyond that it may rise above the road: the strips from the roads' edges
+      // reach over this zone onto the land.
       let cap = Infinity;
       for (let dx = -capRadius; dx <= capRadius; dx++)
         for (let dz = -capRadius; dz <= capRadius; dz++) {
@@ -96,7 +104,7 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
           if (y !== undefined) cap = Math.min(cap, y);
         }
       const out = Math.max(0, d - shoulder);
-      let h = base.get(k)! - own.clearance;
+      let h = base.get(k)!;
       h += hillHeight * smooth(out / hillLength);
       if (options.farRise > 0) h += options.farRise * BLOCK_LEVEL * out / BLOCK_CELL;
       h += own.noise * smooth(out / BLOCK_CELL) * noise2(x, z, 64);

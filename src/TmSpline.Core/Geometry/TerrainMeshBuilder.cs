@@ -149,8 +149,16 @@ public static class TerrainMeshBuilder
         return stream.ToArray();
     }
 
-    /// <summary>Most a road edge's strip reaches out to the terrain, metres (less on the inside of tight bends).</summary>
-    public const double FilletWidth = 12;
+    /// <summary>
+    /// How far a road edge's strip reaches out, in grid cells: past the vertices held below the road (those within a cell
+    /// of it) and the triangles round them, onto land at its own height (less on the inside of tight bends).
+    /// </summary>
+    private const double FilletCells = 2.25;
+    /// <summary>
+    /// The strip's cross-section: from the road's edge it climbs steeply, then levels into the land (shares of its width and
+    /// of the height to the land), as land rising from a curb's top.
+    /// </summary>
+    private static readonly (double Along, double Up)[] FilletProfile = [(0, 0), (0.3, 0.55), (0.65, 0.88), (1, 1)];
     /// <summary>Rings per strip item.</summary>
     private const int FilletRingsPerChunk = 48;
     /// <summary>No strip where the terrain is this far below the road's edge (a bridge over a valley).</summary>
@@ -185,11 +193,11 @@ public static class TerrainMeshBuilder
                     var outward = new Vec3d(ring.Right.X * side, 0, ring.Right.Z * side);
                     if (outward.Length < 1e-6) continue;
                     outward = outward.Normalized();
-                    var width = Math.Min(FilletWidth, InnerRoom(rings, i, side));
+                    var width = Math.Min(FilletCells * grid.Cell, InnerRoom(rings, i, side));
                     var x = edge.X + outward.X * width;
                     var z = edge.Z + outward.Z * width;
                     var y = SurfaceHeight(grid, x, z);
-                    if (double.IsNaN(y) || edge.Y - y > FilletMaxDrop || y > edge.Y + 0.5) continue;
+                    if (double.IsNaN(y) || edge.Y - y > FilletMaxDrop || y - edge.Y > FilletMaxDrop) continue;
                     strip[i] = (edge, new Vec3d(x, y, z));
                 }
                 for (var start = 0; start < rings.Count - 1; start += FilletRingsPerChunk)
@@ -235,33 +243,40 @@ public static class TerrainMeshBuilder
         var offset = new Vec3d(Math.Round(first.X), Math.Round(first.Y), Math.Round(first.Z));
         var chunk = new MeshChunk { Name = name, ItemOffset = offset };
         var m = chunk.MaterialIndex(material);
-        var index = new Dictionary<(int, bool), int>();
-        int Vertex(int i, bool outer)
+        // A point of the strip: row j of the profile at ring i.
+        Vec3d At(int i, int j)
         {
-            if (index.TryGetValue((i, outer), out var v)) return v;
             var (edge, o) = strip[i]!.Value;
-            var p = outer ? o : edge;
-            // Normal: across the strip (edge to outer point) crossed with along the road.
-            var prev = strip[Math.Max(start, i - 1)] ?? strip[i]!;
-            var next = strip[Math.Min(end, i + 1)] ?? strip[i]!;
-            var along = next.Value.Edge - prev.Value.Edge;
-            var across = o - edge;
+            var (along, up) = FilletProfile[j];
+            return new Vec3d(edge.X + (o.X - edge.X) * along, edge.Y + (o.Y - edge.Y) * up, edge.Z + (o.Z - edge.Z) * along);
+        }
+        var index = new Dictionary<(int, int), int>();
+        int Vertex(int i, int j)
+        {
+            if (index.TryGetValue((i, j), out var v)) return v;
+            var p = At(i, j);
+            // Normal: across the strip (between the neighbouring rows) crossed with along the road.
+            var prev = strip[Math.Max(start, i - 1)] is null ? i : Math.Max(start, i - 1);
+            var next = strip[Math.Min(end, i + 1)] is null ? i : Math.Min(end, i + 1);
+            var along = At(next, j) - At(prev, j);
+            var across = At(i, Math.Min(FilletProfile.Length - 1, j + 1)) - At(i, Math.Max(0, j - 1));
             var n = Vec3d.Cross(along, across);
             if (n.Y < 0) n = n * -1;
             n = n.Length < 1e-9 ? Vec3d.UnitY : n.Normalized();
             chunk.Positions.Add(new Vector3((float)(p.X - offset.X), (float)(p.Y - offset.Y), (float)(p.Z - offset.Z)));
             chunk.Normals.Add(new Vector3((float)n.X, (float)n.Y, (float)n.Z));
             chunk.Uv0.Add(new Vector2((float)(p.X / 32), (float)(p.Z / 32)));
-            chunk.Uv1.Add(new Vector2(0.02f + 0.96f * (i - start) / Math.Max(1, end - start), outer ? 0.98f : 0.02f));
-            index[(i, outer)] = chunk.Positions.Count - 1;
+            chunk.Uv1.Add(new Vector2(0.02f + 0.96f * (i - start) / Math.Max(1, end - start), 0.02f + 0.96f * j / (FilletProfile.Length - 1)));
+            index[(i, j)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
         }
         foreach (var i in quads)
-        {
-            int a = Vertex(i, false), b = Vertex(i + 1, false), c = Vertex(i + 1, true), d = Vertex(i, true);
-            MeshChunk.AddFacing(chunk, new Triangle(a, b, c, m), Vector3.UnitY);
-            MeshChunk.AddFacing(chunk, new Triangle(a, c, d, m), Vector3.UnitY);
-        }
+            for (var j = 0; j + 1 < FilletProfile.Length; j++)
+            {
+                int a = Vertex(i, j), b = Vertex(i + 1, j), c = Vertex(i + 1, j + 1), d = Vertex(i, j + 1);
+                MeshChunk.AddFacing(chunk, new Triangle(a, b, c, m), Vector3.UnitY);
+                MeshChunk.AddFacing(chunk, new Triangle(a, c, d, m), Vector3.UnitY);
+            }
         return chunk;
     }
 
