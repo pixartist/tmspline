@@ -181,6 +181,8 @@ on openplanet.dev and pass its review.
   the previous export placed is replaced, what was added in the game's editor stays) and the editor reopens with the
   camera where it was.
 - **Block library**: see above.
+- **Camera unlock** (setting "Unlock camera", on by default): widens the map editor camera's position limits, so it can
+  reach tracks outside the grid and high above it (approach and offsets from Editor++ by XertroV, Unlicense).
 
 ## Run the export server (development)
 
