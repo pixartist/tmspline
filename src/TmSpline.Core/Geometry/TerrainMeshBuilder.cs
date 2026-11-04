@@ -4,112 +4,175 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The terrain grid (TerrainGrid) as items: square chunks of the grid, each grid square two triangles (split along the
-/// diagonal whose ends are closer in height, so ridges and valleys keep their line), smooth normals from the whole grid,
-/// and a skirt hanging from the land's outer edge.
+/// The terrain grid (TerrainGrid) as items: the grid simplified to as few triangles as keep within
+/// <see cref="Tolerance"/> of it (a right-triangulated irregular network, as Mapbox's Martini builds it: halving right
+/// triangles where they stray, so neighbours always share their edges and there are no cracks), with smooth normals from
+/// the whole grid and a skirt hanging from the land's outer edge, cut into square chunks (one item each).
 /// </summary>
 public static class TerrainMeshBuilder
 {
-    /// <summary>Grid squares per chunk side (16 m squares: 128 m chunks).</summary>
-    public const int ChunkSquares = 8;
+    /// <summary>How far the simplified land may stray from the height map, metres.</summary>
+    public const double Tolerance = 0.2;
+    /// <summary>Size of a chunk (one item), metres.</summary>
+    private const double ChunkSize = 128;
 
     public static List<MeshChunk> Build(TerrainGrid grid, string namePrefix = "Terrain")
     {
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
-        var material = Surfaces.Terrain(grid.Surface);
-        var squaresX = grid.Columns - 1;
-        var squaresZ = grid.Rows - 1;
-        for (var cj = 0; cj * ChunkSquares < squaresZ; cj++)
-            for (var ci = 0; ci * ChunkSquares < squaresX; ci++)
+        var triangles = Simplify(grid);
+        if (triangles.Count == 0) return chunks;
+
+        // Outer edges (used by one triangle only) get a skirt, on the side away from their triangle.
+        var edgeUse = new Dictionary<(int, int), int>();
+        foreach (var (a, b, c) in triangles)
+            foreach (var (u, v) in new[] { (a, b), (b, c), (c, a) })
             {
-                var chunk = BuildChunk(grid, ci * ChunkSquares, cj * ChunkSquares, material, $"{namePrefix}_{cj:D2}_{ci:D2}");
-                if (chunk is not null) chunks.Add(chunk);
+                var e = u < v ? (u, v) : (v, u);
+                edgeUse[e] = edgeUse.GetValueOrDefault(e) + 1;
             }
-        return chunks;
-    }
 
-    private static MeshChunk? BuildChunk(TerrainGrid grid, int c0, int r0, TmMaterial material, string name)
-    {
-        var c1 = Math.Min(c0 + ChunkSquares, grid.Columns - 1);
-        var r1 = Math.Min(r0 + ChunkSquares, grid.Rows - 1);
-        var land = new List<(int C, int R)>();
-        for (var r = r0; r < r1; r++)
-            for (var c = c0; c < c1; c++)
-                if (grid.IsLand(c, r)) land.Add((c, r));
-        if (land.Count == 0) return null;
-
+        var material = Surfaces.Terrain(grid.Surface);
+        var byChunk = new Dictionary<(int, int), MeshChunk>();
+        var vertexOf = new Dictionary<(MeshChunk, int), int>();
         var cell = grid.Cell;
-        var offset = new Vec3d(grid.X0 + c0 * cell, land.Min(s => Math.Min(grid.Height(s.C, s.R), grid.Height(s.C + 1, s.R + 1))), grid.Z0 + r0 * cell);
-        var chunk = new MeshChunk { Name = name, ItemOffset = offset };
-        var m = chunk.MaterialIndex(material);
-        Vector3 Local(double x, double y, double z) => new((float)(x - offset.X), (float)(y - offset.Y), (float)(z - offset.Z));
-        var span = Math.Max(c1 - c0, r1 - r0);
-
-        // The grid's vertices of this chunk (shared by its squares).
-        var index = new Dictionary<(int, int), int>();
-        int Vertex(int c, int r)
+        (double X, double Z) At(int i) => (grid.X0 + i % grid.Columns * cell, grid.Z0 + i / grid.Columns * cell);
+        MeshChunk ChunkAt(double x, double z)
         {
-            if (index.TryGetValue((c, r), out var i)) return i;
-            var x = grid.X0 + c * cell;
-            var z = grid.Z0 + r * cell;
-            chunk.Positions.Add(Local(x, grid.Height(c, r), z));
-            chunk.Normals.Add(Normal(grid, c, r));
+            var k = ((int)Math.Floor((x - grid.X0) / ChunkSize), (int)Math.Floor((z - grid.Z0) / ChunkSize));
+            if (byChunk.TryGetValue(k, out var chunk)) return chunk;
+            var offset = new Vec3d(grid.X0 + k.Item1 * ChunkSize, 0, grid.Z0 + k.Item2 * ChunkSize);
+            chunk = new MeshChunk { Name = $"{namePrefix}_{k.Item2 + 100:D3}_{k.Item1 + 100:D3}", ItemOffset = offset };
+            chunk.MaterialIndex(material);
+            byChunk[k] = chunk;
+            return chunk;
+        }
+        int Vertex(MeshChunk chunk, int i)
+        {
+            if (vertexOf.TryGetValue((chunk, i), out var v)) return v;
+            var (x, z) = At(i);
+            var y = grid.Heights[i];
+            var o = chunk.ItemOffset;
+            chunk.Positions.Add(new Vector3((float)(x - o.X), (float)(y - o.Y), (float)(z - o.Z)));
+            chunk.Normals.Add(Normal(grid, i % grid.Columns, i / grid.Columns));
             chunk.Uv0.Add(new Vector2((float)(x / 32), (float)(z / 32)));
-            // Lightmap: the chunk's squares over most of the map, the skirts in a strip beside them.
-            chunk.Uv1.Add(new Vector2(0.02f + 0.76f * (c - c0) / span, 0.02f + 0.96f * (r - r0) / span));
-            index[(c, r)] = chunk.Positions.Count - 1;
+            // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
+            chunk.Uv1.Add(new Vector2((float)(0.02 + 0.76 * Math.Clamp((x - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((z - o.Z) / ChunkSize, 0, 1))));
+            vertexOf[(chunk, i)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
         }
-        foreach (var (c, r) in land)
+        var skirts = new Dictionary<MeshChunk, int>();
+        foreach (var (a, b, c) in triangles)
         {
-            int a = Vertex(c, r), b = Vertex(c + 1, r), d = Vertex(c, r + 1), e = Vertex(c + 1, r + 1);
-            var up = Vector3.UnitY;
-            // Split along the diagonal whose ends are closer in height.
-            if (Math.Abs(grid.Height(c, r) - grid.Height(c + 1, r + 1)) <= Math.Abs(grid.Height(c + 1, r) - grid.Height(c, r + 1)))
+            var (ax, az) = At(a);
+            var (bx, bz) = At(b);
+            var (cx, cz) = At(c);
+            var chunk = ChunkAt((ax + bx + cx) / 3, (az + bz + cz) / 3);
+            MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, a), Vertex(chunk, b), Vertex(chunk, c), 0), Vector3.UnitY);
+            if (grid.Skirt <= 0) continue;
+            foreach (var (u, v, w) in new[] { (a, b, c), (b, c, a), (c, a, b) })
             {
-                MeshChunk.AddFacing(chunk, new Triangle(a, b, e, m), up);
-                MeshChunk.AddFacing(chunk, new Triangle(a, e, d, m), up);
+                if (edgeUse[u < v ? (u, v) : (v, u)] != 1) continue;
+                var (ux, uz) = At(u);
+                var (vx, vz) = At(v);
+                var (wx, wz) = At(w);
+                // Outward: across the edge, away from the triangle's third corner.
+                var outward = new Vector3((float)(vz - uz), 0, (float)(ux - vx));
+                if (outward.X * (wx - ux) + outward.Z * (wz - uz) > 0) outward = -outward;
+                outward = Vector3.Normalize(outward);
+                var k = skirts.GetValueOrDefault(chunk);
+                skirts[chunk] = k + 1;
+                var first = chunk.Positions.Count;
+                var o = chunk.ItemOffset;
+                foreach (var (i, down) in new[] { (u, 0.0), (v, 0.0), (u, grid.Skirt), (v, grid.Skirt) })
+                {
+                    var (x, z) = At(i);
+                    var y = grid.Heights[i] - down;
+                    chunk.Positions.Add(new Vector3((float)(x - o.X), (float)(y - o.Y), (float)(z - o.Z)));
+                    chunk.Normals.Add(outward);
+                    chunk.Uv0.Add(new Vector2((float)((x + z) / 32), (float)(y / 32)));
+                    // Each skirt piece its own little stretch of the lightmap strip.
+                    chunk.Uv1.Add(new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256));
+                }
+                MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, 0), outward);
+                MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, 0), outward);
             }
-            else
+        }
+        return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
+    }
+
+    /// <summary>
+    /// The land's triangles (grid vertex indices), simplified: the grid padded to a square of 2^k + 1 vertices is split
+    /// into right triangles, each halved while the height map strays more than <see cref="Tolerance"/> from it, or while
+    /// it holds both land and no land (down to the grid's own triangles, kept where all three corners are land).
+    /// </summary>
+    private static List<(int A, int B, int C)> Simplify(TerrainGrid grid)
+    {
+        var size = 2;
+        while (size + 1 < Math.Max(grid.Columns, grid.Rows)) size *= 2;
+        var n = size + 1;
+        var h = new double[n * n];
+        Array.Fill(h, double.NaN);
+        for (var r = 0; r < grid.Rows; r++)
+            for (var c = 0; c < grid.Columns; c++)
+                h[r * n + c] = grid.Heights[r * grid.Columns + c];
+
+        // Errors at every triangle's hypotenuse midpoint, smallest triangles first, each also its children's (Martini).
+        var errors = new double[n * n];
+        var smallest = size * size * 2;
+        var count = smallest * 2 - 2;
+        var parents = count - smallest;
+        for (var t = count - 1; t >= 0; t--)
+        {
+            var id = t + 2;
+            int ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
+            if ((id & 1) != 0) { bx = by = cx = size; }
+            else { ax = ay = cy = size; }
+            while ((id >>= 1) > 1)
             {
-                MeshChunk.AddFacing(chunk, new Triangle(a, b, d, m), up);
-                MeshChunk.AddFacing(chunk, new Triangle(b, e, d, m), up);
+                var hx = (ax + bx) >> 1;
+                var hy = (ay + by) >> 1;
+                if ((id & 1) != 0) { bx = ax; by = ay; ax = cx; ay = cy; }
+                else { ax = bx; ay = by; bx = cx; by = cy; }
+                cx = hx;
+                cy = hy;
+            }
+            var mx = (ax + bx) >> 1;
+            var my = (ay + by) >> 1;
+            var m = my * n + mx;
+            double ha = h[ay * n + ax], hb = h[by * n + bx], hm = h[m], hc = h[cy * n + cx];
+            var nan = (double.IsNaN(ha) ? 1 : 0) + (double.IsNaN(hb) ? 1 : 0) + (double.IsNaN(hm) ? 1 : 0) + (double.IsNaN(hc) ? 1 : 0);
+            // Land and no land in one triangle: always split (an all-empty one never matters).
+            var error = nan == 0 ? Math.Abs((ha + hb) / 2 - hm) : nan == 4 ? 0 : double.PositiveInfinity;
+            errors[m] = Math.Max(errors[m], error);
+            if (t < parents)
+            {
+                var left = ((ay + cy) >> 1) * n + ((ax + cx) >> 1);
+                var right = ((by + cy) >> 1) * n + ((bx + cx) >> 1);
+                errors[m] = Math.Max(errors[m], Math.Max(errors[left], errors[right]));
             }
         }
 
-        // Skirts: every square side with no land beyond it, down by Skirt metres.
-        if (grid.Skirt > 0)
+        var triangles = new List<(int, int, int)>();
+        var stack = new Stack<(int Ax, int Ay, int Bx, int By, int Cx, int Cy)>();
+        stack.Push((0, 0, size, size, size, 0));
+        stack.Push((size, size, 0, 0, 0, size));
+        while (stack.Count > 0)
         {
-            var sides = new List<(int C0, int R0, int C1, int R1, Vector3 Out)>();
-            foreach (var (c, r) in land)
+            var (ax, ay, bx, by, cx, cy) = stack.Pop();
+            var mx = (ax + bx) >> 1;
+            var my = (ay + by) >> 1;
+            if (Math.Abs(ax - cx) + Math.Abs(ay - cy) > 1 && errors[my * n + mx] > Tolerance)
             {
-                if (!grid.IsLand(c, r - 1)) sides.Add((c, r, c + 1, r, -Vector3.UnitZ));
-                if (!grid.IsLand(c, r + 1)) sides.Add((c, r + 1, c + 1, r + 1, Vector3.UnitZ));
-                if (!grid.IsLand(c - 1, r)) sides.Add((c, r, c, r + 1, -Vector3.UnitX));
-                if (!grid.IsLand(c + 1, r)) sides.Add((c + 1, r, c + 1, r + 1, Vector3.UnitX));
+                stack.Push((cx, cy, ax, ay, mx, my));
+                stack.Push((bx, by, cx, cy, mx, my));
+                continue;
             }
-            for (var s = 0; s < sides.Count; s++)
-            {
-                var (sc0, sr0, sc1, sr1, outward) = sides[s];
-                var first = chunk.Positions.Count;
-                var v0 = 0.02f + 0.96f * s / sides.Count;
-                var v1 = 0.02f + 0.96f * (s + 0.9f) / sides.Count;
-                foreach (var (c, r, down, v) in new[] { (sc0, sr0, 0.0, v0), (sc1, sr1, 0.0, v1), (sc0, sr0, grid.Skirt, v0), (sc1, sr1, grid.Skirt, v1) })
-                {
-                    var x = grid.X0 + c * cell;
-                    var z = grid.Z0 + r * cell;
-                    var y = grid.Height(c, r) - down;
-                    chunk.Positions.Add(Local(x, y, z));
-                    chunk.Normals.Add(outward);
-                    chunk.Uv0.Add(new Vector2((float)((x + z) / 32), (float)(y / 32)));
-                    chunk.Uv1.Add(new Vector2(down == 0 ? 0.8f : 0.98f, v));
-                }
-                MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, m), outward);
-                MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, m), outward);
-            }
+            int a = ay * n + ax, b = by * n + bx, c = cy * n + cx;
+            if (double.IsNaN(h[a]) || double.IsNaN(h[b]) || double.IsNaN(h[c])) continue;
+            triangles.Add((ay * grid.Columns + ax, by * grid.Columns + bx, cy * grid.Columns + cx));
         }
-        return chunk;
+        return triangles;
     }
 
     /// <summary>
@@ -196,7 +259,8 @@ public static class TerrainMeshBuilder
                     var width = Math.Min(FilletCells * grid.Cell, InnerRoom(rings, i, side));
                     var x = edge.X + outward.X * width;
                     var z = edge.Z + outward.Z * width;
-                    var y = SurfaceHeight(grid, x, z);
+                    // A little below the grid's surface: the simplified land strays from it by up to the tolerance.
+                    var y = SurfaceHeight(grid, x, z) - Tolerance;
                     if (double.IsNaN(y) || edge.Y - y > FilletMaxDrop || y - edge.Y > FilletMaxDrop) continue;
                     strip[i] = (edge, new Vec3d(x, y, z));
                 }

@@ -166,8 +166,8 @@ public sealed partial class ExportService
         : "";
 
     private const double MaxHeight = 1960;
-    /// <summary>Most vertices of an own terrain grid (16 m cells: 10 km² or so).</summary>
-    private const int MaxTerrainVertices = 400_000;
+    /// <summary>Most vertices of an own terrain grid (4 m cells: 32 km² or so).</summary>
+    private const int MaxTerrainVertices = 2_000_000;
     /// <summary>
     /// How far from the map's centre points, free blocks and items may be: 2 km beyond the 48 grid's edges (768 m).
     /// The game keeps and drives them there; the grid itself cannot grow (wider maps crash the game).

@@ -4,9 +4,10 @@ import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
+import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, ownTerrain: { ...OWN_TERRAIN_DEFAULTS }, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -540,12 +541,21 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         { fit: "Best fit per cell (small steps)", lower: "Lower to fit (no steps)", steps: "Steps away from the roads" });
       checkbox(root, "Show height map", () => scenery.showHeightMap, (v) => { scenery.showHeightMap = v; editor.showHeightMap(v); });
     }
+    // The own terrain is not made of blocks: metres, no cells or levels.
+    const own = scenery.mode === "terrain";
+    if (own) {
+      const t = scenery.ownTerrain;
+      numberField(root, "Width (m)", () => t.width, (v) => (t.width = int(v, 32, 1024)), 16);
+      numberField(root, "Smoothing (m)", () => t.smoothing, (v) => (t.smoothing = int(v, 0, 256)), 8);
+      numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(64, v))), 1);
+      numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
+    }
     if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
-    numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
-    if (banded) {
+    if (!own) numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
+    if (nestle) {
       numberField(root, "Band (cells)", () => scenery.band, (v) => (scenery.band = int(v, 1, 24)), 1);
     }
-    if (scenery.hills || banded) {
+    if (!own && (scenery.hills || banded)) {
       numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
       // With cliffs the hills climb to their top instead.
       if (scenery.cliffs === 0 || banded)
