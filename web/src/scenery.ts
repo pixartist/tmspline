@@ -319,6 +319,12 @@ function gridCells(): string[] {
   return cells;
 }
 
+/**
+ * The highest level land may reach: the game's limit for blocks (the export refuses grid blocks above it, and free
+ * blocks above 1960 m), so land rising away from a track high up levels off there.
+ */
+const TOP_LEVEL = 240;
+
 /** The column piece the game puts under land tiles in the air (the same for grass, dirt and ice). */
 const COLUMN = "DecoWallBasePillar";
 
@@ -397,7 +403,7 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
   const height = new Map<string, number>();
   for (const k of cells) {
       if (cliffHigh.has(k)) continue;
-      if (track.has(k)) { height.set(k, track.get(k)!); continue; }
+      if (track.has(k)) { height.set(k, Math.min(TOP_LEVEL, track.get(k)!)); continue; }
       if (cliff && cliffFront.has(k)) { height.set(k, cliff.top); continue; }
       const d = dist.get(k) ?? Infinity, b = base.get(k) ?? 0;
       const step = Math.max(1, options.hillStep);
@@ -417,7 +423,7 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
           // ...up to the hills' height, and on top of that a gentle climb with the distance (the land keeps rising past
           // the hills instead of levelling off).
           const far = options.farRise > 0 ? Math.round(options.farRise * (d - options.gap - 1)) : 0;
-          height.set(k, b + Math.min(rise, even2(options.hillRise)) + far);
+          height.set(k, Math.min(TOP_LEVEL, b + Math.min(rise, even2(options.hillRise)) + far));
         }
       }
     }
@@ -443,7 +449,7 @@ function hills(lib: VanillaLibrary, track: Map<string, number>, dist: Map<string
       const ups = up.filter(Boolean).length;
       const diag = [[1, 1], [-1, -1], [1, -1], [-1, 1]].map(([dx, dz]) => (h(x + dx, z + dz) ?? -1) > v);
       const saddle = ups === 0 && ((diag[0] && diag[1]) || (diag[2] && diag[3]));
-      if (ups >= 3 || (up[0] && up[2]) || (up[1] && up[3]) || saddle) { height.set(k, v + 2); changed = true; continue; }
+      if (ups >= 3 || (up[0] && up[2]) || (up[1] && up[3]) || saddle) { height.set(k, Math.min(TOP_LEVEL, v + 2)); changed = true; continue; }
       // A corner slope climbs one height: two sides that rise by different amounts raise the cell to the lower one.
       const rises = ORTHO.map(([dx, dz]) => (h(x + dx, z + dz) ?? -1) - v).filter((d) => d > 0);
       if (rises.length === 2 && rises[0] !== rises[1]) { height.set(k, v + Math.min(...rises)); changed = true; }

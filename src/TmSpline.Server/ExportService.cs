@@ -160,6 +160,11 @@ public sealed partial class ExportService
     private const int MaxTracks = 64;
     /// <summary>Highest point of anything in meters above the ground, and highest block level: the map grows up to its
     /// largest size (MapExporter.MaxMapRows: 255 rows of 8 m, the ground at row 9) and keeps some room above.</summary>
+    /// <summary>" at x, y, z m (limits ...)" for refusal messages, so the user can find the piece.</summary>
+    private static string Where(double[]? p) => p is { Length: 3 }
+        ? $" (at {p[0]:0}, {p[1]:0}, {p[2]:0} m; the limits are {MaxOffset:0} m from the centre and -16 to {MaxHeight:0} m high)"
+        : "";
+
     private const double MaxHeight = 1960;
     /// <summary>
     /// How far from the map's centre points, free blocks and items may be: 2 km beyond the 48 grid's edges (768 m).
@@ -188,7 +193,7 @@ public sealed partial class ExportService
                 throw new ExportRejectedException("Block names may only contain letters, digits and _");
             if (block.Free && (block.Position is not { Length: 3 } bp || !bp.All(double.IsFinite) || Math.Abs(bp[0]) > MaxOffset || Math.Abs(bp[2]) > MaxOffset
                 || bp[1] is < -16 or > MaxHeight || !double.IsFinite(block.Yaw + block.Pitch + block.Roll)))
-                throw new ExportRejectedException($"Free block {block.Name} is outside the map");
+                throw new ExportRejectedException($"Free block {block.Name} is outside the map{Where(block.Position)}");
             if (!block.Free && (Math.Abs(block.X) > 24 || Math.Abs(block.Z) > 24 || block.Y is < 0 or > MaxBlockLevel))
                 throw new ExportRejectedException($"Block {block.Name} is outside the map");
         }
@@ -201,7 +206,7 @@ public sealed partial class ExportService
                 throw new ExportRejectedException("Item names may only contain letters, digits and _");
             if (item.Position is not { Length: 3 } ip || !ip.All(double.IsFinite) || Math.Abs(ip[0]) > MaxOffset || Math.Abs(ip[2]) > MaxOffset
                 || ip[1] is < -16 or > MaxHeight || !double.IsFinite(item.Yaw))
-                throw new ExportRejectedException($"Item {item.Name} is outside the map");
+                throw new ExportRejectedException($"Item {item.Name} is outside the map{Where(item.Position)}");
         }
         var pointCount = parts.Sum(t => t.Points.Count);
         if (pointCount > _settings.MaxPoints)
