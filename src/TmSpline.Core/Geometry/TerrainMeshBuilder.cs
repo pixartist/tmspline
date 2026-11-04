@@ -151,6 +151,7 @@ public static class TerrainMeshBuilder
             normals[c] += n;
         }
         for (var i = 0; i < normals.Length; i++) normals[i] = normals[i].LengthSquared() > 0 ? Vector3.Normalize(normals[i]) : Vector3.UnitY;
+        var normalOf = normals.ToList();
 
         // Outer edges (one triangle only) get a skirt, except along the roads (there the land ends at their edge).
         var edgeUse = new Dictionary<(int, int), int>();
@@ -183,21 +184,49 @@ public static class TerrainMeshBuilder
             if (vertexOf.TryGetValue((chunk, i), out var v)) return v;
             var o = chunk.ItemOffset;
             chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - o.Y), (float)(zs[i] - o.Z)));
-            chunk.Normals.Add(normals[i]);
-            chunk.Uv0.Add(MaskUv(normals[i].Y));
+            chunk.Normals.Add(normalOf[i]);
+            chunk.Uv0.Add(MaskUv(normalOf[i].Y));
             // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
             chunk.Uv1.Add(new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1))));
             vertexOf[(chunk, i)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
         }
+        // Rock where the land is steeper than the rock angle, measured on the (smoothed) vertex normals and interpolated
+        // across each triangle: a triangle the threshold runs through is cut along it, so the border between grass and
+        // rock is a smooth line, not the triangles' zigzag. Neighbours share the cut points on their common edge.
+        var cuts = new Dictionary<(int, int), int>();
+        int Cut(int u, int v)
+        {
+            var key = u < v ? (u, v) : (v, u);
+            if (cuts.TryGetValue(key, out var i)) return i;
+            var t = Math.Clamp((rockBelow - normalOf[u].Y) / (normalOf[v].Y - normalOf[u].Y), 0, 1);
+            xs.Add(xs[u] + (xs[v] - xs[u]) * t);
+            ys.Add(ys[u] + (ys[v] - ys[u]) * t);
+            zs.Add(zs[u] + (zs[v] - zs[u]) * t);
+            onEdge.Add(false);
+            normalOf.Add(Vector3.Normalize(Vector3.Lerp(normalOf[u], normalOf[v], (float)t)));
+            cuts[key] = xs.Count - 1;
+            return xs.Count - 1;
+        }
         var skirts = new Dictionary<MeshChunk, int>();
         foreach (var (a, b, c) in triangles)
         {
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
-            var face = Vector3.Normalize(Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
-                new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a]))));
-            var m = rocky && Math.Abs(face.Y) < rockBelow ? chunk.MaterialIndex(rock) : 0;
-            MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, a), Vertex(chunk, b), Vertex(chunk, c), m), Vector3.UnitY);
+            void Emit(int p, int q, int r, bool stone) =>
+                MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p), Vertex(chunk, q), Vertex(chunk, r), stone ? chunk.MaterialIndex(rock) : 0), Vector3.UnitY);
+            bool Steep(int i) => normalOf[i].Y < rockBelow;
+            var steep = new[] { a, b, c }.Count(Steep);
+            if (!rocky || steep == 0 || steep == 3) Emit(a, b, c, rocky && steep == 3);
+            else
+            {
+                // The corner on its own side of the line, and the other two in order round the triangle.
+                var (lone, p, q) = Steep(a) == (steep == 1) ? (a, b, c) : Steep(b) == (steep == 1) ? (b, c, a) : (c, a, b);
+                var loneRock = steep == 1;
+                int cp = Cut(lone, p), cq = Cut(lone, q);
+                Emit(lone, cp, cq, loneRock);
+                Emit(cp, p, q, !loneRock);
+                Emit(cp, q, cq, !loneRock);
+            }
             if (grid.Skirt <= 0) continue;
             foreach (var (u, v, w) in new[] { (a, b, c), (b, c, a), (c, a, b) })
             {
