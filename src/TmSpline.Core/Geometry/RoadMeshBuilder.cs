@@ -278,6 +278,21 @@ public static class RoadMeshBuilder
         return (inner, (c.X + t.X * side * ou - n.X * h, c.Y + t.Y * side * ou - n.Y * h));
     }
 
+    /// <summary>
+    /// Where land beside the road meets it on side ±1, in world space: the curb's outer top corner where the segment has
+    /// borders (as built in Profile), the driving surface's edge where it has none.
+    /// </summary>
+    public static Vec3d EdgeContact(Ring ring, TrackSegment segment, int side)
+    {
+        var s = new RoadMeshSettings();
+        var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
+        var (e, t, n) = CurbFrame(ring, arc, side * ring.Width * 0.5);
+        var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
+        var x = e.X + t.X * side * bt + n.X * bh;
+        var y = e.Y + t.Y * side * bt + n.Y * bh;
+        return ring.Position + ring.Right * x + ring.Up * y;
+    }
+
     /// <summary>Height of the boost decal above the driving surface.</summary>
     private const double DecalLift = 0.02;
 

@@ -145,7 +145,7 @@ export interface SceneryLandOptions extends SceneryOptions {
    * "fill": the whole grid from the ground up (cliffs as a backdrop). "nestle": a band of land `band` cells wide beyond the
    * shoulder, at the tracks' own height, as free blocks (floating), on the grid and outside it (see terrain.ts).
    */
-  mode: "fill" | "nestle";
+  mode: "fill" | "nestle" | "terrain";
   /** Nestle: look of the 2-level slopes (see TerrainOptions.look). */
   look?: "smooth" | "hill" | "alone";
   /** Nestle: how the pieces are fitted to the height map (see TerrainOptions.far). */

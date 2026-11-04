@@ -1,14 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
+import { buildPreview, buildTerrain, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
+import { buildTerrainGrid, plantOnTerrain } from "./ownTerrain";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
-  type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
+  type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
 export type Selection =
@@ -735,6 +736,50 @@ export class Editor {
     this.blocks.syncPillars(pillars);
     this.placeBlockAnchor();
     this.items.sync(this.map.items);
+    this.syncTerrain();
+  }
+
+  /** The own terrain's preview mesh (see syncTerrain), and the grid it shows. */
+  private terrainMesh: THREE.Mesh | null = null;
+  private terrainShown: TerrainGrid | undefined;
+  private terrainBuild = 0;
+
+  /**
+   * Shows the map's own terrain as the export builds it (the core in the worker: grid chunks and the strips to the
+   * roads' edges), with the hill material's texture. `force` rebuilds it for the same grid (the roads changed).
+   */
+  private syncTerrain(force = false): void {
+    const grid = this.map.terrain;
+    if (grid === this.terrainShown && !force) return;
+    this.terrainShown = grid;
+    const build = ++this.terrainBuild;
+    if (!grid) { this.setTerrainMesh(null); return; }
+    void buildTerrain(this.map).then((mesh) => {
+      if (build !== this.terrainBuild) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+      geo.setAttribute("uv", new THREE.BufferAttribute(mesh.uvs, 2));
+      geo.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+      const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
+      const texture = this.library?.textureOf(TERRAIN_MATERIALS[grid.surface]);
+      if (texture) material.map = this.library!.textureImage(texture);
+      else material.color.setHex(grid.surface === "Ice" ? 0xdfe8ee : grid.surface === "Dirt" ? 0xb08a5a : 0x5f9a45);
+      const m = new THREE.Mesh(geo, material);
+      m.receiveShadow = true;
+      m.castShadow = true;
+      this.setTerrainMesh(m);
+    }).catch((err) => console.error("Terrain preview failed", err));
+  }
+
+  private setTerrainMesh(mesh: THREE.Mesh | null): void {
+    if (this.terrainMesh) {
+      this.scene.remove(this.terrainMesh);
+      this.terrainMesh.geometry.dispose();
+      (this.terrainMesh.material as THREE.Material).dispose();
+    }
+    this.terrainMesh = mesh;
+    if (mesh) this.scene.add(mesh);
   }
 
   /**
@@ -756,6 +801,25 @@ export class Editor {
   async generateScenery(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
     const lib = this.library;
     if (!lib) return null;
+    if (options.mode === "terrain") {
+      // Own terrain: a mesh of our own instead of land blocks (trees on it), replacing the generated scenery.
+      const meshes = this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r);
+      const grid = buildTerrainGrid(meshes, options);
+      if (!grid) return null;
+      const trees = plantOnTerrain(grid, options, roadFootprint(meshes));
+      this.lastHeightMap = null;
+      this.drawHeightMap();
+      this.editBlocks((blocks) => {
+        const keep = blocks.filter((b) => !b.scenery);
+        blocks.length = 0;
+        blocks.push(...keep);
+        const items = [...(this.map.items ?? []).filter((i) => !i.scenery), ...trees];
+        if (items.length) this.map.items = items;
+        else delete this.map.items;
+        this.map.terrain = grid;
+      });
+      return { blocks: 0, items: trees.length };
+    }
     // The land pieces' meshes, so trees can stand on slopes at their real surface height.
     const pieceMeshes = new Map<string, THREE.BufferGeometry>();
     await Promise.all([...new Set([...landPieces(options.theme), ...terrainPieces(options.theme)])].flatMap((name) => [true, false].map(async (ground) => {
@@ -795,6 +859,7 @@ export class Editor {
       const items = [...(this.map.items ?? []).filter((i) => !i.scenery), ...generated.items];
       if (items.length) this.map.items = items;
       else delete this.map.items;
+      delete this.map.terrain;
     });
     return { blocks: generated.blocks.length, items: generated.items.length };
   }
@@ -865,7 +930,8 @@ export class Editor {
 
   /** Removes the generated scenery, blocks and trees (one undo step); returns how many there were. */
   removeScenery(): number {
-    const count = this.map.blocks.filter((b) => b.scenery).length + (this.map.items ?? []).filter((i) => i.scenery).length;
+    const count = this.map.blocks.filter((b) => b.scenery).length + (this.map.items ?? []).filter((i) => i.scenery).length
+      + (this.map.terrain ? 1 : 0);
     if (count)
       this.editBlocks((blocks) => {
         const keep = blocks.filter((b) => !b.scenery);
@@ -874,6 +940,7 @@ export class Editor {
         const items = (this.map.items ?? []).filter((i) => !i.scenery);
         if (items.length) this.map.items = items;
         else delete this.map.items;
+        delete this.map.terrain;
       });
     return count;
   }
@@ -2163,6 +2230,8 @@ export class Editor {
     } finally {
       this.rebuildRunning = false;
     }
+    // The terrain's strips follow the roads' edges.
+    if (this.map.terrain && this.queuedQuality === 1) this.syncTerrain(true);
   }
 
   private setRoad(track: Track, mesh: PreviewMesh, banks: number[], quality: PreviewQuality): void {
@@ -2294,6 +2363,9 @@ export class Editor {
  * The game material each preview surface's item material links to (TmSpline.Core Surfaces), where the local block
  * library has its texture. Platform variants are PlatformTech with the game's surface modifier.
  */
+/** The own terrain's game materials (TmSpline.Core Surfaces.Terrain), where the block library has their textures. */
+const TERRAIN_MATERIALS: Record<TerrainSurface, string> = { Grass: "DecoHill", Dirt: "PlatformDirt/DecoHill", Ice: "PlatformIce/DecoHill" };
+
 const GAME_MATERIALS: Record<string, string> = {
   RoadTech: "RoadTech", RoadDirt: "RoadDirt", RoadBump: "RoadBump", RoadIce: "RoadIce", PlatformTech: "PlatformTech",
   PlatformDirt: "PlatformDirt/PlatformTech", PlatformGrass: "PlatformGrass/PlatformTech", PlatformIce: "PlatformIce/PlatformTech",

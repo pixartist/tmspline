@@ -166,6 +166,8 @@ public sealed partial class ExportService
         : "";
 
     private const double MaxHeight = 1960;
+    /// <summary>Most vertices of an own terrain grid (16 m cells: 10 km² or so).</summary>
+    private const int MaxTerrainVertices = 400_000;
     /// <summary>
     /// How far from the map's centre points, free blocks and items may be: 2 km beyond the 48 grid's edges (768 m).
     /// The game keeps and drives them there; the grid itself cannot grow (wider maps crash the game).
@@ -242,6 +244,19 @@ public sealed partial class ExportService
         {
             if (!double.IsFinite(s.EffectYaw) || !double.IsFinite(s.EffectPitch) || Math.Abs(s.EffectYaw) > 360 || Math.Abs(s.EffectPitch) > 90)
                 throw new ExportRejectedException("Effect direction must be within ±360° (direction) and ±90° (tilt)");
+        }
+
+        if (dto.Terrain is { } terrain)
+        {
+            if (terrain.Columns < 2 || terrain.Rows < 2 || (long)terrain.Columns * terrain.Rows > MaxTerrainVertices || terrain.Heights.Length != terrain.Columns * terrain.Rows)
+                throw new ExportRejectedException($"The terrain grid must have 2 to {MaxTerrainVertices} vertices, one height each");
+            if (!double.IsFinite(terrain.Cell) || terrain.Cell < 4 || terrain.Cell > 64 || !double.IsFinite(terrain.Skirt) || terrain.Skirt < 0 || terrain.Skirt > 64)
+                throw new ExportRejectedException("The terrain's cells must be 4 to 64 m, its skirt 0 to 64 m");
+            if (!double.IsFinite(terrain.X0) || !double.IsFinite(terrain.Z0) || Math.Abs(terrain.X0) > MaxOffset + 512 || Math.Abs(terrain.Z0) > MaxOffset + 512
+                || Math.Abs(terrain.X0 + terrain.Cell * (terrain.Columns - 1)) > MaxOffset + 512 || Math.Abs(terrain.Z0 + terrain.Cell * (terrain.Rows - 1)) > MaxOffset + 512)
+                throw new ExportRejectedException($"The terrain must stay within {MaxOffset} m of the map's centre");
+            if (terrain.Heights.Any(h => h is { } v && (!double.IsFinite(v) || v < -16 || v > MaxHeight)))
+                throw new ExportRejectedException($"Terrain heights must be between -16 and {MaxHeight:0} m");
         }
 
         var map = TrackJson.ToMap(dto);

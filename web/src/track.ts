@@ -218,6 +218,27 @@ export interface TrackMap {
   blocks: VanillaBlock[];
   /** Vanilla game items (trees, ...), exported by name; the editor draws stand-ins (their models are not converted). */
   items?: VanillaItem[];
+  /** Own terrain round the tracks (exported as custom items; see TerrainGrid). */
+  terrain?: TerrainGrid;
+}
+
+/** The terrain's look and surface: the game's hill materials (grass, dirt with sand physics, ice). */
+export type TerrainSurface = "Grass" | "Dirt" | "Ice";
+
+/**
+ * Own terrain: heights (metres) on a square grid of vertices, vertex (c, r) at x = x0 + c cell, z = z0 + r cell, rows one
+ * after another, null where there is none. A grid square is land where its four corners have heights; land at its outer
+ * edge gets a skirt down by `skirt` metres. The export adds strips from the roads' edges to it (TerrainMeshBuilder).
+ */
+export interface TerrainGrid {
+  surface: TerrainSurface;
+  cell: number;
+  x0: number;
+  z0: number;
+  columns: number;
+  rows: number;
+  heights: (number | null)[];
+  skirt: number;
 }
 
 /**
@@ -615,7 +636,15 @@ export function parseMap(json: string): TrackMap {
       name: i.name, position: i.position.map(Number) as Vec3, yaw: Number(i.yaw) || 0,
       ...(typeof i.scenery === "string" && i.scenery ? { scenery: i.scenery } : {}),
     }));
-  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}) };
+  const t = doc.terrain;
+  const terrain: TerrainGrid | undefined = t && Number.isInteger(t.columns) && Number.isInteger(t.rows) && t.columns > 1 && t.rows > 1
+    && Array.isArray(t.heights) && t.heights.length === t.columns * t.rows && t.cell > 0
+    ? {
+      surface: t.surface === "Dirt" || t.surface === "Ice" ? t.surface : "Grass", cell: Number(t.cell), x0: Number(t.x0) || 0,
+      z0: Number(t.z0) || 0, columns: t.columns, rows: t.rows, skirt: Math.max(0, Number(t.skirt) || 0),
+      heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
+    } : undefined;
+  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...(terrain ? { terrain } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

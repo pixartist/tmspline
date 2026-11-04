@@ -22,6 +22,17 @@ public static class Surfaces
     /// <summary>Underside and plain side walls: near-black matte concrete, like the native roads.</summary>
     public static readonly TmMaterial Underside = new("Underside", "CustomConcrete", Color: "141416");
 
+    /// <summary>
+    /// Own terrain: the hill blocks' materials (grass; dirt with sand physics; ice), textured by world position like
+    /// them (projection "pypxz", 32 m tiles), so the terrain looks like the DecoHill pieces.
+    /// </summary>
+    public static TmMaterial Terrain(TerrainSurface surface) => surface switch
+    {
+        TerrainSurface.Dirt => new("TerrainDirt", "PlatformDirt_DecoHill"),
+        TerrainSurface.Ice => new("TerrainIce", "PlatformIce_DecoHill"),
+        _ => new("TerrainGrass", "DecoHill"),
+    };
+
     /// <summary>Pillars under the road: light grey concrete.</summary>
     public static readonly TmMaterial Pillar = new("Pillar", "CustomConcrete", Color: "8C9096");
 

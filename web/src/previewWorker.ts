@@ -1,9 +1,9 @@
 // Runs TmSpline.Core (.NET WebAssembly) off the main thread, so mesh rebuilds never freeze the editor.
-// Messages in:  { type: "init" } | { type: "build", id, json, quality }
+// Messages in:  { type: "init" } | { type: "build", id, json, quality } | { type: "terrain", id, json (the map) }
 // Messages out: { type: "ready" } | { type: "result", id, bytes } | { type: "error", id?, message }
 
 interface WasmExports {
-  TmSpline: { Wasm: { Interop: { BuildPreview(json: string, quality: number): Uint8Array } } };
+  TmSpline: { Wasm: { Interop: { BuildPreview(json: string, quality: number): Uint8Array; BuildTerrain(json: string): Uint8Array } } };
 }
 
 // Typed by hand: the project's DOM lib types `self` as a Window, not a worker scope.
@@ -34,7 +34,8 @@ ctx.onmessage = async (e: MessageEvent) => {
       return;
     }
     // Copy into a buffer we own before transferring it to the main thread.
-    const bytes = core.TmSpline.Wasm.Interop.BuildPreview(msg.json!, msg.quality ?? 1).slice();
+    const interop = core.TmSpline.Wasm.Interop;
+    const bytes = (msg.type === "terrain" ? interop.BuildTerrain(msg.json!) : interop.BuildPreview(msg.json!, msg.quality ?? 1)).slice();
     ctx.postMessage({ type: "result", id: msg.id, bytes }, [bytes.buffer]);
   } catch (err) {
     ctx.postMessage({ type: "error", id: msg.id, message: String(err) });

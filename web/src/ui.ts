@@ -6,7 +6,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { mode: "fill" as "fill" | "nestle", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -529,8 +529,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     // Settings that show or hide other fields redraw the inspector.
     const relayout = () => editor.onChange();
     const nestle = scenery.mode === "nestle";
-    selectField(root, "Mode", ["fill", "nestle"], () => scenery.mode, (v) => { scenery.mode = v as typeof scenery.mode; relayout(); }, false,
-      { fill: "Fill the grid (from the ground)", nestle: "Nestle (band at the track's height)" });
+    // Nestle and the own terrain are a band round the tracks.
+    const banded = scenery.mode !== "fill";
+    selectField(root, "Mode", ["fill", "nestle", "terrain"], () => scenery.mode, (v) => { scenery.mode = v as typeof scenery.mode; relayout(); }, false,
+      { fill: "Fill the grid (from the ground)", nestle: "Nestle (band at the track's height)", terrain: "Own terrain (mesh, experimental)" });
     if (nestle) {
       selectField(root, "2-level slopes", ["smooth", "hill", "alone"], () => scenery.look, (v) => (scenery.look = v as typeof scenery.look), false,
         { smooth: "Smooth (platform slopes)", hill: "Hill (terraced, where it fits)", alone: "Hill where a slope stands alone" });
@@ -538,21 +540,21 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         { fit: "Best fit per cell (small steps)", lower: "Lower to fit (no steps)", steps: "Steps away from the roads" });
       checkbox(root, "Show height map", () => scenery.showHeightMap, (v) => { scenery.showHeightMap = v; editor.showHeightMap(v); });
     }
-    if (!nestle) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
+    if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
-    if (nestle) {
+    if (banded) {
       numberField(root, "Band (cells)", () => scenery.band, (v) => (scenery.band = int(v, 1, 24)), 1);
     }
-    if (scenery.hills || nestle) {
+    if (scenery.hills || banded) {
       numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
       // With cliffs the hills climb to their top instead.
-      if (scenery.cliffs === 0 || nestle)
+      if (scenery.cliffs === 0 || banded)
         numberField(root, "Hill height (levels)", () => scenery.hillRise, (v) => (scenery.hillRise = int(v, 0, 16)), 2);
-      if (scenery.cliffs === 0 || nestle)
+      if (scenery.cliffs === 0 || banded)
         numberField(root, "Rise over distance (levels per cell, 0 = off)", () => scenery.farRise,
           (v) => (scenery.farRise = Math.max(0, Math.min(4, Math.round(v * 100) / 100))), 0.25);
     }
-    if (!nestle)
+    if (!banded)
       numberField(root, "Cliffs at (cells, 0 = none)", () => scenery.cliffs, (v) => { scenery.cliffs = int(v, 0, 24); relayout(); }, 1);
     // The theme sets the land's surface and the cliffs, and picks its forest (which can still be changed).
     selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => {

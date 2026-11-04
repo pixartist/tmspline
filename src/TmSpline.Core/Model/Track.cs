@@ -300,6 +300,9 @@ public sealed class TrackMap
     /// <summary>Vanilla game items (trees, ...), written into the map by name (the game has their models).</summary>
     public List<VanillaItem> Items { get; } = new();
 
+    /// <summary>Own terrain round the tracks (exported as custom items), or null.</summary>
+    public TerrainGrid? Terrain { get; set; }
+
     public static TrackMap Single(Track track, string name = "Untitled") => new() { Name = name, Tracks = { track } };
 }
 

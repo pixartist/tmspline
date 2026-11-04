@@ -39,6 +39,22 @@ public static class TrackJson
         /// <summary>Vanilla items of the map (trees, ...; version 2 maps only).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<ItemDto>? Items { get; set; }
+        /// <summary>Own terrain round the tracks (version 2 maps only; see TerrainGrid).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public TerrainDto? Terrain { get; set; }
+    }
+
+    /// <summary>See TerrainGrid; Heights null where there is no terrain.</summary>
+    public sealed class TerrainDto
+    {
+        public TerrainSurface Surface { get; set; }
+        public double Cell { get; set; } = 16;
+        public double X0 { get; set; }
+        public double Z0 { get; set; }
+        public int Columns { get; set; }
+        public int Rows { get; set; }
+        public double?[] Heights { get; set; } = [];
+        public double Skirt { get; set; } = 16;
     }
 
     public sealed class ItemDto
@@ -178,6 +194,12 @@ public static class TrackJson
         foreach (var i in dto.Items ?? new())
             if (!string.IsNullOrWhiteSpace(i.Name) && i.Position is { Length: 3 } p)
                 map.Items.Add(new VanillaItem { Name = i.Name, Position = V(p), Yaw = i.Yaw });
+        if (dto.Terrain is { Columns: > 1, Rows: > 1 } t && t.Heights.Length == t.Columns * t.Rows && t.Cell > 0)
+            map.Terrain = new TerrainGrid
+            {
+                Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
+                Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
+            };
         return map;
     }
 
