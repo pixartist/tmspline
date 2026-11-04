@@ -220,7 +220,9 @@ export function generateTerrain(lib: VanillaLibrary, input: SceneryInput, option
         const hs = p.map((v) => m + v);
         if (hs.some((v, i) => v < 0 || v > TOP_LEVEL || (caps.has(ks[i]) && v > caps.get(ks[i])!))) continue;
         // Below the wish costs a little more than above, so the land rather stays up than sinks.
-        const cost = hs.reduce((s, v, i) => s + (v - want[i]) ** 2 * (v < want[i] ? 1.1 : 1), 0);
+        // With a hill look a tie goes to the 2-level shapes (they have hill pieces, the 1-level ones have none).
+        const cost = hs.reduce((s, v, i) => s + (v - want[i]) ** 2 * (v < want[i] ? 1.1 : 1), 0)
+          - (terrain.look !== "smooth" && Math.max(...p) === 2 ? 0.01 : 0);
         if (cost < bestCost) { bestCost = cost; best = hs; }
       }
     return best;
