@@ -5,6 +5,7 @@ import { buildPreview, type ObjectPlacement, type PreviewMesh, type PreviewQuali
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
+import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
@@ -193,6 +194,10 @@ export class Editor {
     new THREE.LineBasicMaterial({ color: 0x1c2228, transparent: true, opacity: 0.55 }));
   /** Green bars joining the tops of the gates of each linked checkpoint group (across all tracks). */
   private readonly checkpointLinks = new THREE.Group();
+  /** Terrain mode's height map (debug view), see showHeightMap. */
+  private readonly heightMap = new THREE.Group();
+  private lastHeightMap: TerrainDebug | null = null;
+  private heightMapShown = false;
   private readonly checkpointLinkMaterial = new THREE.MeshBasicMaterial({ color: 0x3fe07a, transparent: true, opacity: 0.85 });
   private blockTarget: VanillaBlock | null = null;
   private lastBlockPlace: Editor["blockPlace"] = null;
@@ -289,6 +294,7 @@ export class Editor {
     this.dropLines.frustumCulled = false;
     this.scene.add(this.dropLines);
     this.scene.add(this.checkpointLinks);
+    this.scene.add(this.heightMap);
     void VanillaLibrary.load().then((lib) => {
       this.library = lib;
       this.blocks.setLibrary(lib);
@@ -752,7 +758,7 @@ export class Editor {
     if (!lib) return null;
     // The land pieces' meshes, so trees can stand on slopes at their real surface height.
     const pieceMeshes = new Map<string, THREE.BufferGeometry>();
-    await Promise.all(landPieces(options.theme).flatMap((name) => [true, false].map(async (ground) => {
+    await Promise.all([...new Set([...landPieces(options.theme), ...terrainPieces(options.theme)])].flatMap((name) => [true, false].map(async (ground) => {
       const file = lib.variant(name, ground)?.mesh?.file;
       if (file && !pieceMeshes.has(file)) pieceMeshes.set(file, await lib.geometry(file));
     })));
@@ -775,8 +781,13 @@ export class Editor {
     const footprint = roadFootprint(meshes);
     // The blocks themselves, not their columns: land may rise under an air block (its columns then stop on it).
     const occupied = occupiedCells(own, lib);
-    const generated = generateScenery(lib, { roads, footprint, occupied, surface }, options);
+    const input = { roads, footprint, occupied, surface, roadsFine: roadColumns(meshes, BLOCK_CELL / 2) };
+    const terrain = options.mode === "terrain"
+      ? generateTerrain(lib, input, options, { look: options.look ?? "hill", clearance: 0.5, fix: options.fix ?? "nearest" }) : null;
+    const generated = options.mode === "terrain" ? terrain : generateScenery(lib, input, options);
     if (!generated) return null;
+    this.lastHeightMap = terrain?.debug ?? null;
+    this.drawHeightMap();
     this.editBlocks((blocks) => {
       const keep = blocks.filter((b) => !b.scenery);
       blocks.length = 0;
@@ -786,6 +797,60 @@ export class Editor {
       else delete this.map.items;
     });
     return { blocks: generated.blocks.length, items: generated.items.length };
+  }
+
+  /** Shows or hides the last terrain height map (corners as dots, cells as a grid; see drawHeightMap). */
+  showHeightMap(on: boolean): void {
+    this.heightMapShown = on;
+    this.drawHeightMap();
+  }
+
+  get hasHeightMap(): boolean { return !!this.lastHeightMap; }
+
+  /**
+   * The height map's corners at their final heights (a level's top, 2 m above its floor) joined by grid lines. Dots:
+   * blue where a road or block holds the corner down, green where it got its wish, orange where it was lowered for a
+   * piece to fit, with a red line up to the wished height.
+   */
+  private drawHeightMap(): void {
+    for (const child of this.heightMap.children) {
+      const o = child as THREE.Points | THREE.LineSegments;
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+    this.heightMap.clear();
+    const map = this.lastHeightMap;
+    if (!map || !this.heightMapShown) { return; }
+    const y = (level: number) => level * BLOCK_LEVEL + 2 + 0.4;
+    const dots: number[] = [], colors: number[] = [], grid: number[] = [], wish: number[] = [];
+    const c = new THREE.Color();
+    for (const [k, level] of map.final) {
+      const [i, j] = k.split(",").map(Number);
+      const x = i * BLOCK_CELL, z = j * BLOCK_CELL;
+      dots.push(x, y(level), z);
+      const wanted = map.target.get(k) ?? level;
+      c.setHex(map.capped.has(k) && wanted === level ? 0x3080ff : wanted > level ? 0xff9020 : 0x40d040);
+      colors.push(c.r, c.g, c.b);
+      if (wanted > level) wish.push(x, y(level), z, x, y(wanted), z);
+      for (const [di, dj] of [[1, 0], [0, 1]]) {
+        const n = map.final.get(`${i + di},${j + dj}`);
+        if (n !== undefined) grid.push(x, y(level), z, (i + di) * BLOCK_CELL, y(n), (j + dj) * BLOCK_CELL);
+      }
+    }
+    const pointGeo = new THREE.BufferGeometry();
+    pointGeo.setAttribute("position", new THREE.Float32BufferAttribute(dots, 3));
+    pointGeo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    const points = new THREE.Points(pointGeo, new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true, depthTest: false }));
+    points.renderOrder = 10;
+    const lines = (data: number[], color: number) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(data, 3));
+      const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.8 }));
+      l.renderOrder = 9;
+      return l;
+    };
+    this.heightMap.add(lines(grid, 0xffffff), lines(wish, 0xff3020), points);
+
   }
 
   /** Removes the generated scenery, blocks and trees (one undo step); returns how many there were. */

@@ -32,6 +32,8 @@ export const SCENERY_THEMES: SceneryTheme[] = [
 export interface SceneryInput {
   /** Lowest point of the roads per grid column ("x,z" → metres above the ground). */
   roads: Map<string, number>;
+  /** The same per 16 m square (terrain mode: caps the height map's corners). */
+  roadsFine?: Map<string, number>;
   /** Where the roads are, at any height: FOOTPRINT_CELL squares ("x,z") the road meshes cover (see roadFootprint). */
   footprint: Set<string>;
   /** Grid cells taken by blocks ("x,y,z", levels), the scenery's own excluded. */
@@ -99,7 +101,7 @@ const parse = (k: string) => k.split(",").map(Number) as Cell;
  * Distance in cells (8 neighbours) from the source cells over the map (or the cells `within` allows, up to `reach`), and
  * the value of the nearest source (the lowest where several are equally near) and which source that is.
  */
-function spread(sources: Map<string, number>, within: (x: number, z: number) => boolean = inMap, reach = Infinity):
+export function spread(sources: Map<string, number>, within: (x: number, z: number) => boolean = inMap, reach = Infinity):
   { dist: Map<string, number>; base: Map<string, number>; from: Map<string, Cell> } {
   const dist = new Map<string, number>(), base = new Map<string, number>();
   // The source each cell took its value from: among equally near sources (8-neighbour steps) the one closest in a
@@ -146,7 +148,11 @@ export interface SceneryLandOptions extends SceneryOptions {
    * "fill": the whole grid from the ground up (cliffs as a backdrop). "nestle": a band of land `band` cells wide beyond the
    * shoulder, at the tracks' own height, as free blocks without columns (floating), on the grid and outside it.
    */
-  mode: "fill" | "nestle";
+  mode: "fill" | "nestle" | "terrain";
+  /** Terrain: look of the 2-level slopes. */
+  look?: "hill" | "platform";
+  /** Terrain: how cells without a matching piece are fixed (see TerrainOptions.fix). */
+  fix?: "lower" | "nearest";
   /** Nestle: cells of land beyond the shoulder. */
   band: number;
   /**
@@ -179,7 +185,7 @@ export interface SceneryLandOptions extends SceneryOptions {
 export const FOOTPRINT_CELL = 2;
 
 /** Whether a spot is at least `clearance` metres from every footprint square (measured to the square's nearest point). */
-function clearOfRoads(footprint: Set<string>, px: number, pz: number, clearance: number): boolean {
+export function clearOfRoads(footprint: Set<string>, px: number, pz: number, clearance: number): boolean {
   const reach = Math.ceil(clearance / FOOTPRINT_CELL) + 1;
   const [cx, cz] = [Math.floor(px / FOOTPRINT_CELL), Math.floor(pz / FOOTPRINT_CELL)];
   for (let dx = -reach; dx <= reach; dx++)
@@ -224,7 +230,7 @@ function random(seed: number): () => number {
  * Trees on flat cells (level → its surface): a share `density` of them get 1..4 trees at random spots, kept 7 m apart,
  * 3 m from the cell's edges and `clear` of the roads, random sizes and turns.
  */
-function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string,
+export function plantForest(surfaces: Map<string, number>, forest: string, density: number, theme: string,
   clear: (x: number, z: number) => boolean, slopes = new Map<string, VanillaBlock>(),
   surface?: SceneryInput["surface"]): VanillaItem[] {
   const kind = FORESTS.find((f) => f.id === forest);
@@ -326,7 +332,7 @@ function gridCells(): string[] {
  * The highest level land may reach: the game's limit for blocks (the export refuses grid blocks above it, and free
  * blocks above 1960 m), so land rising away from a track high up levels off there.
  */
-const TOP_LEVEL = 240;
+export const TOP_LEVEL = 240;
 
 /** The column piece the game puts under land tiles in the air (the same for grass, dirt and ice). */
 const COLUMN = "DecoWallBasePillar";
@@ -412,7 +418,7 @@ function nestleBlocks(lib: VanillaLibrary, land: VanillaBlock[], height: Map<str
 }
 
 /** The same block placed freely, exactly where it stands on the grid (as the editor's Tab converts it). */
-function freeBlock(lib: VanillaLibrary, b: VanillaBlock): VanillaBlock {
+export function freeBlock(lib: VanillaLibrary, b: VanillaBlock): VanillaBlock {
   const origin = new THREE.Vector3().setFromMatrixPosition(blockMatrix(b, blockSize(lib, b)));
   return { ...b, free: true, position: [origin.x, origin.y, origin.z], yaw: wrapBank(-b.dir * 90), pitch: 0, roll: 0 };
 }
@@ -685,11 +691,11 @@ function cliffWalls(lib: VanillaLibrary, theme: SceneryTheme, dist: Map<string, 
   return { blocks, high, front, top: outer.height - 1 };
 }
 
-/** Lowest road point per grid column, from road meshes (world space). Triangles are sampled every few metres. */
-export function roadColumns(meshes: THREE.Mesh[]): Map<string, number> {
+/** Lowest road point per grid column (or per `cell` metres), from road meshes (world space), sampled every few metres. */
+export function roadColumns(meshes: THREE.Mesh[], cell = BLOCK_CELL): Map<string, number> {
   const columns = new Map<string, number>();
-  sampleRoads(meshes, 4, (v) => {
-    const k = key(Math.floor(v.x / BLOCK_CELL), Math.floor(v.z / BLOCK_CELL));
+  sampleRoads(meshes, Math.min(4, cell / 4), (v) => {
+    const k = key(Math.floor(v.x / cell), Math.floor(v.z / cell));
     columns.set(k, Math.min(columns.get(k) ?? Infinity, v.y));
   });
   return columns;
@@ -703,7 +709,7 @@ export function roadFootprint(meshes: THREE.Mesh[]): Set<string> {
 }
 
 /** Calls `mark` with points on every triangle of the meshes (world space), at most `step` metres apart. */
-function sampleRoads(meshes: THREE.Mesh[], step: number, mark: (v: THREE.Vector3) => void): void {
+export function sampleRoads(meshes: THREE.Mesh[], step: number, mark: (v: THREE.Vector3) => void): void {
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), p = new THREE.Vector3();
   for (const mesh of meshes) {
     mesh.updateMatrixWorld();

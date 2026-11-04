@@ -6,7 +6,7 @@ import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
 
 /** Scenery panel settings (kept while the page is open). */
-const scenery = { mode: "fill" as "fill" | "nestle", band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, steps: true, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "hill" as "hill" | "platform", showHeightMap: true, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, steps: true, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -528,14 +528,21 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     const int = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
     // Settings that show or hide other fields redraw the inspector.
     const relayout = () => editor.onChange();
-    const nestle = scenery.mode === "nestle";
-    selectField(root, "Mode", ["fill", "nestle"], () => scenery.mode, (v) => { scenery.mode = v as "fill" | "nestle"; relayout(); }, false,
-      { fill: "Fill the grid (from the ground)", nestle: "Nestle (band at the track's height)" });
+    // Terrain (height map, then pieces) is a band like nestle.
+    const terrain = scenery.mode === "terrain";
+    const nestle = scenery.mode === "nestle" || terrain;
+    selectField(root, "Mode", ["fill", "nestle", "terrain"], () => scenery.mode, (v) => { scenery.mode = v as typeof scenery.mode; relayout(); }, false,
+      { fill: "Fill the grid (from the ground)", nestle: "Nestle (band at the track's height)", terrain: "Terrain (height map, experimental)" });
+    if (terrain) {
+      selectField(root, "Steep slopes", ["hill", "platform"], () => scenery.look, (v) => (scenery.look = v as typeof scenery.look), false,
+        { hill: "Hill (rounded)", platform: "Platform (flat faces)" });
+      checkbox(root, "Show height map", () => scenery.showHeightMap, (v) => { scenery.showHeightMap = v; editor.showHeightMap(v); });
+    }
     if (!nestle) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
     if (nestle) {
       numberField(root, "Band (cells)", () => scenery.band, (v) => (scenery.band = int(v, 1, 24)), 1);
-      checkbox(root, "Steps where too steep", () => scenery.steps, (v) => (scenery.steps = v));
+      if (!terrain) checkbox(root, "Steps where too steep", () => scenery.steps, (v) => (scenery.steps = v));
     }
     if (scenery.hills || nestle) {
       numberField(root, "Hill step (cells)", () => scenery.hillStep, (v) => (scenery.hillStep = int(v, 1, 8)), 1);
@@ -564,6 +571,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         label: "Generate", onClick: async () => {
           const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
           const n = await editor.generateScenery({ ...scenery, theme });
+          editor.showHeightMap(scenery.mode === "terrain" && scenery.showHeightMap);
           scenery.note = n === null ? "The block library lacks pieces for these settings."
             : `Placed ${n.blocks} blocks${n.items ? ` and ${n.items} trees` : ""}.`;
           editor.onChange();
