@@ -97,10 +97,10 @@ const parse = (k: string) => k.split(",").map(Number) as Cell;
 
 /**
  * Distance in cells (8 neighbours) from the source cells over the map (or the cells `within` allows, up to `reach`), and
- * the value of the nearest source (the lowest where several are equally near).
+ * the value of the nearest source (the lowest where several are equally near) and which source that is.
  */
 function spread(sources: Map<string, number>, within: (x: number, z: number) => boolean = inMap, reach = Infinity):
-  { dist: Map<string, number>; base: Map<string, number> } {
+  { dist: Map<string, number>; base: Map<string, number>; from: Map<string, Cell> } {
   const dist = new Map<string, number>(), base = new Map<string, number>();
   // The source each cell took its value from: among equally near sources (8-neighbour steps) the one closest in a
   // straight line wins, then the lowest. Beside a sloping road that is the road right next to the cell; taking the
@@ -138,7 +138,7 @@ function spread(sources: Map<string, number>, within: (x: number, z: number) => 
         }
     frontier = next;
   }
-  return { dist, base };
+  return { dist, base, from };
 }
 
 export interface SceneryLandOptions extends SceneryOptions {
@@ -272,7 +272,7 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
   if (track.size === 0) return { blocks: [], items: [] };
   const nestle = options.mode === "nestle";
   // Nestle: only the band round the tracks, wherever they are (also outside the grid).
-  const { dist, base } = nestle ? spread(track, inWorld, Math.max(0, options.gap) + Math.max(1, options.band)) : spread(track);
+  const { dist, base, from } = nestle ? spread(track, inWorld, Math.max(0, options.gap) + Math.max(1, options.band)) : spread(track);
 
   const blocks: VanillaBlock[] = [];
   let cliff: Cliffs | null = null;
@@ -297,8 +297,11 @@ export function generateScenery(lib: VanillaLibrary, input: SceneryInput, option
     if (!land) return null;
     // Nestle floats: every piece becomes the same block placed freely (free blocks get no columns, and may stand outside
     // the grid).
-    blocks.push(...(nestle ? nestleBlocks(lib, land.blocks, land.height, options.theme.id) : land.blocks));
-    surfaces = land.flat;
+    // Nestle's free blocks may stand at any height: the flat land under the roads and on the shoulder is lifted from its
+    // level to just below the nearest road, so it meets the road instead of a drop of up to a level.
+    const lifts = nestle ? liftsToRoads(input.roads, land.flat, dist, from, options.gap) : new Map<string, number>();
+    blocks.push(...(nestle ? nestleBlocks(lib, land.blocks, land.height, options.theme, lifts) : land.blocks));
+    surfaces = new Map([...land.flat].map(([k, v]) => [k, v + (lifts.get(k) ?? 0) / BLOCK_LEVEL]));
     slopes = land.slopes;
   } else
     for (let x = -HALF; x < HALF; x++)
@@ -328,38 +331,84 @@ const TOP_LEVEL = 240;
 /** The column piece the game puts under land tiles in the air (the same for grass, dirt and ice). */
 const COLUMN = "DecoWallBasePillar";
 
+/** How far below a road's lowest point lifted land ends (its top), so the road's underside never sinks into it. */
+const LIFT_CLEARANCE = 0.5;
+
+/**
+ * Nestle: metres to lift flat land cells by (cell → 0..8.5 m), so the land under the roads and on the shoulder (`gap`
+ * cells) ends just below the road it took its height from instead of on the level below. Only cells still at that road's
+ * level are lifted (not those that blocks or the hills moved).
+ */
+function liftsToRoads(roads: Map<string, number>, flat: Map<string, number>, dist: Map<string, number>,
+  from: Map<string, Cell>, gap: number): Map<string, number> {
+  const lifts = new Map<string, number>();
+  for (const [k, v] of flat) {
+    if ((dist.get(k) ?? Infinity) > gap) continue;
+    const src = from.get(k);
+    const lowest = src && roads.get(key(src[0], src[1]));
+    if (lowest === undefined) continue;
+    const lift = lowest - LIFT_CLEARANCE - (v * BLOCK_LEVEL + 2);
+    if (lift > 0.05 && lift <= BLOCK_LEVEL + 0.5) lifts.set(k, lift);
+  }
+  return lifts;
+}
+
 /**
  * Nestle's free blocks get no columns from the game, so where a cell is higher than a neighbour the step would stay open.
- * Each cell gets column pieces from the level of its lowest neighbour (all eight) up to just below its own tile: the
- * piece under level v reaches v's floor, the tile's plate sits 2 m above it, and the lowest piece starts below the
- * neighbour's plate (checked in game: stacked free DecoWallBasePillar close such a step).
+ * Each cell gets column pieces (8 m each, stacked down from its tile) until they reach below the top of its lowest
+ * neighbour (all eight): a tile's plate sits 2 m above its origin, and the lowest piece starts below the neighbour's
+ * plate (checked in game: stacked free DecoWallBasePillar close such a step). Cell → origins (m) of its pieces.
  */
-function columns(lib: VanillaLibrary, height: Map<string, number>, theme: string): VanillaBlock[] {
-  if (!lib.has(COLUMN)) return [];
-  const out: VanillaBlock[] = [];
-  for (const [k, v] of height) {
+function columns(height: Map<string, number>, lifts: Map<string, number>): Map<string, number[]> {
+  const top = (k: string) => height.get(k)! * BLOCK_LEVEL + 2 + (lifts.get(k) ?? 0);
+  const out = new Map<string, number[]>();
+  for (const k of height.keys()) {
     const [x, z] = parse(k);
-    let low = v;
+    let low = top(k);
     for (let dx = -1; dx <= 1; dx++)
       for (let dz = -1; dz <= 1; dz++) {
-        const n = height.get(key(x + dx, z + dz));
-        if (n !== undefined && n < low) low = n;
+        const n = key(x + dx, z + dz);
+        if (height.has(n)) low = Math.min(low, top(n));
       }
-    for (let level = low; level < v; level++) out.push({ name: COLUMN, x, y: level, z, dir: 0, scenery: theme });
+    const origin = top(k) - 2, lowOrigin = low - 2;
+    const count = Math.ceil((origin - lowOrigin) / BLOCK_LEVEL - 1e-6);
+    if (count > 0) out.set(k, Array.from({ length: count }, (_, i) => origin - BLOCK_LEVEL * (i + 1)));
   }
   return out;
 }
 
 /**
- * Nestle's pieces as free blocks, with the columns that close the steps. A 1-level slope standing on a column gets the
- * adapter bit, which shows its "column below" version (its sides reach down to the column); hill slopes show theirs
- * without it, and the bit would hide it (checked in game).
+ * Nestle's pieces as free blocks (flat land lifted by `lifts`), with the columns that close the steps. A 1-level slope
+ * standing on a column gets the adapter bit, which shows its "column below" version (its sides reach down to the
+ * column); hill slopes show theirs without it, and the bit would hide it (checked in game).
  */
-function nestleBlocks(lib: VanillaLibrary, land: VanillaBlock[], height: Map<string, number>, theme: string): VanillaBlock[] {
-  const cols = columns(lib, height, theme);
-  const onColumn = new Set(cols.map((c) => `${c.x},${c.y + 1},${c.z}`));
-  const pieces = land.map((b) => onColumn.has(`${b.x},${b.y},${b.z}`) && lib.hasColumnAdapter(b.name) ? { ...b, extraFlags: GROUND_ADAPTER_FLAG } : b);
-  return [...pieces, ...cols].map((b) => freeBlock(lib, b));
+function nestleBlocks(lib: VanillaLibrary, land: VanillaBlock[], height: Map<string, number>, theme: SceneryTheme,
+  lifts: Map<string, number>): VanillaBlock[] {
+  const flat = landPieces(theme)[0];
+  const cols = lib.has(COLUMN) ? columns(height, lifts) : new Map<string, number[]>();
+  const raised = (b: VanillaBlock, dy: number) => {
+    const f = freeBlock(lib, b);
+    return dy ? { ...f, position: [f.position![0], f.position![1] + dy, f.position![2]] as [number, number, number] } : f;
+  };
+  const out: VanillaBlock[] = [];
+  const placed = new Set<string>();
+  for (const b of land) {
+    const k = key(b.x, b.z);
+    placed.add(k);
+    const adapter = cols.has(k) && lib.hasColumnAdapter(b.name);
+    out.push(raised(adapter ? { ...b, extraFlags: GROUND_ADAPTER_FLAG } : b, lifts.get(k) ?? 0));
+  }
+  // Lifted ground on the grid (level 0 has no tile there) needs its own tile.
+  for (const [k, lift] of lifts)
+    if (!placed.has(k)) {
+      const [x, z] = parse(k);
+      out.push(raised({ name: flat, x, y: height.get(k)!, z, dir: 0, scenery: theme.id }, lift));
+    }
+  for (const [k, origins] of cols) {
+    const [x, z] = parse(k);
+    for (const y of origins) out.push(raised({ name: COLUMN, x, y: 0, z, dir: 0, scenery: theme.id }, y));
+  }
+  return out;
 }
 
 /** The same block placed freely, exactly where it stands on the grid (as the editor's Tab converts it). */
