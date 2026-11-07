@@ -195,9 +195,11 @@ public static class TerrainMeshBuilder
     /// </code>
     /// Empty (both counts 0) without terrain.
     /// </summary>
-    public static byte[] Preview(string mapJson)
+    public static byte[] Preview(string mapJson) => Preview(TrackJson.ParseMap(mapJson));
+
+    /// <summary>See <see cref="Preview(string)"/>.</summary>
+    public static byte[] Preview(TrackMap map)
     {
-        var map = TrackJson.ParseMap(mapJson);
         var chunks = map.Terrain is { } grid ? Build(grid, map) : [];
         var positions = new List<Vector3>();
         var normals = new List<Vector3>();

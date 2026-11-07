@@ -91,6 +91,13 @@ public sealed partial class ExportService
         }).ToList();
     }
 
+    /// <summary>The map's own terrain as the export builds it, packed for the editor (TerrainMeshBuilder.Preview).</summary>
+    public byte[] TerrainPreview(ExportRequestDto request)
+    {
+        var (map, _) = Validate(request);
+        return TerrainMeshBuilder.Preview(map);
+    }
+
     public async Task<ExportedMap> ExportAsync(ExportRequestDto request, CancellationToken ct)
     {
         var (map, name) = Validate(request);

@@ -6,7 +6,7 @@ import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, 
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
-import { buildTerrainGrid, plantOnTerrain } from "./ownTerrain";
+import { buildTerrainGrid, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
@@ -146,6 +146,19 @@ const REACTOR_EFFECTS = [3, 4];
 const SCREEN_SIZE = 0.011;
 const OBJECT_MARKER = new THREE.OctahedronGeometry(1.1);
 const DRAG_THRESHOLD_PX = 3;
+
+/** Terrain brushes: raise and lower the land, smooth it, or flatten it to the height where the stroke started. */
+export type TerrainBrush = "raise" | "lower" | "smooth" | "flatten";
+export interface TerrainPaint {
+  brush: TerrainBrush;
+  /** Radius, metres. */
+  radius: number;
+  /** Raise/lower: metres per dab at the middle; smooth/flatten: how far towards the target per dab (0..1). */
+  strength: number;
+}
+/** Land lower than the stadium's ground lies this deep (ownTerrain's SUNK). */
+const SUNK_LAND = -2;
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 /** Height range of track points and free blocks, meters above the ground (the export server's limit; the exported map grows to fit). */
 const Y_MIN = -8, Y_MAX = 1960;
 /**
@@ -170,6 +183,14 @@ export class Editor {
   onChange: () => void = () => {};
   /** Called before a user edit starts, with a snapshot of the map (for undo). */
   onBeforeEdit: (snapshot: TrackMap) => void = () => {};
+  /** What the editor is busy with for a while (generating, meshing the terrain), or null when nothing. */
+  onBusy: (message: string | null) => void = () => {};
+  private readonly busy = new Map<string, string>();
+  private setBusy(key: string, message: string | null): void {
+    if (message) this.busy.set(key, message);
+    else this.busy.delete(key);
+    this.onBusy([...this.busy.values()].at(-1) ?? null);
+  }
   /** Optional axis-arrow gizmo for precise moves (toggled with G). */
   axisGizmoEnabled = false;
   /** Insert mode: hovering the road previews where a click inserts a point. */
@@ -764,9 +785,11 @@ export class Editor {
     if (grid === this.terrainShown && !force) return;
     this.terrainShown = grid;
     const build = ++this.terrainBuild;
-    if (!grid) { this.setTerrainMesh(null); return; }
+    if (!grid) { this.setTerrainMesh(null); this.setQuickTerrain(false); this.setBusy("terrain", null); return; }
+    this.setBusy("terrain", "Meshing the terrain…");
     void buildTerrain(this.map).then((mesh) => {
       if (build !== this.terrainBuild) return;
+      this.setBusy("terrain", null);
       // The game projects both materials' textures by position: from above for the land, from the side for the rock
       // (each rock triangle on its own vertices, projected along its steeper side).
       const triangles = mesh.indices.length / 3, land = triangles - mesh.rockTriangles;
@@ -808,7 +831,10 @@ export class Editor {
       m.receiveShadow = true;
       m.castShadow = true;
       this.setTerrainMesh(m);
-    }).catch((err) => console.error("Terrain preview failed", err));
+    }).catch((err) => {
+      if (build === this.terrainBuild) this.setBusy("terrain", null);
+      console.error("Terrain preview failed", err);
+    });
   }
 
   private setTerrainMesh(mesh: THREE.Mesh | null): void {
@@ -819,6 +845,214 @@ export class Editor {
     }
     this.terrainMesh = mesh;
     if (mesh) this.scene.add(mesh);
+    // Built from the painted land: the quick mesh is done, unless a stroke is on (then this one is already behind).
+    if (mesh && this.stroke) mesh.visible = false;
+    else this.setQuickTerrain(false);
+  }
+
+  // ---- terrain painting --------------------------------------------------------------------------
+
+  /** The brush while painting the terrain (left drags paint), or null. */
+  terrainPaint: TerrainPaint | null = null;
+  private stroke: { pointerId: number; last: THREE.Vector3 | null; flat: number; x0: number; z0: number; x1: number; z1: number } | null = null;
+  private brushRing: THREE.LineLoop | null = null;
+  /** While painting: the land's grid as a plain mesh, updated with every dab (the real mesh follows after a stroke). */
+  private quickTerrain: THREE.Mesh | null = null;
+
+  setTerrainPaint(paint: TerrainPaint | null): void {
+    this.terrainPaint = paint;
+    if (!paint && this.brushRing) this.brushRing.visible = false;
+    this.renderer.domElement.style.cursor = paint ? "crosshair" : "";
+  }
+
+  /** Where the pointer's ray meets the land (the grid's triangles), or null. */
+  private terrainHit(e: PointerEvent): THREE.Vector3 | null {
+    const grid = this.map.terrain;
+    if (!grid) return null;
+    const ray = this.rayFrom(e).ray;
+    const p = new THREE.Vector3();
+    let prev = 0;
+    for (let t = 0; t < 4000; t += 1) {
+      ray.at(t, p);
+      const h = terrainHeight(grid, p.x, p.z);
+      if (h !== null && p.y <= h) {
+        // Refine between the last step above and this one.
+        let lo = prev, hi = t;
+        for (let k = 0; k < 12; k++) {
+          const mid = (lo + hi) / 2;
+          ray.at(mid, p);
+          const hm = terrainHeight(grid, p.x, p.z);
+          if (hm !== null && p.y <= hm) hi = mid; else lo = mid;
+        }
+        ray.at(hi, p);
+        return p.clone();
+      }
+      prev = t;
+    }
+    return null;
+  }
+
+  private showBrush(at: THREE.Vector3 | null): void {
+    const paint = this.terrainPaint, grid = this.map.terrain;
+    if (!this.brushRing) {
+      this.brushRing = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffe066, depthTest: false }));
+      this.brushRing.renderOrder = 11;
+      this.scene.add(this.brushRing);
+    }
+    if (!paint || !grid || !at) { this.brushRing.visible = false; return; }
+    const points: number[] = [];
+    for (let k = 0; k < 64; k++) {
+      const a = (k / 64) * Math.PI * 2;
+      const x = at.x + Math.cos(a) * paint.radius, z = at.z + Math.sin(a) * paint.radius;
+      points.push(x, (terrainHeight(grid, x, z) ?? at.y) + 0.3, z);
+    }
+    this.brushRing.geometry.dispose();
+    this.brushRing.geometry = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+    this.brushRing.visible = true;
+  }
+
+  private startStroke(e: PointerEvent): void {
+    const at = this.terrainHit(e);
+    if (!at || !this.map.terrain) return;
+    this.onBeforeEdit(structuredClone(this.map));
+    this.lastMerge = { time: 0 };
+    this.stroke = { pointerId: e.pointerId, last: null, flat: at.y, x0: at.x, z0: at.z, x1: at.x, z1: at.z };
+    this.orbit.enabled = false;
+    try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    this.setQuickTerrain(true);
+    this.dab(at);
+  }
+
+  private continueStroke(e: PointerEvent): void {
+    const at = this.terrainHit(e);
+    this.showBrush(at);
+    const stroke = this.stroke, paint = this.terrainPaint;
+    if (!at || !stroke || !paint) return;
+    if (stroke.last && stroke.last.distanceTo(at) < Math.max(1, paint.radius / 4)) return;
+    this.dab(at);
+  }
+
+  private endStroke(): void {
+    const stroke = this.stroke, grid = this.map.terrain;
+    if (!stroke) return;
+    try { this.renderer.domElement.releasePointerCapture(stroke.pointerId); } catch { /* not captured */ }
+    this.stroke = null;
+    this.orbit.enabled = true;
+    // The trees in the painted area stand on the new land.
+    const r = (this.terrainPaint?.radius ?? 0) + 1;
+    if (grid)
+      for (const item of this.map.items ?? []) {
+        const [x, , z] = item.position;
+        if (!item.scenery || x < stroke.x0 - r || x > stroke.x1 + r || z < stroke.z0 - r || z > stroke.z1 + r) continue;
+        const h = terrainHeight(grid, x, z);
+        if (h !== null) item.position = [x, h, z];
+      }
+    this.items.sync(this.map.items);
+    this.onChange();
+    this.syncTerrain(true);
+  }
+
+  /** One dab of the brush at a point on the land. */
+  private dab(at: THREE.Vector3): void {
+    const paint = this.terrainPaint, grid = this.map.terrain, stroke = this.stroke;
+    if (!paint || !grid || !stroke) return;
+    stroke.last = at.clone();
+    stroke.x0 = Math.min(stroke.x0, at.x); stroke.x1 = Math.max(stroke.x1, at.x);
+    stroke.z0 = Math.min(stroke.z0, at.z); stroke.z1 = Math.max(stroke.z1, at.z);
+    const { cell, x0, z0, columns, rows } = grid;
+    const c0 = Math.max(0, Math.floor((at.x - paint.radius - x0) / cell)), c1 = Math.min(columns - 1, Math.ceil((at.x + paint.radius - x0) / cell));
+    const r0 = Math.max(0, Math.floor((at.z - paint.radius - z0) / cell)), r1 = Math.min(rows - 1, Math.ceil((at.z + paint.radius - z0) / cell));
+    const before = grid.heights.slice();
+    const land = (h: number | null) => (h === null ? null : h <= SUNK_LAND + 0.01 ? 0 : h);
+    const rate = Math.min(1, Math.max(0, paint.strength));
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) {
+        const k = r * columns + c;
+        const h = land(before[k]);
+        if (h === null) continue;
+        const x = x0 + c * cell, z = z0 + r * cell;
+        const d = Math.hypot(x - at.x, z - at.z);
+        if (d > paint.radius) continue;
+        const w = 0.5 * (1 + Math.cos(Math.PI * d / paint.radius));
+        let next = h;
+        if (paint.brush === "raise") next = h + paint.strength * w;
+        else if (paint.brush === "lower") next = h - paint.strength * w;
+        else if (paint.brush === "flatten") next = h + (stroke.flat - h) * w * rate;
+        else {
+          let sum = 0, n = 0;
+          for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+            const cc = c + dc, rr = r + dr;
+            if (cc < 0 || rr < 0 || cc >= columns || rr >= rows) continue;
+            const v = land(before[rr * columns + cc]);
+            if (v !== null) { sum += v; n++; }
+          }
+          next = h + (sum / n - h) * w * rate;
+        }
+        next = Math.max(-16, Math.min(1990, next));
+        // On the stadium's ground, land below it sinks under it (as generated).
+        const inside = Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT;
+        grid.heights[k] = inside && next < 0.5 ? SUNK_LAND : next;
+      }
+    this.updateQuickTerrain(c0, r0, c1, r1);
+  }
+
+  /** Shows (or drops) the quick mesh of the land's grid; the real mesh hides while it shows. */
+  private setQuickTerrain(on: boolean): void {
+    const grid = this.map.terrain;
+    if (!on || !grid) {
+      if (this.quickTerrain) {
+        this.scene.remove(this.quickTerrain);
+        this.quickTerrain.geometry.dispose();
+        (this.quickTerrain.material as THREE.Material).dispose();
+        this.quickTerrain = null;
+      }
+      if (this.terrainMesh) this.terrainMesh.visible = true;
+      return;
+    }
+    if (this.terrainMesh) this.terrainMesh.visible = false;
+    if (this.quickTerrain) return;
+    const { cell, x0, z0, columns, rows, heights } = grid;
+    const positions = new Float32Array(columns * rows * 3), uvs = new Float32Array(columns * rows * 2);
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < columns; c++) {
+        const k = r * columns + c, x = x0 + c * cell, z = z0 + r * cell;
+        positions.set([x, heights[k] ?? 0, z], k * 3);
+        uvs.set([x / 32, z / 32], k * 2);
+      }
+    const index: number[] = [];
+    for (let r = 0; r + 1 < rows; r++)
+      for (let c = 0; c + 1 < columns; c++) {
+        const a = r * columns + c, b = a + 1, d = a + columns, e = d + 1;
+        if (heights[a] === null || heights[b] === null || heights[d] === null || heights[e] === null) continue;
+        index.push(a, d, b, b, d, e);
+      }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(index);
+    geo.computeVertexNormals();
+    const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
+    const texture = this.library?.textureOf(TERRAIN_MATERIALS[grid.surface]);
+    if (texture) {
+      material.map = this.library!.textureImage(texture);
+      material.map.wrapS = material.map.wrapT = THREE.RepeatWrapping;
+    } else material.color.setHex(0x5f9a45);
+    this.quickTerrain = new THREE.Mesh(geo, material);
+    this.quickTerrain.receiveShadow = true;
+    this.scene.add(this.quickTerrain);
+  }
+
+  private updateQuickTerrain(c0: number, r0: number, c1: number, r1: number): void {
+    const grid = this.map.terrain, mesh = this.quickTerrain;
+    if (!grid || !mesh) return;
+    const pos = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) {
+        const k = r * grid.columns + c;
+        pos.setY(k, grid.heights[k] ?? 0);
+      }
+    pos.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
   }
 
   /**
@@ -838,6 +1072,16 @@ export class Editor {
    * step). Returns how many blocks and items it placed, or null when the block library lacks the theme's pieces.
    */
   async generateScenery(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
+    this.setBusy("generate", options.mode === "terrain" ? "Building the height map…" : "Placing the scenery…");
+    try {
+      await nextFrame();
+      return await this.generateSceneryNow(options);
+    } finally {
+      this.setBusy("generate", null);
+    }
+  }
+
+  private async generateSceneryNow(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
     const lib = this.library;
     if (!lib) return null;
     if (options.mode === "terrain") {
@@ -1629,6 +1873,7 @@ export class Editor {
     // Runs before OrbitControls' listener (capture phase), which reads the button mapping on pointer down.
     this.orbit.mouseButtons.LEFT = e.altKey ? THREE.MOUSE.ROTATE : (-1 as THREE.MOUSE);
     if (e.button !== 0 || e.altKey) return;
+    if (this.terrainPaint && this.map.terrain) { this.startStroke(e); return; }
     // The optional axis gizmo handles its own drags.
     if (this.axisGizmoEnabled && this.axisGizmo.axis) return;
     // Insert/place mode: clicks insert (handled on pointer up).
@@ -1675,6 +1920,14 @@ export class Editor {
 
   private onPointerMove(e: PointerEvent): void {
     this.lastPointer = e;
+    if (this.terrainPaint && this.map.terrain && (!this.stroke || e.pointerId === this.stroke.pointerId)) {
+      if (this.stroke) this.continueStroke(e);
+      else if (!this.hoverQueued && !e.buttons) {
+        this.hoverQueued = true;
+        requestAnimationFrame(() => { this.hoverQueued = false; if (this.lastPointer) this.showBrush(this.terrainHit(this.lastPointer)); });
+      }
+      return;
+    }
     const marquee = this.marquee;
     if (marquee && e.pointerId === marquee.pointerId) {
       if (marquee.el.hidden && Math.hypot(e.clientX - marquee.x, e.clientY - marquee.y) < DRAG_THRESHOLD_PX) return;
@@ -1727,6 +1980,7 @@ export class Editor {
       return;
     }
     if (e.button !== 0) return;
+    if (this.stroke && e.pointerId === this.stroke.pointerId) { this.endStroke(); return; }
     const marquee = this.marquee;
     this.marquee = null;
     if (marquee && !marquee.el.hidden) {

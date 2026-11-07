@@ -1,4 +1,4 @@
-import { MAX_BLOCK_LEVEL, type Editor } from "./editor";
+import { MAX_BLOCK_LEVEL, type Editor, type TerrainBrush } from "./editor";
 import { showExportDialog } from "./export";
 import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
@@ -7,6 +7,8 @@ import { FORESTS, SCENERY_THEMES } from "./scenery";
 import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
+/** The terrain brush (Off: the mouse edits as usual). */
+const paint = { brush: "off" as "off" | TerrainBrush, radius: 24, strength: 1 };
 const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, ownTerrain: { ...OWN_TERRAIN_DEFAULTS }, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
@@ -53,6 +55,7 @@ export function loadSavedMap(): TrackMap {
 export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLElement, status: HTMLElement): void {
   const history = new History();
   editor.onBeforeEdit = (snapshot) => history.push(snapshot);
+  busyOverlay(editor);
   // The desktop app's cloud link (sign-in, sync, sharing); null in a plain browser.
   let cloud: CloudUi | null = null;
   void createCloudUi(editor, toolbar.parentElement!, STORAGE_KEY).then((c) => {
@@ -591,6 +594,18 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       },
       { label: "Remove", onClick: () => { scenery.note = `Removed ${editor.removeScenery()} blocks and trees.`; editor.onChange(); } },
     ]);
+    if (editor.map.terrain) {
+      section("Paint terrain");
+      const apply = () => editor.setTerrainPaint(paint.brush === "off" ? null : { brush: paint.brush, radius: paint.radius, strength: paint.strength });
+      selectField(root, "Brush", ["off", "raise", "lower", "smooth", "flatten"], () => paint.brush, (v) => { paint.brush = v as typeof paint.brush; apply(); }, false,
+        { off: "Off", raise: "Raise", lower: "Lower", smooth: "Smooth", flatten: "Flatten (to where the stroke starts)" });
+      numberField(root, "Radius (m)", () => paint.radius, (v) => { paint.radius = Math.max(4, Math.min(256, v)); apply(); }, 4);
+      numberField(root, paint.brush === "raise" || paint.brush === "lower" ? "Strength (m per dab)" : "Strength (0 to 1)", () => paint.strength,
+        (v) => { paint.strength = Math.max(0.05, Math.min(paint.brush === "raise" || paint.brush === "lower" ? 16 : 1, v)); apply(); }, 0.25);
+      hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). The land follows at once; "
+        + "where it meets the roads it is fitted again after each stroke. Each stroke is one undo step; generating again "
+        + "replaces the painted land.");
+    }
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
       ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "
         + "hills rising by 2 levels every hill step, as free blocks (the land floats, e.g. along a ski slope high up), "
@@ -1087,3 +1102,49 @@ function openFile(editor: Editor, opened?: () => void): void {
 const confirmDiscard = () => confirm("Start a new track? The current one can still be restored with Undo.");
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 const round = (v: number) => Math.round(v * 100) / 100;
+
+/** A box over the 3D view while the editor works on something that takes a while, with what and for how long. */
+function busyOverlay(editor: Editor): void {
+  const host = editor.renderer.domElement.parentElement!;
+  if (!document.getElementById("busy-style")) {
+    const style = document.createElement("style");
+    style.id = "busy-style";
+    style.textContent = `
+      .busy-overlay { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20; display: flex; gap: 10px;
+        align-items: center; padding: 8px 14px; border-radius: 8px; background: rgba(16, 18, 28, 0.88); color: #eef0f6;
+        font: 13px system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); pointer-events: none; }
+      .busy-overlay[hidden] { display: none; }
+      .busy-overlay .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25);
+        border-top-color: #ffe066; animation: busy-spin 0.8s linear infinite; }
+      .busy-overlay .time { opacity: 0.6; font-variant-numeric: tabular-nums; }
+      @keyframes busy-spin { to { transform: rotate(360deg); } }`;
+    document.head.appendChild(style);
+  }
+  const box = document.createElement("div");
+  box.className = "busy-overlay";
+  box.hidden = true;
+  const spin = document.createElement("div");
+  spin.className = "spin";
+  const text = document.createElement("span");
+  const time = document.createElement("span");
+  time.className = "time";
+  box.append(spin, text, time);
+  if (getComputedStyle(host).position === "static") host.style.position = "relative";
+  host.appendChild(box);
+  let since = 0, timer = 0;
+  editor.onBusy = (message) => {
+    if (!message) {
+      box.hidden = true;
+      clearInterval(timer);
+      timer = 0;
+      return;
+    }
+    text.textContent = message;
+    if (box.hidden) {
+      since = performance.now();
+      box.hidden = false;
+      time.textContent = "";
+      timer = window.setInterval(() => (time.textContent = `${Math.round((performance.now() - since) / 1000)} s`), 500);
+    }
+  };
+}

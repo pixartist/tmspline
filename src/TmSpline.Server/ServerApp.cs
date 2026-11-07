@@ -32,6 +32,10 @@ public static class ServerApp
             o.AddPolicy("estimate", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = requestsPerMinute * 3, Window = TimeSpan.FromMinutes(1) }));
+            // The terrain preview: the editor asks for one after generating and after each painted stroke.
+            o.AddPolicy("terrain", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = requestsPerMinute * 10, Window = TimeSpan.FromMinutes(1) }));
         });
     }
 
@@ -154,6 +158,21 @@ public static class ServerApp
             }
         })
         .RequireRateLimiting("estimate")
+        .DisableAntiforgery();
+
+        // The own terrain's preview mesh, built natively (the editor's WebAssembly core takes many times as long).
+        app.MapPost("/api/terrain", (ExportRequestDto request, ExportService service) =>
+        {
+            try
+            {
+                return Results.Bytes(service.TerrainPreview(request), "application/octet-stream");
+            }
+            catch (ExportRejectedException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest, title: "Invalid track");
+            }
+        })
+        .RequireRateLimiting("terrain")
         .DisableAntiforgery();
 
         MapCloud(app);

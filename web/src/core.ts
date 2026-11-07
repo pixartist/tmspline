@@ -87,13 +87,29 @@ export async function buildPreview(track: Track, quality: PreviewQuality = 1): P
 /** The map's own terrain as the export builds it, in world space; the last `rockTriangles` triangles are rock. */
 export interface TerrainMesh { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint32Array; rockTriangles: number }
 
+/**
+ * Builds the terrain preview: on the local server when it can (natively, many times faster than the WebAssembly core),
+ * else in the worker.
+ */
 export async function buildTerrain(map: TrackMap): Promise<TerrainMesh> {
+  try {
+    const response = await fetch("/api/terrain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ track: map }),
+    });
+    if (response.ok) return decodeTerrain(new Uint8Array(await response.arrayBuffer()));
+  } catch { /* no server: the worker builds it */ }
   await loadCore();
   const id = nextId++;
   const bytes = await new Promise<Uint8Array>((resolve, reject) => {
     pending.set(id, { resolve, reject });
     worker.postMessage({ type: "terrain", id, json: JSON.stringify(map) });
   });
+  return decodeTerrain(bytes);
+}
+
+function decodeTerrain(bytes: Uint8Array): TerrainMesh {
   const buffer = bytes.slice().buffer;
   const view = new DataView(buffer);
   const vertexCount = view.getInt32(0, true), triangleCount = view.getInt32(4, true), rockTriangles = view.getInt32(8, true);
