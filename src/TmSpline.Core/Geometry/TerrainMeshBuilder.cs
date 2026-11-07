@@ -269,6 +269,9 @@ public static class TerrainMeshBuilder
                 if (outward.X * (xs[w] - xs[u]) + outward.Z * (zs[w] - zs[u]) > 0) outward = -outward;
                 if (outward.LengthSquared() < 1e-12) continue;
                 outward = Vector3.Normalize(outward);
+                // Only the land's outer edge (no height map beyond it): where the land was left off a road it has
+                // land beyond, under the road, and a skirt there would be a wall beside the road.
+                if (!double.IsNaN(Sample(grid, (xs[u] + xs[v]) / 2 + outward.X * 2, (zs[u] + zs[v]) / 2 + outward.Z * 2))) continue;
                 var k = skirts.GetValueOrDefault(chunk);
                 skirts[chunk] = k + 1;
                 var first = chunk.Positions.Count;
@@ -305,9 +308,9 @@ public static class TerrainMeshBuilder
             var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
             if (rings.Count < 2) continue;
             var first = samples.Count;
-            // No land meets walls, upside-down road, or road climbing or diving steeper than about 33 degrees (a loop's
-            // sides); the editor's height map (ownTerrain.ts) uses the same limits.
-            bool Holds(int i) => rings[i].Up.Y >= 0.5 && Math.Abs(rings[i].Tangent.Normalized().Y) <= 0.55;
+            // No rows along walls and upside-down road (they would not reach out from it); elsewhere the land meets an
+            // edge wherever the height map reaches it (see Met), steep road included.
+            bool Holds(int i) => rings[i].Up.Y >= 0.5;
             Vec3d? Edge(int i, int side)
             {
                 // Edges where the road is not upside down (on walls too: the land is left off them).
