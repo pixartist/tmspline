@@ -3,7 +3,7 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The terrain built the experimental way (TerrainGrid.Adaptive): all knowledge of the roads goes into a fine height map
+/// The terrain's fine height map and its companions (TerrainMeshBuilder): all knowledge of the roads goes into a fine height map
 /// and its companions, the mesh comes from those alone (AdaptiveTerrainMesher).
 /// <list type="number">
 /// <item>The land: the editor's grid (the roads' shape extended, smoothed, noise, its own keep-out), sampled at the fine

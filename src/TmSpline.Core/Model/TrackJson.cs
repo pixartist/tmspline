@@ -57,7 +57,6 @@ public static class TrackJson
         public double Skirt { get; set; } = 16;
         /// <summary>Missing: no rock (90°).</summary>
         public double? RockAngle { get; set; }
-        public bool? Adaptive { get; set; }
     }
 
     public sealed class ItemDto
@@ -202,7 +201,6 @@ public static class TrackJson
             {
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
-                Adaptive = t.Adaptive == true,
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
             };
         return map;

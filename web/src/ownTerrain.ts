@@ -4,19 +4,20 @@ import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme }
 
 /**
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
- * hill blocks' materials, see TerrainMeshBuilder). Here its height map, on a fine grid:
+ * hill blocks' materials, see TerrainMeshBuilder). Here the land's height map, on a 4 m grid:
  *
  * 1. The roads' shape extended outwards: every vertex takes the top (curbs, or the surface's edge) of the nearest road.
  * 2. That surface smoothed (a wide blur), blending from the unsmoothed surface at the road into the smoothed one over
  *    the first 32 m, so the land meets the road.
  * 3. Height noise on top, faded in over the same 32 m.
  *
- * Only upright road (its driving surface facing up more than sideways, as the export's rows along the edges) shapes the
- * land. Walls and upside-down road keep it out: below them, and below the space a car drives through on them (a few
+ * Only upright road (its driving surface facing up more than sideways, and not climbing too steeply, as in the
+ * export's AdaptiveTerrainBuilder) shapes the land. Walls and upside-down road keep it out: below them, and below the space a car drives through on them (a few
  * metres off the driving surface, a square either side), the land stays lower.
  *
- * The export builds the mesh from the roads outwards (rows of points along their edges, the first on the edges, then this
- * grid, sparser further out) and leaves the roads themselves out, so the land meets them exactly.
+ * The export (and the preview, through the core) samples this grid at 0.5 m, pins the land to the roads' edges and
+ * open ends, cuts it out between pinned edges and meshes it by error and fidelity (AdaptiveTerrainBuilder,
+ * AdaptiveTerrainMesher), so the land meets the roads exactly.
  */
 
 export interface OwnTerrainOptions {
@@ -30,8 +31,6 @@ export interface OwnTerrainOptions {
   noiseSize: number;
   /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
   rockAngle: number;
-  /** Experimental: mesh a fine height map with pins and fidelity (in the core) instead of the rows along the edges. */
-  adaptive?: boolean;
 }
 
 export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50 };
@@ -45,17 +44,13 @@ const SKIRT = 16;
 /** Land lower than the stadium's ground lies this deep, under it, metres. */
 const SUNK = -2;
 
-/**
- * Road whose driving surface faces up less than this (the normal's y) is a wall or upside down, and road climbing or
- * diving steeper than MAX_PITCH (the sine of its slope along the track; a loop's sides) does not hold the land either.
- * TerrainMeshBuilder's edge rows end at the same limits.
- */
 /** Off the driving surface (curbs), road counts for the land up to this much over the surface in its square, metres (not gates, signs). */
 const CURB_REACH = 3;
 /** Roads in one square further apart in height than this are separate (a bridge over a road), metres. */
 const LAYER_GAP = 4;
 /** Near a road the land rises at most this steeply over it (1: 45 degrees), so it ramps up under a bridge, no wall. */
 const MAX_RISE = 1;
+/** Road facing up less than this (the normal's y) or climbing steeper than MAX_PITCH (sine) holds no land (walls, loops). */
 const UPRIGHT = 0.5;
 const MAX_PITCH = 0.55;
 /** On walls and upside-down road: how far off the driving surface a car needs room, metres. */
@@ -111,7 +106,7 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Ma
     const normals = road.mesh.geometry.getAttribute("normal");
     // Upright or not per metre along the road, by its cross-section as a whole: the driving surface's normal in its
     // middle (on a bent cross-section the sides face further sideways) and its climb along the middle a few metres
-    // either way. TerrainMeshBuilder decides by the same, its rings' up and tangent.
+    // either way. AdaptiveTerrainBuilder decides by the same, its rings' up and tangent.
     const middle = new Map<number, { across: number; n: THREE.Vector3; p: THREE.Vector3 }>();
     const position = road.mesh.geometry.getAttribute("position");
     for (let i = 0; i < position.count; i++) {
@@ -350,8 +345,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;
   }
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle,
-    ...(own.adaptive ? { adaptive: true as const } : {}) };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

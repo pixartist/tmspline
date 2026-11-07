@@ -21,8 +21,6 @@ public sealed class TerrainGrid
     public double Skirt { get; set; } = 16;
     /// <summary>Land steeper than this (degrees) is rock (Surfaces.TerrainRock), as are the skirts; 90: never.</summary>
     public double RockAngle { get; set; } = 90;
-    /// <summary>Experimental: the mesh from a fine height map with pins and fidelity (AdaptiveTerrainBuilder).</summary>
-    public bool Adaptive { get; set; }
 
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 
