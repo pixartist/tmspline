@@ -168,7 +168,7 @@ public static class TerrainMeshBuilder
         var rock = Surfaces.TerrainRock(grid.Surface);
         var rockBelow = (float)Math.Cos(grid.RockAngle * Math.PI / 180);
         var byChunk = new Dictionary<(int, int), MeshChunk>();
-        var vertexOf = new Dictionary<(MeshChunk, int), int>();
+        var vertexOf = new Dictionary<(MeshChunk, int, bool), int>();
         MeshChunk ChunkAt(double x, double z)
         {
             var k = ((int)Math.Floor((x - grid.X0) / ChunkSize), (int)Math.Floor((z - grid.Z0) / ChunkSize));
@@ -179,16 +179,18 @@ public static class TerrainMeshBuilder
             byChunk[k] = chunk;
             return chunk;
         }
-        int Vertex(MeshChunk chunk, int i)
+        // Grass and rock corners are separate vertices: the two materials read their first UV layer differently.
+        int Vertex(MeshChunk chunk, int i, bool stone)
         {
-            if (vertexOf.TryGetValue((chunk, i), out var v)) return v;
+            if (vertexOf.TryGetValue((chunk, i, stone), out var v)) return v;
             var o = chunk.ItemOffset;
             chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - o.Y), (float)(zs[i] - o.Z)));
             chunk.Normals.Add(normalOf[i]);
-            chunk.Uv0.Add(MaskUv(normalOf[i].Y));
             // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
-            chunk.Uv1.Add(new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1))));
-            vertexOf[(chunk, i)] = chunk.Positions.Count - 1;
+            var light = new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1)));
+            chunk.Uv0.Add(stone ? light : MaskUv(GroundU(xs[i], zs[i]), normalOf[i].Y));
+            chunk.Uv1.Add(light);
+            vertexOf[(chunk, i, stone)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
         }
         // Rock where the land is steeper than the rock angle, measured on the (smoothed) vertex normals and interpolated
@@ -213,7 +215,7 @@ public static class TerrainMeshBuilder
         {
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
             void Emit(int p, int q, int r, bool stone) =>
-                MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p), Vertex(chunk, q), Vertex(chunk, r), stone ? chunk.MaterialIndex(rock) : 0), Vector3.UnitY);
+                MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p, stone), Vertex(chunk, q, stone), Vertex(chunk, r, stone), stone ? chunk.MaterialIndex(rock) : 0), Vector3.UnitY);
             bool Steep(int i) => normalOf[i].Y < rockBelow;
             var steep = new[] { a, b, c }.Count(Steep);
             if (!rocky || steep == 0 || steep == 3) Emit(a, b, c, rocky && steep == 3);
@@ -244,9 +246,10 @@ public static class TerrainMeshBuilder
                 {
                     chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - down - o.Y), (float)(zs[i] - o.Z)));
                     chunk.Normals.Add(outward);
-                    // The hill's side (dirt), as on the hill pieces' flanks.
-                    chunk.Uv0.Add(MaskUv(0));
-                    chunk.Uv1.Add(new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256));
+                    var light = new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256);
+                    // Rock: its lightmap; else the hill's side (dirt), as on the hill pieces' flanks, u along the edge.
+                    chunk.Uv0.Add(rocky ? light : MaskUv((float)((i == u ? 0 : Math.Sqrt((xs[v] - xs[u]) * (xs[v] - xs[u]) + (zs[v] - zs[u]) * (zs[v] - zs[u]))) / 32 + GroundU(xs[u], zs[u])), 0));
+                    chunk.Uv1.Add(light);
                 }
                 var sm = rocky ? chunk.MaterialIndex(rock) : 0;
                 MeshChunk.AddFacing(chunk, new Triangle(first, first + 1, first + 3, sm), outward);
@@ -421,15 +424,23 @@ public static class TerrainMeshBuilder
     }
 
     /// <summary>
-    /// The hill material's first UV layer is no texture position (it projects its textures by position) but its mask
-    /// between grass and the flank's dirt, as on the hill pieces: their tops at v 0.4 to 0.9, their sides below 0.3
-    /// (measured on DecoHillSlope2Straight). Grass where the land is flat, turning to dirt where it gets steep.
+    /// The hill material projects its colour textures by position; its first UV layer places its mask between grass and
+    /// the flank's dirt, as on the hill pieces (measured on DecoHillSlope2Straight): u runs along the ground, a 32 m
+    /// block from 0 to 1, v is the profile (tops 0.42 to 0.55, slopes 0.26 to 0.44, sides below 0.26). Here v comes from
+    /// the steepness: grass where the land is flat, turning to dirt where it gets steep. (u must vary: a constant u
+    /// stretches one column of the mask over the land.)
     /// </summary>
-    private static Vector2 MaskUv(float normalY)
+    private static Vector2 MaskUv(float u, float normalY)
     {
         var steep = Math.Clamp((0.9f - normalY) / 0.3f, 0, 1);
-        return new Vector2(0.5f, 0.55f - 0.4f * steep);
+        return new Vector2(u, 0.55f - 0.4f * steep);
     }
+
+    /// <summary>
+    /// The mask's u on the land: along the ground at 1/32 per metre, on a slant (so no direction of slope keeps one u
+    /// down its whole fall).
+    /// </summary>
+    private static float GroundU(double x, double z) => (float)((x * 0.8 + z * 0.6) / 32);
 
     /// <summary>
     /// The map's terrain (its chunks) as the export builds it, in world space, packed for the editor:
