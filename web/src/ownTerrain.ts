@@ -336,10 +336,12 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     const w = smooth(distance[i] / BLEND);
     let h = extended[i] * (1 - w) + smoothed[i] * w;
     h += own.noise * w * fractal(x, z, own.noiseSize);
-    // Under walls and inverted road (the squares round the vertex).
+    // Under walls and inverted road (the squares round the vertex), except in squares with road that holds the land:
+    // there the land follows that road (its lowest), so it meets the road up to where the road turns steep (the start
+    // of a loop or wall) and only falls away after it.
     const sc = sx0 + c, sr = sz0 + r;
-    const limit = Math.min(ceiling[i], caps.get(key(sc, sr)) ?? Infinity, caps.get(key(sc - 1, sr)) ?? Infinity,
-      caps.get(key(sc, sr - 1)) ?? Infinity, caps.get(key(sc - 1, sr - 1)) ?? Infinity);
+    const capOf = (k: string) => (tops.has(k) ? Infinity : caps.get(k) ?? Infinity);
+    const limit = Math.min(ceiling[i], capOf(key(sc, sr)), capOf(key(sc - 1, sr)), capOf(key(sc, sr - 1)), capOf(key(sc - 1, sr - 1)));
     h = Math.min(h, limit);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land, so no skirt). Outside it there is no ground: land ends there.
