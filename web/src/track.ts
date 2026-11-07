@@ -241,6 +241,8 @@ export interface TerrainGrid {
   skirt: number;
   /** Land steeper than this (degrees) is rock, as are the skirts; missing or 90: none. */
   rockAngle?: number;
+  /** Experimental: the export meshes a fine height map with pins and fidelity (AdaptiveTerrainBuilder). */
+  adaptive?: true;
 }
 
 /**
@@ -646,6 +648,7 @@ export function parseMap(json: string): TrackMap {
       z0: Number(t.z0) || 0, columns: t.columns, rows: t.rows, skirt: Math.max(0, Number(t.skirt) || 0),
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
+      ...(t.adaptive === true ? { adaptive: true as const } : {}),
     } : undefined;
   return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...(terrain ? { terrain } : {}) };
 }

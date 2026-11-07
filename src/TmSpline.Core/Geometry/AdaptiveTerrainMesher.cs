@@ -40,13 +40,17 @@ public sealed record TerrainPin(IReadOnlyList<Vec3d> Points);
 /// <param name="Tolerance">Height error allowed where fidelity is 1, metres (divided by the fidelity elsewhere).</param>
 /// <param name="MinEdge">Longest triangle side where fidelity is 1, metres (divided by the fidelity elsewhere, up to MaxEdge).</param>
 /// <param name="PinSpacing">Pins' points at most this far apart (longer segments are split), metres.</param>
-public sealed record MesherSettings(double Tolerance = 0.08, double MinEdge = 1.5, double MaxEdge = 48, double PinSpacing = 1.5, int MaxRounds = 100);
+/// <param name="OutlineSpacing">Points along the land's outline at most this far apart, metres.</param>
+public sealed record MesherSettings(double Tolerance = 0.08, double MinEdge = 1.5, double MaxEdge = 48, double PinSpacing = 1.5, int MaxRounds = 100,
+    double OutlineSpacing = 2);
 
 /// <summary>The mesher's result: positions (x, y, z) and three indices per triangle, with what it could not do.</summary>
 public sealed class AdaptiveMesh
 {
     public List<Vector3> Positions { get; } = [];
     public List<int> Indices { get; } = [];
+    /// <summary>Per position: whether it is a pin's point (its height exact).</summary>
+    public List<bool> Pinned { get; } = [];
     /// <summary>Pin segments that crossed an earlier one and were left out.</summary>
     public int RefusedSegments { get; set; }
     public int Rounds { get; set; }
@@ -112,6 +116,16 @@ public static class AdaptiveTerrainMesher
         for (var c = 0; c < field.Columns; c += seed) { Seed(c, field.Rows - 1); }
         for (var r = 0; r < field.Rows; r += seed) { Seed(field.Columns - 1, r); }
         Seed(field.Columns - 1, field.Rows - 1);
+        // The land's outline (cells with land next to cells without), every OutlineSpacing: the mesh reaches out to it.
+        var step = Math.Max(1, (int)Math.Round(s.OutlineSpacing / field.Cell));
+        for (var r = 0; r < field.Rows; r++)
+            for (var c = 0; c < field.Columns; c++)
+            {
+                if ((r + c) % step != 0 || double.IsNaN(field.Height(c, r))) continue;
+                if (double.IsNaN(field.Height(c - 1, r)) || double.IsNaN(field.Height(c + 1, r)) || double.IsNaN(field.Height(c, r - 1)) || double.IsNaN(field.Height(c, r + 1))
+                    || c == 0 || r == 0 || c == field.Columns - 1 || r == field.Rows - 1)
+                    Seed(c, r);
+            }
         void Seed(int c, int r)
         {
             var h = field.Height(c, r);
@@ -134,7 +148,7 @@ public static class AdaptiveTerrainMesher
                 double mx = (ax + bx + cx) / 3, mz = (az + bz + cz) / 3;
                 var mid = field.CellAt(mx, mz);
                 if (mid >= 0 && field.Cut[mid]) continue;
-                if (double.IsNaN(ay) || double.IsNaN(by) || double.IsNaN(cy)) continue;
+                if (double.IsNaN(ay) || double.IsNaN(by) || double.IsNaN(cy) || mid < 0 || float.IsNaN(field.Heights[mid])) continue;
                 var fid = mid >= 0 ? Math.Max(0.02, field.Fidelity[mid]) : 0.02;
                 // Size.
                 var longest = Math.Sqrt(Math.Max((ax - bx) * (ax - bx) + (az - bz) * (az - bz),
@@ -194,13 +208,14 @@ public static class AdaptiveTerrainMesher
         {
             if (double.IsNaN(heights[a]) || double.IsNaN(heights[b]) || double.IsNaN(heights[c])) continue;
             var mid = field.CellAt((cdt.X(a) + cdt.X(b) + cdt.X(c)) / 3, (cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3);
-            if (mid >= 0 && field.Cut[mid]) continue;
+            if (mid < 0 || field.Cut[mid] || float.IsNaN(field.Heights[mid])) continue;
             foreach (var v in new[] { a, b, c })
             {
                 if (!index.TryGetValue(v, out var i))
                 {
                     i = result.Positions.Count;
                     result.Positions.Add(new Vector3((float)cdt.X(v), (float)heights[v], (float)cdt.Z(v)));
+                    result.Pinned.Add(pinned[v]);
                     index[v] = i;
                 }
                 result.Indices.Add(i);

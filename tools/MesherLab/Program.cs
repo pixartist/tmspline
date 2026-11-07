@@ -5,6 +5,7 @@
 using SkiaSharp;
 using TmSpline.Core.Geometry;
 
+if (args.Length >= 3 && args[0] == "--map") { MapMode.Run(args[1], args[2]); return; }
 var output = args.Length > 0 ? args[0] : "mesher.png";
 const double Size = 160, Cell = 0.5;
 int n = (int)(Size / Cell);
@@ -176,3 +177,61 @@ using (var data = bitmap.Encode(SKEncodedImageFormat.Png, 90))
 using (var file = File.Create(output))
     data.SaveTo(file);
 Console.WriteLine($"picture: {Path.GetFullPath(output)}");
+
+static class MapMode
+{
+    public static void Run(string mapFile, string output)
+    {
+        var map = TmSpline.Core.Model.TrackJson.ParseMap(File.ReadAllText(mapFile));
+        var grid = map.Terrain ?? throw new InvalidOperationException("The map has no terrain");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (field, pins) = AdaptiveTerrainBuilder.Fields(grid, map);
+        var tFields = sw.ElapsedMilliseconds;
+        var mesh = AdaptiveTerrainMesher.Build(field, pins);
+        var tMesh = sw.ElapsedMilliseconds - tFields;
+        sw.Restart();
+        var chunks = TerrainMeshBuilder.Build(grid, map);
+        var tAll = sw.ElapsedMilliseconds;
+        Console.WriteLine($"field {field.Columns}x{field.Rows} cells of {field.Cell} m, {pins.Count} pins ({pins.Sum(p => p.Points.Count)} points), {field.Cut.Count(c => c)} cut cells: {tFields} ms");
+        Console.WriteLine($"mesh {mesh.Positions.Count} vertices, {mesh.Indices.Count / 3} triangles, {mesh.Rounds} rounds, worst error {mesh.WorstError:F2}, {mesh.RefusedSegments} pin segments refused: {tMesh} ms");
+        Console.WriteLine($"export build: {chunks.Count} chunks, {chunks.Sum(c => c.Triangles.Count)} triangles: {tAll} ms");
+
+        // Picture: 2 px per metre: land shaded, cut blue, triangle edges, pins red.
+        const double Scale = 2;
+        int w = (int)(field.Columns * field.Cell * Scale), h = (int)(field.Rows * field.Cell * Scale);
+        using var bitmap = new SKBitmap(w, h);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(new SKColor(20, 20, 26));
+        double lo = double.MaxValue, hi = double.MinValue;
+        foreach (var v in field.Heights) if (!float.IsNaN(v) && v > -1.5) { lo = Math.Min(lo, v); hi = Math.Max(hi, v); }
+        for (var r = 0; r < field.Rows; r++)
+            for (var c = 0; c < field.Columns; c++)
+            {
+                var i = r * field.Columns + c;
+                var v = field.Heights[i];
+                SKColor col;
+                if (field.Cut[i]) col = new SKColor(40, 60, 130);
+                else if (float.IsNaN(v)) continue;
+                else if (v < -1) col = new SKColor(60, 60, 60);
+                else { var g = (byte)Math.Clamp(30 + (v - lo) / (hi - lo) * 200, 0, 255); col = new SKColor((byte)(g / 2), g, (byte)(g / 3)); }
+                bitmap.SetPixel((int)(c * field.Cell * Scale), (int)(r * field.Cell * Scale), col);
+            }
+        // Fill the gaps between the sampled pixels (one per cell at 1 px per cell).
+        using (var line = new SKPaint { Color = new SKColor(255, 255, 255, 110), StrokeWidth = 1, IsAntialias = true, Style = SKPaintStyle.Stroke })
+            for (var t = 0; t < mesh.Indices.Count; t += 3)
+                for (var k = 0; k < 3; k++)
+                {
+                    var a = mesh.Positions[mesh.Indices[t + k]]; var b = mesh.Positions[mesh.Indices[t + (k + 1) % 3]];
+                    canvas.DrawLine((float)((a.X - field.X0) * Scale), (float)((a.Z - field.Z0) * Scale), (float)((b.X - field.X0) * Scale), (float)((b.Z - field.Z0) * Scale), line);
+                }
+        using (var red = new SKPaint { Color = SKColors.Red, StrokeWidth = 2, IsAntialias = true, Style = SKPaintStyle.Stroke })
+            foreach (var pin in pins)
+                for (var k = 0; k + 1 < pin.Points.Count; k++)
+                    canvas.DrawLine((float)((pin.Points[k].X - field.X0) * Scale), (float)((pin.Points[k].Z - field.Z0) * Scale),
+                        (float)((pin.Points[k + 1].X - field.X0) * Scale), (float)((pin.Points[k + 1].Z - field.Z0) * Scale), red);
+        using var data = bitmap.Encode(SKEncodedImageFormat.Png, 90);
+        using var file = File.Create(output);
+        data.SaveTo(file);
+        Console.WriteLine($"picture: {Path.GetFullPath(output)}");
+    }
+}

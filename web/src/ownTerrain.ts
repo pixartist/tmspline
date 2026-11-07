@@ -30,6 +30,8 @@ export interface OwnTerrainOptions {
   noiseSize: number;
   /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
   rockAngle: number;
+  /** Experimental: mesh a fine height map with pins and fidelity (in the core) instead of the rows along the edges. */
+  adaptive?: boolean;
 }
 
 export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50 };
@@ -348,7 +350,8 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;
   }
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle,
+    ...(own.adaptive ? { adaptive: true as const } : {}) };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

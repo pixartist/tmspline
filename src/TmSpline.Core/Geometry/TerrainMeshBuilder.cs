@@ -52,6 +52,7 @@ public static class TerrainMeshBuilder
     {
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
+        if (grid.Adaptive && map is not null) return BuildAdaptive(grid, map, namePrefix);
         var (allSamples, ends) = map is null ? ([], []) : RoadSamples(map);
         // Land meets an edge where the height map is near it or below (not where it is far below: a bridge over the
         // land, which the editor's map keeps below the road it passes over): elsewhere the edge has no rows.
@@ -193,7 +194,29 @@ public static class TerrainMeshBuilder
         }
         bool Long(int a, int b) => (xs[a] - xs[b]) * (xs[a] - xs[b]) + (zs[a] - zs[b]) * (zs[a] - zs[b]) > MaxEdge * MaxEdge;
         if (triangles.Count == 0) return chunks;
+        return Assemble(grid, xs, ys, zs, onEdge, triangles, namePrefix);
+    }
 
+    /// <summary>The experiment: fine height map, pins and fidelity (AdaptiveTerrainBuilder), meshed by AdaptiveTerrainMesher.</summary>
+    private static List<MeshChunk> BuildAdaptive(TerrainGrid grid, TrackMap map, string namePrefix)
+    {
+        var (field, pins) = AdaptiveTerrainBuilder.Fields(grid, map);
+        var mesh = AdaptiveTerrainMesher.Build(field, pins);
+        var xs = mesh.Positions.Select(p => (double)p.X).ToList();
+        var ys = mesh.Positions.Select(p => (double)p.Y).ToList();
+        var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
+        var triangles = new List<(int A, int B, int C)>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix);
+    }
+
+    /// <summary>
+    /// The land's triangles (points xs/ys/zs, `onEdge`: on a road's edge, no skirt between two such) as items: normals,
+    /// grass and rock (cut along the rock angle), lightmap UVs, skirts under the outer edge, square chunks.
+    /// </summary>
+    internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
+        List<(int A, int B, int C)> triangles, string namePrefix)
+    {
         // Normals: the triangles' round each point, by area.
         var normals = new Vector3[xs.Count];
         foreach (var (a, b, c) in triangles)
