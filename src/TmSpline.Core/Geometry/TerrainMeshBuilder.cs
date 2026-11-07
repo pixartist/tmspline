@@ -308,9 +308,9 @@ public static class TerrainMeshBuilder
             var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
             if (rings.Count < 2) continue;
             var first = samples.Count;
-            // No rows along walls and upside-down road (they would not reach out from it); elsewhere the land meets an
-            // edge wherever the height map reaches it (see Met), steep road included.
-            bool Holds(int i) => rings[i].Up.Y >= 0.5;
+            // No land meets walls, upside-down road, or road climbing or diving steeper than about 33 degrees (a loop's
+            // sides); the editor's height map (ownTerrain.ts) uses the same limits.
+            bool Holds(int i) => rings[i].Up.Y >= 0.5 && Math.Abs(rings[i].Tangent.Normalized().Y) <= 0.55;
             Vec3d? Edge(int i, int side)
             {
                 // Edges where the road is not upside down (on walls too: the land is left off them).
