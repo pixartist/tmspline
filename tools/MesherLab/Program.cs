@@ -46,23 +46,27 @@ for (var r = 0; r < n; r++)
     {
         double x = (c + 0.5) * Cell, z = (r + 0.5) * Cell;
         var i = r * n + c;
+        // The nearest point of each road (its band, ends included): the land blends to its surface height there,
+        // the fidelity falls with the distance to it.
         var d = Math.Sqrt((x - Cx) * (x - Cx) + (z - Cz) * (z - Cz));
         var deg = Math.Atan2(z - Cz, x - Cx) * 180 / Math.PI;
         while (deg < From) deg += 360;
-        var dEdge = Math.Abs(d - Radius) - Half;
+        if (deg > To) deg = deg - To < From + 360 - deg ? To : From;
+        var off = Math.Clamp(d - Radius, -Half, Half);
+        var rad = deg * Math.PI / 180;
+        double nx = Cx + (Radius + off) * Math.Cos(rad), nz = Cz + (Radius + off) * Math.Sin(rad);
+        var dCircle = Math.Sqrt((x - nx) * (x - nx) + (z - nz) * (z - nz));
+        var circleY = RoadY(deg) + 3 * (off + Half) / (2 * Half);
+        double sx = Math.Clamp(x, 4, 156), sz = Math.Clamp(z, 76, 84);
+        var dStraight = Math.Sqrt((x - sx) * (x - sx) + (z - sz) * (z - sz));
         var h = Hills(x, z);
-        if (deg <= To && dEdge < 16)
-        {
-            var edgeY = RoadY(deg) + (d > Radius ? 3 : 0);
-            var w = Math.Clamp(dEdge / 16, 0, 1);
-            w = w * w * (3 - 2 * w);
-            h = edgeY * (1 - w) + h * w;
-        }
-        var dStraight = Math.Abs(z - 80) - 4;
-        if (x > 4 && x < 156 && dStraight < 10) { var w = Math.Clamp(dStraight / 10, 0, 1); h = 9 * (1 - w) + h * w; }
+        var wc = Math.Clamp(dCircle / 16, 0, 1); wc = wc * wc * (3 - 2 * wc);
+        h = circleY * (1 - wc) + h * wc;
+        var ws = Math.Clamp(dStraight / 10, 0, 1); ws = ws * ws * (3 - 2 * ws);
+        h = 9 * (1 - ws) + h * ws;
+        var near = Math.Min(dCircle, dStraight);
         heights[i] = x > 130 && z > 130 ? float.NaN : (float)h;
         cut[i] = OnCircle(x, z, 0) || OnStraight(x, z, 0);
-        var near = Math.Min(Math.Abs(dEdge), Math.Abs(dStraight));
         fidelity[i] = (float)Math.Max(0.06, Math.Exp(-Math.Max(0, near) / 10));
     }
 var field = new TerrainField(0, 0, Cell, n, n, heights, fidelity, cut);
