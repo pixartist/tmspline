@@ -25,6 +25,8 @@ public static class TerrainMeshBuilder
     private const double DenseGrid = 24, MediumGrid = 72;
     /// <summary>Width of the curbs outside the road's surface (RoadMeshSettings.BorderThickness), metres.</summary>
     private static readonly double CurbWidth = new RoadMeshSettings().BorderThickness;
+    /// <summary>The land meets a road's edge when the height map there is this close to it, metres.</summary>
+    private const double EdgeReach = 3;
     /// <summary>No triangle longer than this on a side (the triangulation's hull fills what is no land).</summary>
     private const double MaxEdge = 48;
 
@@ -36,6 +38,10 @@ public static class TerrainMeshBuilder
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
         var (samples, ends) = map is null ? ([], []) : RoadSamples(map);
+        // Land meets an edge only where the height map reaches it (not a bridge over the land, which the editor's map
+        // keeps below the road it passes over): there the edge has no rows, and the land under it stays.
+        Vec3d? Met(Vec3d? edge) => edge is { } e && Sample(grid, e.X, e.Z) is var h && (double.IsNaN(h) || Math.Abs(h - e.Y) <= EdgeReach) ? e : null;
+        samples = samples.Select(s => s with { Left = Met(s.Left), RightEdge = Met(s.RightEdge) }).ToList();
         var lastRow = RowOffsets[^1];
 
         // The points: the rows along the edges...
@@ -276,7 +282,9 @@ public static class TerrainMeshBuilder
             var first = samples.Count;
             Vec3d? Edge(int i, int side)
             {
-                if (rings[i].Up.Y < 0.5) return null;
+                // No land on walls, upside-down road, or road climbing or diving steeper than about 33 degrees (a
+                // loop's sides); the editor's height map (ownTerrain.ts) uses the same limits.
+                if (rings[i].Up.Y < 0.5 || Math.Abs(rings[i].Tangent.Normalized().Y) > 0.55) return null;
                 var segment = track.Segments[Math.Clamp(rings[i].Segment, 0, track.Segments.Count - 1)];
                 return RoadMeshBuilder.EdgeContact(rings[i], segment, side);
             }

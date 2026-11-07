@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
-import { clearOfRoads, plantForest, sampleRoads, type SceneryLandOptions, type SceneryTheme } from "./scenery";
+import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
@@ -10,6 +10,10 @@ import { clearOfRoads, plantForest, sampleRoads, type SceneryLandOptions, type S
  * 2. That surface smoothed (a wide blur), blending from the unsmoothed surface at the road into the smoothed one over
  *    the first 32 m, so the land meets the road.
  * 3. Height noise on top, faded in over the same 32 m.
+ *
+ * Only upright road (its driving surface facing up more than sideways, as the export's rows along the edges) shapes the
+ * land. Walls and upside-down road keep it out: below them, and below the space a car drives through on them (a few
+ * metres off the driving surface, a square either side), the land stays lower.
  *
  * The export builds the mesh from the roads outwards (rows of points along their edges, the first on the edges, then this
  * grid, sparser further out) and leaves the roads themselves out, so the land meets them exactly.
@@ -37,7 +41,138 @@ const BLEND = 32;
 /** Skirt under the land's outer edge, metres. */
 const SKIRT = 16;
 
+/**
+ * Road whose driving surface faces up less than this (the normal's y) is a wall or upside down, and road climbing or
+ * diving steeper than MAX_PITCH (the sine of its slope along the track; a loop's sides) does not hold the land either.
+ * TerrainMeshBuilder's edge rows end at the same limits.
+ */
+/** Off the driving surface (curbs), road counts for the land up to this much over the surface in its square, metres (not gates, signs). */
+const CURB_REACH = 3;
+/** Roads in one square further apart in height than this are separate (a bridge over a road), metres. */
+const LAYER_GAP = 4;
+/** Near a road the land rises at most this steeply over it (1: 45 degrees), so it ramps up under a bridge, no wall. */
+const MAX_RISE = 1;
+const UPRIGHT = 0.5;
+const MAX_PITCH = 0.55;
+/** On walls and upside-down road: how far off the driving surface a car needs room, metres. */
+const DRIVE_ROOM = 4;
+/** Land stays this much under walls, inverted road and the room they need, metres. */
+const KEEP_CLEAR = 0.5;
+
 const key = (x: number, z: number) => `${x},${z}`;
+
+/** A road's preview mesh and its vertices' driving-surface coordinates (NaN off the driving surface: curbs, sides, underside). */
+export interface TerrainRoad { mesh: THREE.Mesh; surface: Float32Array }
+
+/**
+ * The roads sampled for the land: per CELL square the top of its upright road (what the land continues), and the height
+ * the land must stay under (walls and inverted road, and the room to drive on them).
+ */
+function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map<string, number> } {
+  // Upright road's heights per square; the land continues the lowest road in each (the top of its curbs).
+  const heights = new Map<string, number[]>(), caps = new Map<string, number>();
+  const tops = {
+    get: (k: string) => { const l = heights.get(k); return l ? Math.max(...l) : undefined; },
+    set: (k: string, y: number) => { const l = heights.get(k); if (l) l.push(y); else heights.set(k, [y]); },
+  };
+  const column = (x: number, z: number) => key(Math.floor(x / CELL), Math.floor(z / CELL));
+  const cap = (k: string, y: number) => caps.set(k, Math.min(caps.get(k) ?? Infinity, y - KEEP_CLEAR));
+  // Driving surface first: upright or not, by its normal; remembered in 3D squares for the rest of the road.
+  const VOXEL = CELL;
+  const voxel = (p: THREE.Vector3) => `${Math.floor(p.x / VOXEL)},${Math.floor(p.y / VOXEL)},${Math.floor(p.z / VOXEL)}`;
+  const votes = new Map<string, number>(); // > 0: mostly upright
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), p = new THREE.Vector3();
+  const n = new THREE.Vector3(), q = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), along = new THREE.Vector3();
+  const triangles = (road: TerrainRoad, fn: (ia: number, ib: number, ic: number) => void) => {
+    const index = road.mesh.geometry.getIndex();
+    const count = index ? index.count : road.mesh.geometry.getAttribute("position").count;
+    for (let i = 0; i + 2 < count; i += 3) fn(...([0, 1, 2].map((j) => (index ? index.getX(i + j) : i + j)) as [number, number, number]));
+  };
+  const points = (road: TerrainRoad, ia: number, ib: number, ic: number, step: number, mark: (v: THREE.Vector3) => void) => {
+    const pos = road.mesh.geometry.getAttribute("position");
+    a.fromBufferAttribute(pos, ia).applyMatrix4(road.mesh.matrixWorld);
+    b.fromBufferAttribute(pos, ib).applyMatrix4(road.mesh.matrixWorld);
+    c.fromBufferAttribute(pos, ic).applyMatrix4(road.mesh.matrixWorld);
+    const longest = Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a));
+    const steps = Math.min(64, Math.max(1, Math.ceil(longest / step)));
+    for (let u = 0; u <= steps; u++)
+      for (let v = 0; u + v <= steps; v++) {
+        p.copy(a).multiplyScalar(1 - (u + v) / steps).addScaledVector(b, u / steps).addScaledVector(c, v / steps);
+        mark(p);
+      }
+  };
+  const onSurface = (road: TerrainRoad, i: number) => !Number.isNaN(road.surface[i * 2]);
+  for (const road of roads) {
+    road.mesh.updateMatrixWorld();
+    const normals = road.mesh.geometry.getAttribute("normal");
+    triangles(road, (ia, ib, ic) => {
+      if (!onSurface(road, ia) || !onSurface(road, ib) || !onSurface(road, ic)) return;
+      n.set(0, 0, 0);
+      for (const i of [ia, ib, ic]) n.add(q.fromBufferAttribute(normals, i));
+      n.transformDirection(road.mesh.matrixWorld);
+      // Along the track: where the distance on the surface grows (its gradient in the triangle's plane).
+      const pos = road.mesh.geometry.getAttribute("position");
+      e1.fromBufferAttribute(pos, ib).sub(q.fromBufferAttribute(pos, ia));
+      e2.fromBufferAttribute(pos, ic).sub(q.fromBufferAttribute(pos, ia));
+      const d1 = road.surface[ib * 2] - road.surface[ia * 2], d2 = road.surface[ic * 2] - road.surface[ia * 2];
+      const g11 = e1.dot(e1), g12 = e1.dot(e2), g22 = e2.dot(e2), det = g11 * g22 - g12 * g12;
+      along.set(0, 0, 0);
+      if (Math.abs(det) > 1e-9) along.copy(e1).multiplyScalar((d1 * g22 - d2 * g12) / det).addScaledVector(e2, (d2 * g11 - d1 * g12) / det);
+      const pitch = along.lengthSq() > 1e-12 ? Math.abs(along.normalize().y) : 0;
+      const upright = n.y >= UPRIGHT && pitch <= MAX_PITCH;
+      points(road, ia, ib, ic, 1, (v) => {
+        const k = voxel(v);
+        votes.set(k, (votes.get(k) ?? 0) + (upright ? 1 : -1));
+        if (upright) {
+          const t = column(v.x, v.z);
+          tops.set(t, v.y);
+          return;
+        }
+        // The room to drive: off the surface along its normal, kept clear a square either side.
+        for (let d = 0; d <= DRIVE_ROOM; d++) {
+          q.copy(v).addScaledVector(n, d);
+          const cx = Math.floor(q.x / CELL), cz = Math.floor(q.z / CELL);
+          for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) cap(key(cx + dx, cz + dz), q.y);
+        }
+      });
+    });
+  }
+  // The rest of the road (curbs, sides, underside) goes with the driving surface round it: by upright road its curbs
+  // (not what stands higher: gates, signs), by walls and inverted road their structure. Further from any driving
+  // surface (pillars) it does not count.
+  const surfaceTops = new Map([...heights].map(([k, l]) => [k, Math.max(...l)]));
+  const nearTop = (x: number, z: number) => {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    let top = -Infinity;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) top = Math.max(top, surfaceTops.get(key(cx + dx, cz + dz)) ?? -Infinity);
+    return top;
+  };
+  const vote = (v: THREE.Vector3) => {
+    let sum = 0;
+    const [x, y, z] = [v.x, v.y, v.z].map((u) => Math.floor(u / VOXEL));
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) sum += votes.get(`${x + dx},${y + dy},${z + dz}`) ?? 0;
+    return sum;
+  };
+  for (const road of roads)
+    triangles(road, (ia, ib, ic) => {
+      if (onSurface(road, ia) && onSurface(road, ib) && onSurface(road, ic)) return;
+      points(road, ia, ib, ic, 1, (v) => {
+        const t = column(v.x, v.z), side = vote(v);
+        if (side > 0) { if (v.y <= nearTop(v.x, v.z) + CURB_REACH) tops.set(t, v.y); }
+        else if (side < 0) cap(t, v.y);
+      });
+    });
+  // Per square the top of its lowest road (the heights up to the first gap of LAYER_GAP).
+  const lowest = new Map<string, number>();
+  for (const [k, list] of heights) {
+    list.sort((p, q) => p - q);
+    let top = list[0];
+    for (let i = 1; i < list.length && list[i] - top <= LAYER_GAP; i++) top = list[i];
+    lowest.set(k, top);
+  }
+  return { tops: lowest, caps };
+}
 
 export function terrainSurface(theme: SceneryTheme): TerrainSurface {
   return theme.land === "Dirt" ? "Dirt" : theme.land === "Ice" ? "Ice" : "Grass";
@@ -82,14 +217,11 @@ function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows
   return out;
 }
 
-/** The height map round the roads (`meshes`, world space); null without roads or when it would be too big. */
-export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
-  // Per road square its highest point (the curbs' tops or the surface's edge: the road's shape the land continues).
-  const tops = new Map<string, number>();
-  sampleRoads(meshes, 1, (v) => {
-    const k = key(Math.floor(v.x / CELL), Math.floor(v.z / CELL));
-    tops.set(k, Math.max(tops.get(k) ?? -Infinity, v.y));
-  });
+/** The height map round the roads (world space); null without upright roads or when it would be too big. */
+export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
+  // Per road square its highest point (the curbs' tops or the surface's edge: the road's shape the land continues), and
+  // under walls and inverted road the height the land stays below.
+  const { tops, caps } = roadShape(roads);
   if (tops.size === 0) return null;
   const width = Math.max(BLEND, own.width);
   // The smoothing reaches past the land's edge, so the land there is smoothed like everywhere.
@@ -149,6 +281,31 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
 
+  // How high the land may be: at most MAX_RISE over any road (a chamfer distance from the road squares' tops; a
+  // vertex takes its squares' lowest).
+  const ceiling = new Float64Array(n).fill(Infinity);
+  for (const [k, top] of tops) {
+    const [x, z] = k.split(",").map(Number);
+    for (const [dc, dr] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const c = x - sx0 + dc, r = z - sz0 + dr;
+      if (c < columns && r < rows) ceiling[r * columns + c] = Math.min(ceiling[r * columns + c], top);
+    }
+  }
+  const axial = MAX_RISE * CELL, diagonal = MAX_RISE * CELL * Math.SQRT2;
+  const lower = (i: number, j: number, cost: number) => { if (ceiling[j] + cost < ceiling[i]) ceiling[i] = ceiling[j] + cost; };
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < columns; c++) {
+      const i = r * columns + c;
+      if (c > 0) lower(i, i - 1, axial);
+      if (r > 0) { lower(i, i - columns, axial); if (c > 0) lower(i, i - columns - 1, diagonal); if (c + 1 < columns) lower(i, i - columns + 1, diagonal); }
+    }
+  for (let r = rows - 1; r >= 0; r--)
+    for (let c = columns - 1; c >= 0; c--) {
+      const i = r * columns + c;
+      if (c + 1 < columns) lower(i, i + 1, axial);
+      if (r + 1 < rows) { lower(i, i + columns, axial); if (c + 1 < columns) lower(i, i + columns + 1, diagonal); if (c > 0) lower(i, i + columns - 1, diagonal); }
+    }
+
   // Blend and noise (under the roads too: the export's mesh ends at their edges, the land there only shapes it).
   const heights: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
@@ -158,6 +315,14 @@ export function buildTerrainGrid(meshes: THREE.Mesh[], options: SceneryLandOptio
     const w = smooth(distance[i] / BLEND);
     let h = extended[i] * (1 - w) + smoothed[i] * w;
     h += own.noise * w * fractal(x, z, own.noiseSize);
+    // Under walls and inverted road (the squares round the vertex).
+    const sc = sx0 + c, sr = sz0 + r;
+    const limit = Math.min(ceiling[i], caps.get(key(sc, sr)) ?? Infinity, caps.get(key(sc - 1, sr)) ?? Infinity,
+      caps.get(key(sc, sr - 1)) ?? Infinity, caps.get(key(sc - 1, sr - 1)) ?? Infinity);
+    if (h > limit) {
+      if (limit < 0.05) continue;
+      h = limit;
+    }
     // On the stadium's grid the ground is there: land at its height would flicker with it.
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT && h < 0.5) continue;
     heights[i] = Math.max(0.05, h);

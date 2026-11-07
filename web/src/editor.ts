@@ -843,7 +843,8 @@ export class Editor {
     if (options.mode === "terrain") {
       // Own terrain: a mesh of our own instead of land blocks (trees on it), replacing the generated scenery.
       const meshes = this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r);
-      const grid = buildTerrainGrid(meshes, options, options.ownTerrain);
+      const roads = this.map.tracks.flatMap((t) => { const v = this.views.get(t); return v?.road ? [{ mesh: v.road, surface: v.surfaceCoords }] : []; });
+      const grid = buildTerrainGrid(roads, options, options.ownTerrain);
       if (!grid) return null;
       const trees = plantOnTerrain(grid, options, roadFootprint(meshes));
       this.lastHeightMap = null;
