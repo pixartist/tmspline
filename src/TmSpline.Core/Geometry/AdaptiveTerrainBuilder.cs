@@ -101,6 +101,10 @@ public static class AdaptiveTerrainBuilder
                     var k = CellAt(p.X, p.Z);
                     if (k < 0) continue;
                     floor[k] = Math.Min(floor[k], (float)p.Y);
+                    // Under any driving surface the land stays below it (where it is cut out this does not matter;
+                    // where it is not, e.g. one edge unpinned, it would otherwise poke through). Not the curbs: the
+                    // land meets their tops at the pins.
+                    keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
                     if (holds) continue;
                     steep[k] = true;
                     keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
