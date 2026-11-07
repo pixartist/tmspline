@@ -25,24 +25,35 @@ public static class TerrainMeshBuilder
     private const double DenseGrid = 24, MediumGrid = 72;
     /// <summary>Width of the curbs outside the road's surface (RoadMeshSettings.BorderThickness), metres.</summary>
     private static readonly double CurbWidth = new RoadMeshSettings().BorderThickness;
+    /// <summary>Where a triangle is tested for lying on a road (barycentric weights).</summary>
+    private static readonly (double, double, double)[] Weights =
+        [(1.0 / 3, 1.0 / 3, 1.0 / 3), (0.5, 0.5, 0), (0, 0.5, 0.5), (0.5, 0, 0.5), (0.8, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.1, 0.8),
+         (0.25, 0.75, 0), (0.75, 0.25, 0), (0, 0.25, 0.75), (0, 0.75, 0.25), (0.25, 0, 0.75), (0.75, 0, 0.25)];
+    /// <summary>Land this far or further below a road is under it (a bridge), not on it, metres.</summary>
+    private const double BelowRoad = 3;
     /// <summary>The land meets a road's edge when the height map there is this close to it, metres.</summary>
     private const double EdgeReach = 3;
     /// <summary>No triangle longer than this on a side (the triangulation's hull fills what is no land).</summary>
     private const double MaxEdge = 48;
 
-    /// <summary>A point of a road's edge every couple of metres: its centre, both edges (null: no land meets it there).</summary>
-    private sealed record EdgeSample(Vec3d Centre, Vec3d Right, Vec3d? Left, Vec3d? RightEdge, double RoomLeft, double RoomRight);
+    /// <summary>
+    /// A point of a road's edge every couple of metres: its centre, both edges (null: none, or no land meets it there),
+    /// and whether land may meet the road here at all (upright, not too steep; the edges are still there for leaving the
+    /// land off the road).
+    /// </summary>
+    private sealed record EdgeSample(Vec3d Centre, Vec3d Right, Vec3d? Left, Vec3d? RightEdge, double RoomLeft, double RoomRight, bool Holds = true);
 
     public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain")
     {
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
-        var (samples, ends) = map is null ? ([], []) : RoadSamples(map);
+        var (allSamples, ends) = map is null ? ([], []) : RoadSamples(map);
         // Land meets an edge only where the height map reaches it (not a bridge over the land, which the editor's map
         // keeps below the road it passes over): there the edge has no rows, and the land under it stays.
-        Vec3d? Met(Vec3d? edge) => edge is { } e && Sample(grid, e.X, e.Z) is var h && (double.IsNaN(h) || Math.Abs(h - e.Y) <= EdgeReach) ? e : null;
-        samples = samples.Select(s => s with { Left = Met(s.Left), RightEdge = Met(s.RightEdge) }).ToList();
+        Vec3d? Met(EdgeSample s, Vec3d? edge) => s.Holds && edge is { } e && Sample(grid, e.X, e.Z) is var h && (double.IsNaN(h) || Math.Abs(h - e.Y) <= EdgeReach) ? e : null;
+        var samples = allSamples.Select(s => s with { Left = Met(s, s.Left), RightEdge = Met(s, s.RightEdge) }).ToList();
         var lastRow = RowOffsets[^1];
+        var onRoad = RoadTest(allSamples, ends);
 
         // The points: the rows along the edges...
         var xs = new List<double>();
@@ -53,8 +64,14 @@ public static class TerrainMeshBuilder
         for (var s = 0; s < samples.Count; s++)
         {
             var sample = samples[s];
-            foreach (var (edge, sign, room) in new[] { (sample.Left, -1, sample.RoomLeft), (sample.RightEdge, 1, sample.RoomRight) })
+            foreach (var (edge, sign, room, road) in new[] { (sample.Left, -1, sample.RoomLeft, allSamples[s].Left), (sample.RightEdge, 1, sample.RoomRight, allSamples[s].RightEdge) })
             {
+                // An edge the land does not meet still gets a point at the land's height under it, so the triangulation
+                // has no triangle reaching across the road.
+                // (Not where that is on another road: a bridge's edge over a road.)
+                if (edge is null && road is { } f && Sample(grid, f.X, f.Z) is var below && !double.IsNaN(below) && below < f.Y + 0.5
+                    && !onRoad(f.X, f.Z, Math.Min(below, f.Y)))
+                    Add(f.X, Math.Min(below, f.Y), f.Z, true);
                 if (edge is not { } e) continue;
                 var outward = new Vec3d(sample.Right.X * sign, 0, sample.Right.Z * sign);
                 Add(e.X, e.Y, e.Z, true);
@@ -133,14 +150,22 @@ public static class TerrainMeshBuilder
         var all = new Delaunay(coords).Triangles;
 
         // Land only: not on a road, not longer than the land's points are apart, not where the height map has none.
-        var onRoad = RoadTest(samples, ends);
         var triangles = new List<(int A, int B, int C)>();
         for (var t = 0; t + 2 < all.Length; t += 3)
         {
             int a = all[t], b = all[t + 1], c = all[t + 2];
             double cx = (xs[a] + xs[b] + xs[c]) / 3, cz = (zs[a] + zs[b] + zs[c]) / 3;
-            if (Long(a, b) || Long(b, c) || Long(c, a) || onRoad(cx, cz) || double.IsNaN(Sample(grid, cx, cz))) continue;
+            if (Long(a, b) || Long(b, c) || Long(c, a) || OnRoad(a, b, c) || double.IsNaN(Sample(grid, cx, cz))) continue;
             triangles.Add((a, b, c));
+        }
+        // On a road anywhere: tested at the centre, the sides' middles and near the corners (a long triangle beside a
+        // road can cross it with its centre off it).
+        bool OnRoad(int a, int b, int c)
+        {
+            foreach (var (wa, wb, wc) in Weights)
+                if (onRoad(xs[a] * wa + xs[b] * wb + xs[c] * wc, zs[a] * wa + zs[b] * wb + zs[c] * wc, ys[a] * wa + ys[b] * wb + ys[c] * wc))
+                    return true;
+            return false;
         }
         bool Long(int a, int b) => (xs[a] - xs[b]) * (xs[a] - xs[b]) + (zs[a] - zs[b]) * (zs[a] - zs[b]) > MaxEdge * MaxEdge;
         if (triangles.Count == 0) return chunks;
@@ -280,11 +305,13 @@ public static class TerrainMeshBuilder
             var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
             if (rings.Count < 2) continue;
             var first = samples.Count;
+            // No land meets walls, upside-down road, or road climbing or diving steeper than about 33 degrees (a loop's
+            // sides); the editor's height map (ownTerrain.ts) uses the same limits.
+            bool Holds(int i) => rings[i].Up.Y >= 0.5 && Math.Abs(rings[i].Tangent.Normalized().Y) <= 0.55;
             Vec3d? Edge(int i, int side)
             {
-                // No land on walls, upside-down road, or road climbing or diving steeper than about 33 degrees (a
-                // loop's sides); the editor's height map (ownTerrain.ts) uses the same limits.
-                if (rings[i].Up.Y < 0.5 || Math.Abs(rings[i].Tangent.Normalized().Y) > 0.55) return null;
+                // Edges where the road is not upside down (on walls too: the land is left off them).
+                if (rings[i].Up.Y < -0.2) return null;
                 var segment = track.Segments[Math.Clamp(rings[i].Segment, 0, track.Segments.Count - 1)];
                 return RoadMeshBuilder.EdgeContact(rings[i], segment, side);
             }
@@ -302,12 +329,13 @@ public static class TerrainMeshBuilder
                 {
                     var t = (double)j / steps;
                     samples.Add(new EdgeSample(Lerp(a.Position, b.Position, t), Lerp(a.Right, b.Right, t).Normalized(),
-                        la is { } l0 && lb is { } l1 ? Lerp(l0, l1, t) : null, ra is { } r0 && rb is { } r1 ? Lerp(r0, r1, t) : null, roomL, roomR));
+                        la is { } l0 && lb is { } l1 ? Lerp(l0, l1, t) : null, ra is { } r0 && rb is { } r1 ? Lerp(r0, r1, t) : null, roomL, roomR,
+                        Holds(i) && Holds(i + 1)));
                 }
             }
             var last = rings.Count - 1;
             samples.Add(new EdgeSample(rings[last].Position, rings[last].Right, Edge(last, -1), Edge(last, 1),
-                InnerRoom(rings, last, -1), InnerRoom(rings, last, 1)));
+                InnerRoom(rings, last, -1), InnerRoom(rings, last, 1), Holds(last)));
             // An open track's ends, each with the way out of the road (along the track, level).
             if (!track.Closed)
             {
@@ -375,10 +403,11 @@ public static class TerrainMeshBuilder
         edge is { } e ? Math.Sqrt((e.X - centre.X) * (e.X - centre.X) + (e.Z - centre.Z) * (e.Z - centre.Z)) : 0;
 
     /// <summary>
-    /// Whether a point (x, z) lies on a road: across its nearest edge sample, between the two edges (a little inside them,
-    /// so the triangles along an edge stay).
+    /// Whether land at (x, y, z) lies on a road: across a road's edge sample there, between its two edges (a little inside
+    /// them, so the triangles along an edge stay), and not well below the road (land under a bridge stays). Every road
+    /// nearby counts (stacked roads), the edges as the road has them, whether the land meets them or not.
     /// </summary>
-    private static Func<double, double, bool> RoadTest(List<EdgeSample> samples, List<(int Index, Vec3d Forward)> ends)
+    private static Func<double, double, double, bool> RoadTest(List<EdgeSample> samples, List<(int Index, Vec3d Forward)> ends)
     {
         const double cell = 8;
         var endOf = ends.ToDictionary(e => e.Index, e => e.Forward);
@@ -389,33 +418,33 @@ public static class TerrainMeshBuilder
             if (!hash.TryGetValue(k, out var list)) hash[k] = list = [];
             list.Add(i);
         }
-        return (x, z) =>
+        return (x, z, y) =>
         {
             int hx = (int)Math.Floor(x / cell), hz = (int)Math.Floor(z / cell);
-            var best = -1;
-            var bestD = double.PositiveInfinity;
             for (var dx = -3; dx <= 3; dx++)
                 for (var dz = -3; dz <= 3; dz++)
                 {
                     if (!hash.TryGetValue((hx + dx, hz + dz), out var list)) continue;
                     foreach (var i in list)
                     {
-                        var c = samples[i].Centre;
-                        var d = (c.X - x) * (c.X - x) + (c.Z - z) * (c.Z - z);
-                        if (d < bestD) { bestD = d; best = i; }
+                        var s = samples[i];
+                        // Only the sample right here along its road (beyond a track's end: right next to its last one).
+                        var along = (x - s.Centre.X) * -s.Right.Z + (z - s.Centre.Z) * s.Right.X;
+                        if (Math.Abs(along) > AlongSpacing * 0.75) continue;
+                        // In front of an end: land.
+                        if (endOf.TryGetValue(i, out var forward) && (x - s.Centre.X) * forward.X + (z - s.Centre.Z) * forward.Z > 0.02) continue;
+                        var lateral = (x - s.Centre.X) * s.Right.X + (z - s.Centre.Z) * s.Right.Z;
+                        var right = s.RightEdge is { } re ? (re.X - s.Centre.X) * s.Right.X + (re.Z - s.Centre.Z) * s.Right.Z : Half(s.Centre, s.Left);
+                        var left = s.Left is { } le ? -((le.X - s.Centre.X) * s.Right.X + (le.Z - s.Centre.Z) * s.Right.Z) : Half(s.Centre, s.RightEdge);
+                        if (lateral >= right - 0.05 || -lateral >= left - 0.05) continue;
+                        // Not well below the road there (its height across it: on a banked road the low side is lower).
+                        var edgeY = lateral >= 0 ? s.RightEdge?.Y : s.Left?.Y;
+                        var width = lateral >= 0 ? right : left;
+                        var roadY = edgeY is { } ey && width > 1e-6 ? s.Centre.Y + (ey - s.Centre.Y) * Math.Abs(lateral) / width : s.Centre.Y;
+                        if (y >= roadY - BelowRoad) return true;
                     }
                 }
-            if (best < 0) return false;
-            var s = samples[best];
-            // Beyond a track's end the nearest sample is its last one: on the road only right next to a sample along it.
-            var along = (x - s.Centre.X) * -s.Right.Z + (z - s.Centre.Z) * s.Right.X;
-            if (Math.Abs(along) > AlongSpacing * 0.75) return false;
-            // In front of an end: land.
-            if (endOf.TryGetValue(best, out var forward) && (x - s.Centre.X) * forward.X + (z - s.Centre.Z) * forward.Z > 0.02) return false;
-            var lateral = (x - s.Centre.X) * s.Right.X + (z - s.Centre.Z) * s.Right.Z;
-            var right = s.RightEdge is { } re ? (re.X - s.Centre.X) * s.Right.X + (re.Z - s.Centre.Z) * s.Right.Z : Half(s.Centre, s.Left);
-            var left = s.Left is { } le ? -((le.X - s.Centre.X) * s.Right.X + (le.Z - s.Centre.Z) * s.Right.Z) : Half(s.Centre, s.RightEdge);
-            return lateral < right - 0.05 && -lateral < left - 0.05;
+            return false;
         };
     }
 
