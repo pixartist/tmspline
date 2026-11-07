@@ -108,7 +108,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
 
   button("New", "Start a new track", () => {
     if (!confirmDiscard()) return;
-    editor.editMap((m) => Object.assign(m, newMap()));
+    editor.replaceMap(newMap());
     editor.select(null);
     editor.frameTrack();
     cloud?.replaced();
@@ -222,7 +222,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
       loadTheirs: () => {
         const json = localStorage.getItem(STORAGE_KEY);
         if (json) {
-          editor.editMap((m) => Object.assign(m, parseMap(json)));
+          editor.replaceMap(parseMap(json));
           lastSaved = json;
         }
         conflict = null;
@@ -1073,7 +1073,7 @@ function openFile(editor: Editor, opened?: () => void): void {
     if (!file) return;
     try {
       const map = parseMap(await file.text());
-      editor.editMap((m) => Object.assign(m, map));
+      editor.replaceMap(map);
       editor.select(null);
       editor.frameTrack();
       opened?.();

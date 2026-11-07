@@ -377,6 +377,17 @@ export class Editor {
     this.mapChanged();
   }
 
+  /**
+   * Loads another map in place of this one, with undo: every field of the old map goes, also those the new one has not
+   * (its terrain, say).
+   */
+  replaceMap(map: TrackMap): void {
+    this.editMap((m) => {
+      for (const key of Object.keys(m)) delete (m as unknown as Record<string, unknown>)[key];
+      Object.assign(m, map);
+    });
+  }
+
   /** Makes another track the one being edited (clears the selection). */
   setActive(index: number): void {
     if (index === this.active || index < 0 || index >= this.map.tracks.length) return;

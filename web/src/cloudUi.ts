@@ -34,7 +34,7 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
   const container = editor.renderer.domElement.parentElement!;
   const mapJson = () => JSON.stringify(editor.map);
   const loadMap = (map: TrackMap) => {
-    editor.editMap((m) => Object.assign(m, map));
+    editor.replaceMap(map);
     editor.select(null);
     editor.frameTrack();
   };
