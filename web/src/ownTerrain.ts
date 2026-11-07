@@ -70,7 +70,7 @@ export interface TerrainRoad { mesh: THREE.Mesh; surface: Float32Array }
  * The roads sampled for the land: per CELL square the top of its upright road (what the land continues), and the height
  * the land must stay under (walls and inverted road, and the room to drive on them).
  */
-function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map<string, number> } {
+function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Map<string, number>; caps: Map<string, number> } {
   // Upright road's heights per square; the land continues the lowest road in each (the top of its curbs).
   const heights = new Map<string, number[]>(), caps = new Map<string, number>();
   const tops = {
@@ -85,7 +85,6 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map
   const votes = new Map<string, number>(); // > 0: mostly upright
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), p = new THREE.Vector3();
   const n = new THREE.Vector3(), q = new THREE.Vector3();
-  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), along = new THREE.Vector3();
   const triangles = (road: TerrainRoad, fn: (ia: number, ib: number, ic: number) => void) => {
     const index = road.mesh.geometry.getIndex();
     const count = index ? index.count : road.mesh.geometry.getAttribute("position").count;
@@ -108,21 +107,38 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map
   for (const road of roads) {
     road.mesh.updateMatrixWorld();
     const normals = road.mesh.geometry.getAttribute("normal");
+    // Upright or not per metre along the road, by its cross-section as a whole: the driving surface's normal in its
+    // middle (on a bent cross-section the sides face further sideways) and its climb along the middle a few metres
+    // either way. TerrainMeshBuilder decides by the same, its rings' up and tangent.
+    const middle = new Map<number, { across: number; n: THREE.Vector3; p: THREE.Vector3 }>();
+    const position = road.mesh.geometry.getAttribute("position");
+    for (let i = 0; i < position.count; i++) {
+      if (!onSurface(road, i)) continue;
+      const b = Math.round(road.surface[i * 2]), across = Math.abs(road.surface[i * 2 + 1]);
+      const m = middle.get(b);
+      if (m && m.across <= across) continue;
+      middle.set(b, { across, n: new THREE.Vector3().fromBufferAttribute(normals, i).transformDirection(road.mesh.matrixWorld),
+        p: new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(road.mesh.matrixWorld) });
+    }
+    const along = [...middle.keys()].sort((u, w) => u - w);
+    const uprightAt = new Map<number, boolean>();
+    along.forEach((b, j) => {
+      const m = middle.get(b)!;
+      const t = middle.get(along[Math.min(along.length - 1, j + 3)])!.p.clone().sub(middle.get(along[Math.max(0, j - 3)])!.p);
+      const pitch = t.lengthSq() > 1e-9 ? Math.abs(t.normalize().y) : 0;
+      uprightAt.set(b, m.n.y >= UPRIGHT && pitch <= MAX_PITCH);
+    });
+    const uprightNear = (d: number, fallback: boolean) => {
+      const b = Math.round(d);
+      for (let k = 0; k <= 4; k++) { const u = uprightAt.get(b + k) ?? uprightAt.get(b - k); if (u !== undefined) return u; }
+      return fallback;
+    };
     triangles(road, (ia, ib, ic) => {
       if (!onSurface(road, ia) || !onSurface(road, ib) || !onSurface(road, ic)) return;
       n.set(0, 0, 0);
       for (const i of [ia, ib, ic]) n.add(q.fromBufferAttribute(normals, i));
       n.transformDirection(road.mesh.matrixWorld);
-      // Along the track: where the distance on the surface grows (its gradient in the triangle's plane).
-      const pos = road.mesh.geometry.getAttribute("position");
-      e1.fromBufferAttribute(pos, ib).sub(q.fromBufferAttribute(pos, ia));
-      e2.fromBufferAttribute(pos, ic).sub(q.fromBufferAttribute(pos, ia));
-      const d1 = road.surface[ib * 2] - road.surface[ia * 2], d2 = road.surface[ic * 2] - road.surface[ia * 2];
-      const g11 = e1.dot(e1), g12 = e1.dot(e2), g22 = e2.dot(e2), det = g11 * g22 - g12 * g12;
-      along.set(0, 0, 0);
-      if (Math.abs(det) > 1e-9) along.copy(e1).multiplyScalar((d1 * g22 - d2 * g12) / det).addScaledVector(e2, (d2 * g11 - d1 * g12) / det);
-      const pitch = along.lengthSq() > 1e-12 ? Math.abs(along.normalize().y) : 0;
-      const upright = n.y >= UPRIGHT && pitch <= MAX_PITCH;
+      const upright = uprightNear((road.surface[ia * 2] + road.surface[ib * 2] + road.surface[ic * 2]) / 3, n.y >= UPRIGHT);
       points(road, ia, ib, ic, 1, (v) => {
         const k = voxel(v);
         votes.set(k, (votes.get(k) ?? 0) + (upright ? 1 : -1));
@@ -166,14 +182,16 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map
       });
     });
   // Per square the top of its lowest road (the heights up to the first gap of LAYER_GAP).
-  const lowest = new Map<string, number>();
+  // Where that is a road under another (a bridge over it), also in `under`.
+  const lowest = new Map<string, number>(), under = new Map<string, number>();
   for (const [k, list] of heights) {
     list.sort((p, q) => p - q);
-    let top = list[0];
-    for (let i = 1; i < list.length && list[i] - top <= LAYER_GAP; i++) top = list[i];
+    let i = 1, top = list[0];
+    for (; i < list.length && list[i] - top <= LAYER_GAP; i++) top = list[i];
     lowest.set(k, top);
+    if (i < list.length) under.set(k, top);
   }
-  return { tops: lowest, caps };
+  return { tops: lowest, under, caps };
 }
 
 export function terrainSurface(theme: SceneryTheme): TerrainSurface {
@@ -223,7 +241,7 @@ function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows
 export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
   // Per road square its highest point (the curbs' tops or the surface's edge: the road's shape the land continues), and
   // under walls and inverted road the height the land stays below.
-  const { tops, caps } = roadShape(roads);
+  const { tops, under, caps } = roadShape(roads);
   if (tops.size === 0) return null;
   const width = Math.max(BLEND, own.width);
   // The smoothing reaches past the land's edge, so the land there is smoothed like everywhere.
@@ -283,10 +301,11 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
 
-  // How high the land may be: at most MAX_RISE over any road (a chamfer distance from the road squares' tops; a
-  // vertex takes its squares' lowest).
+  // How high the land may be: at most MAX_RISE over a road with another over it (a chamfer distance from those squares'
+  // tops; a vertex takes its squares' lowest), so it ramps up to the bridge instead of walling in the road under it.
+  // (Not from every road: beside a steeply banked one its own low side would hold the land under its high edge.)
   const ceiling = new Float64Array(n).fill(Infinity);
-  for (const [k, top] of tops) {
+  for (const [k, top] of under) {
     const [x, z] = k.split(",").map(Number);
     for (const [dc, dr] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
       const c = x - sx0 + dc, r = z - sz0 + dr;
