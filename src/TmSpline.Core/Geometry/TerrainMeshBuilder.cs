@@ -31,8 +31,13 @@ public static class TerrainMeshBuilder
          (0.25, 0.75, 0), (0.75, 0.25, 0), (0, 0.25, 0.75), (0, 0.75, 0.25), (0.25, 0, 0.75), (0.75, 0, 0.25)];
     /// <summary>Land this far or further below a road is under it (a bridge), not on it, metres.</summary>
     private const double BelowRoad = 3;
-    /// <summary>The land meets a road's edge when the height map there is this close to it, metres.</summary>
-    private const double EdgeReach = 3;
+    /// <summary>
+    /// The land meets a road's edge when the height map there is at most this much above it, or at most PullReach below
+    /// it (the rows then pull it up to the edge: at a loop's or wall's start the editor's map is held lower), metres.
+    /// </summary>
+    private const double EdgeReach = 3, PullReach = 24;
+    /// <summary>A point this far inside a road's edge is on it (less: the edge's own triangles, a curve's chords), metres.</summary>
+    private const double EdgeMargin = 0.25;
     /// <summary>No triangle longer than this on a side (the triangulation's hull fills what is no land).</summary>
     private const double MaxEdge = 48;
 
@@ -48,12 +53,24 @@ public static class TerrainMeshBuilder
         var chunks = new List<MeshChunk>();
         if (grid.Columns < 2 || grid.Rows < 2) return chunks;
         var (allSamples, ends) = map is null ? ([], []) : RoadSamples(map);
-        // Land meets an edge only where the height map reaches it (not a bridge over the land, which the editor's map
-        // keeps below the road it passes over): there the edge has no rows, and the land under it stays.
-        Vec3d? Met(EdgeSample s, Vec3d? edge) => s.Holds && edge is { } e && Sample(grid, e.X, e.Z) is var h && (double.IsNaN(h) || Math.Abs(h - e.Y) <= EdgeReach) ? e : null;
-        var samples = allSamples.Select(s => s with { Left = Met(s, s.Left), RightEdge = Met(s, s.RightEdge) }).ToList();
-        var lastRow = RowOffsets[^1];
+        // Land meets an edge where the height map is near it or below (not where it is far below: a bridge over the
+        // land, which the editor's map keeps below the road it passes over): elsewhere the edge has no rows.
         var onRoad = RoadTest(allSamples, ends);
+        // Pulled up only where no other road lies under the edge or just beyond it (a bridge over a road: the land stays
+        // with the road below).
+        bool Bridge(EdgeSample s, Vec3d e, int sign)
+        {
+            foreach (var d in new[] { 0.5, 2.0, 4.0 })
+            {
+                double x = e.X + s.Right.X * sign * d, z = e.Z + s.Right.Z * sign * d;
+                if (Sample(grid, x, z) is var h && !double.IsNaN(h) && onRoad(x, z, h)) return true;
+            }
+            return false;
+        }
+        Vec3d? Met(EdgeSample s, Vec3d? edge, int sign) => s.Holds && edge is { } e && Sample(grid, e.X, e.Z) is var h
+            && (double.IsNaN(h) || (h <= e.Y + EdgeReach && h >= e.Y - (Bridge(s, e, sign) ? EdgeReach : PullReach))) ? e : null;
+        var samples = allSamples.Select(s => s with { Left = Met(s, s.Left, -1), RightEdge = Met(s, s.RightEdge, 1) }).ToList();
+        var lastRow = RowOffsets[^1];
 
         // The points: the rows along the edges...
         var xs = new List<double>();
@@ -83,9 +100,13 @@ public static class TerrainMeshBuilder
                     var y = Sample(grid, x, z);
                     if (double.IsNaN(y)) continue;
                     // From the edge's own height into the height map's over the rows (the map is coarser than the
-                    // road: on a steep one its height beside the edge is off by up to a metre or two).
+                    // road: on a steep one its height beside the edge is off by up to a metre or two; where it is held
+                    // lower, the rows pull it up to the edge).
                     var w = offset / lastRow;
-                    Add(x, e.Y + (y - e.Y) * w * w * (3 - 2 * w), z, false);
+                    var rowY = e.Y + (y - e.Y) * w * w * (3 - 2 * w);
+                    // Not onto another road (the one under a loop, say): the rows end before it.
+                    if (onRoad(x, z, rowY)) break;
+                    Add(x, rowY, z, false);
                 }
             }
         }
@@ -465,7 +486,7 @@ public static class TerrainMeshBuilder
                         var lateral = (x - s.Centre.X) * s.Right.X + (z - s.Centre.Z) * s.Right.Z;
                         var right = s.RightEdge is { } re ? (re.X - s.Centre.X) * s.Right.X + (re.Z - s.Centre.Z) * s.Right.Z : Half(s.Centre, s.Left);
                         var left = s.Left is { } le ? -((le.X - s.Centre.X) * s.Right.X + (le.Z - s.Centre.Z) * s.Right.Z) : Half(s.Centre, s.RightEdge);
-                        if (lateral >= right - 0.05 || -lateral >= left - 0.05) continue;
+                        if (lateral >= right - EdgeMargin || -lateral >= left - EdgeMargin) continue;
                         // Not well below the road there (its height across it: on a banked road the low side is lower).
                         var edgeY = lateral >= 0 ? s.RightEdge?.Y : s.Left?.Y;
                         var width = lateral >= 0 ? right : left;
