@@ -188,7 +188,7 @@ public static class TerrainMeshBuilder
             chunk.Normals.Add(normalOf[i]);
             // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
             var light = new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1)));
-            chunk.Uv0.Add(stone ? light : MaskUv(GroundU(xs[i], zs[i]), normalOf[i].Y));
+            chunk.Uv0.Add(stone ? light : GroundUv(xs[i], zs[i]));
             chunk.Uv1.Add(light);
             vertexOf[(chunk, i, stone)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
@@ -248,7 +248,7 @@ public static class TerrainMeshBuilder
                     chunk.Normals.Add(outward);
                     var light = new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256);
                     // Rock: its lightmap; else the hill's side (dirt), as on the hill pieces' flanks, u along the edge.
-                    chunk.Uv0.Add(rocky ? light : MaskUv((float)((i == u ? 0 : Math.Sqrt((xs[v] - xs[u]) * (xs[v] - xs[u]) + (zs[v] - zs[u]) * (zs[v] - zs[u]))) / 32 + GroundU(xs[u], zs[u])), 0) with { Y = SideV });
+                    chunk.Uv0.Add(rocky ? light : new Vector2((float)((i == u ? 0 : Math.Sqrt((xs[v] - xs[u]) * (xs[v] - xs[u]) + (zs[v] - zs[u]) * (zs[v] - zs[u]))) / 32 + GroundUv(xs[u], zs[u]).X), SideV));
                     chunk.Uv1.Add(light);
                 }
                 var sm = rocky ? chunk.MaterialIndex(rock) : 0;
@@ -424,26 +424,23 @@ public static class TerrainMeshBuilder
     }
 
     /// <summary>
-    /// The hill material's first UV layer maps its own texture (DecoHill_D, besides the projected ones): grass above v
-    /// 0.25, below it the wooden strip of the hill pieces' vertical sides. On the hill pieces (DecoHillSlope2Straight) u
-    /// runs along the ground, a 32 m block from 0 to 1; tops and slopes at v 0.26 to 0.55, sides 0.2 to 0.26. The land
-    /// keeps to the grass (v 0.35 to 0.55, a little lower where steep), the skirts get the sides' strip. (u must vary: a
-    /// constant u stretches one column of the texture over the land.)
+    /// The hill material's first UV layer maps its own texture (DecoHill_D, besides the projected ones): grass, and at one
+    /// end of v the wooden strip of the hill pieces' vertical sides (theirs at v 0.2 to 0.26). On the hill pieces
+    /// (DecoHillSlope2Straight) u runs along the ground, a 32 m block from 0 to 1. The land maps the grass by position at
+    /// that scale in both directions (a direction without change stretches the texture's pixels into lines): u along a
+    /// slant, v across it, back and forth between 0.3 and 0.7 (mirrored, so it never reaches the wood).
     /// </summary>
-    private static Vector2 MaskUv(float u, float normalY)
-    {
-        var steep = Math.Clamp((0.9f - normalY) / 0.3f, 0, 1);
-        return new Vector2(u, 0.55f - 0.2f * steep);
-    }
-
-    /// <summary>The hill pieces' side strip (v 0.2 to 0.26: the wood under the grass's edge).</summary>
+    /// <summary>The hill pieces' side strip (v 0.2 to 0.26: the wood under the grass's edge), for the skirts.</summary>
     private const float SideV = 0.23f;
 
-    /// <summary>
-    /// The mask's u on the land: along the ground at 1/32 per metre, on a slant (so no direction of slope keeps one u
-    /// down its whole fall).
-    /// </summary>
-    private static float GroundU(double x, double z) => (float)((x * 0.8 + z * 0.6) / 32);
+    private static Vector2 GroundUv(double x, double z)
+    {
+        var u = (x * 0.8 + z * 0.6) / 32;
+        var across = (-x * 0.6 + z * 0.8) / 32 / 0.8; // in periods of the mirror (0.4 there and 0.4 back)
+        var f = across - Math.Floor(across);
+        var v = 0.3 + 0.8 * (f < 0.5 ? f : 1 - f);
+        return new Vector2((float)u, (float)v);
+    }
 
     /// <summary>
     /// The map's terrain (its chunks) as the export builds it, in world space, packed for the editor:
