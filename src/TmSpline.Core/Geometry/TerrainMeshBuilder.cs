@@ -248,7 +248,7 @@ public static class TerrainMeshBuilder
                     chunk.Normals.Add(outward);
                     var light = new Vector2(down == 0 ? 0.8f : 0.98f, 0.02f + 0.96f * ((k % 256) + (i == u ? 0.05f : 0.95f)) / 256);
                     // Rock: its lightmap; else the hill's side (dirt), as on the hill pieces' flanks, u along the edge.
-                    chunk.Uv0.Add(rocky ? light : MaskUv((float)((i == u ? 0 : Math.Sqrt((xs[v] - xs[u]) * (xs[v] - xs[u]) + (zs[v] - zs[u]) * (zs[v] - zs[u]))) / 32 + GroundU(xs[u], zs[u])), 0));
+                    chunk.Uv0.Add(rocky ? light : MaskUv((float)((i == u ? 0 : Math.Sqrt((xs[v] - xs[u]) * (xs[v] - xs[u]) + (zs[v] - zs[u]) * (zs[v] - zs[u]))) / 32 + GroundU(xs[u], zs[u])), 0) with { Y = SideV });
                     chunk.Uv1.Add(light);
                 }
                 var sm = rocky ? chunk.MaterialIndex(rock) : 0;
@@ -424,17 +424,20 @@ public static class TerrainMeshBuilder
     }
 
     /// <summary>
-    /// The hill material projects its colour textures by position; its first UV layer places its mask between grass and
-    /// the flank's dirt, as on the hill pieces (measured on DecoHillSlope2Straight): u runs along the ground, a 32 m
-    /// block from 0 to 1, v is the profile (tops 0.42 to 0.55, slopes 0.26 to 0.44, sides below 0.26). Here v comes from
-    /// the steepness: grass where the land is flat, turning to dirt where it gets steep. (u must vary: a constant u
-    /// stretches one column of the mask over the land.)
+    /// The hill material's first UV layer maps its own texture (DecoHill_D, besides the projected ones): grass above v
+    /// 0.25, below it the wooden strip of the hill pieces' vertical sides. On the hill pieces (DecoHillSlope2Straight) u
+    /// runs along the ground, a 32 m block from 0 to 1; tops and slopes at v 0.26 to 0.55, sides 0.2 to 0.26. The land
+    /// keeps to the grass (v 0.35 to 0.55, a little lower where steep), the skirts get the sides' strip. (u must vary: a
+    /// constant u stretches one column of the texture over the land.)
     /// </summary>
     private static Vector2 MaskUv(float u, float normalY)
     {
         var steep = Math.Clamp((0.9f - normalY) / 0.3f, 0, 1);
-        return new Vector2(u, 0.55f - 0.4f * steep);
+        return new Vector2(u, 0.55f - 0.2f * steep);
     }
+
+    /// <summary>The hill pieces' side strip (v 0.2 to 0.26: the wood under the grass's edge).</summary>
+    private const float SideV = 0.23f;
 
     /// <summary>
     /// The mask's u on the land: along the ground at 1/32 per metre, on a slant (so no direction of slope keeps one u
