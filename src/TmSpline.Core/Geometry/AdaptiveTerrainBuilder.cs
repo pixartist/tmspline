@@ -29,9 +29,9 @@ public static class AdaptiveTerrainBuilder
     private const double PinReach = 24, PullSlope = 1.5;
     /// <summary>
     /// Under road that holds land but is not cut out (a bridge), the land is raised to KeepClear under it when it is at
-    /// most FillReach lower, falling away at FillSlope (1: 45 degrees) round it: no open gap under a bridge.
+    /// most FillReach lower, fading out round it like the pins' pull: no open gap under a bridge.
     /// </summary>
-    private const double FillReach = 40, FillSlope = 1;
+    private const double FillReach = 8;
     /// <summary>Land more than this below a cut road (its edges' line) is under it, not at it: it is not cut, metres.</summary>
     private const double CutDepth = 4;
     private const double DriveRoom = 4, KeepClear = 0.5, BridgeGap = 3, Sunk = -2;
@@ -260,37 +260,33 @@ public static class AdaptiveTerrainBuilder
         // Under a cut stretch far over the land (a bridge pinned at its edges): the land stays, it is not at the road.
         for (var i = 0; i < n; i++)
             if (cut[i] && !float.IsNaN(land[i]) && land[i] + delta[i] < roadY[i] - CutDepth) { deep[i] = true; cut[i] = false; }
-        // The fill under bridges: seeded under road that holds land where the land is lower (by at
-        // most FillReach), spread at FillSlope (a chamfer max-propagation).
-        var lift = new float[n];
-        Array.Fill(lift, float.NegativeInfinity);
+        // The fill under bridges: under them (see below) the land rises to KeepClear under their underside where it is at
+        // most FillReach lower, fading out round them as the pins' pull does (further the more it rises), smoothed.
+        var seedTop = new float[n];
+        Array.Fill(seedTop, float.NaN);
         for (var i = 0; i < n; i++)
         {
-            // (Also under cut road: it is left out there, but the fill spreads from it to the land round a bridge; a road on
-            // the land has the land at its underside already, so it seeds nothing.)
-            if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i])) continue;
+            // Only under bridges: road whose edges are not pinned (no cut there), or a pinned stretch far over the land
+            // (deep). Road the land meets keeps the pins' banks.
+            if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i]) || !(deep[i] || float.IsNegativeInfinity(roadY[i]))) continue;
             var top = holdBottom[i] - (float)KeepClear;
             var gap = top - (land[i] + delta[i]);
-            if (gap > 0 && gap <= FillReach) lift[i] = top;
+            if (gap > 0 && gap <= FillReach) seedTop[i] = top;
         }
+        var (nearSeed, seedDistance) = NearestTransform(seedTop, columns, rows);
+        var fill = new float[n];
+        for (var i = 0; i < n; i++)
         {
-            float ax = (float)(FillSlope * Cell), dg = (float)(FillSlope * Cell * Math.Sqrt(2));
-            void Up(int i, int j, float cost) { if (lift[j] - cost > lift[i]) lift[i] = lift[j] - cost; }
-            for (var r = 0; r < rows; r++)
-                for (var c = 0; c < columns; c++)
-                {
-                    var i = r * columns + c;
-                    if (c > 0) Up(i, i - 1, ax);
-                    if (r > 0) { Up(i, i - columns, ax); if (c > 0) Up(i, i - columns - 1, dg); if (c + 1 < columns) Up(i, i - columns + 1, dg); }
-                }
-            for (var r = rows - 1; r >= 0; r--)
-                for (var c = columns - 1; c >= 0; c--)
-                {
-                    var i = r * columns + c;
-                    if (c + 1 < columns) Up(i, i + 1, ax);
-                    if (r + 1 < rows) { Up(i, i + columns, ax); if (c + 1 < columns) Up(i, i + columns + 1, dg); if (c > 0) Up(i, i + columns - 1, dg); }
-                }
+            var j = nearSeed[i];
+            if (j < 0) continue;
+            var rise = seedTop[j] - (land[j] + delta[j]);
+            var reach = Math.Max(PullDistance, rise * PullSlope);
+            var d = seedDistance[i] * Cell;
+            if (d > reach) continue;
+            var w = Math.Clamp(d / reach, 0, 1);
+            fill[i] = (float)(rise * (1 - w * w * (3 - 2 * w)));
         }
+        fill = Blur(fill, columns, rows, (int)Math.Round(2 / Cell));
         var heights = new float[n];
         var fidelity = new float[n];
         var (_, toDense) = NearestTransform(pinY.Select((y, i) => steep[i] ? 0f : y).ToArray(), columns, rows);
@@ -298,7 +294,7 @@ public static class AdaptiveTerrainBuilder
         {
             fidelity[i] = (float)Math.Max(MinFidelity, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
             if (float.IsNaN(land[i])) { heights[i] = float.NaN; continue; }
-            var h = Math.Min(Math.Max(land[i] + delta[i], lift[i]), keepOut[i]);
+            var h = Math.Min(land[i] + delta[i] + fill[i], keepOut[i]);
             int c = i % columns, r = i / columns;
             double x = x0 + (c + 0.5) * Cell, z = z0 + (r + 0.5) * Cell;
             if (Math.Abs(x) < StadiumHalf && Math.Abs(z) < StadiumHalf && h < 0.5) h = (float)Sunk;
