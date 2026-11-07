@@ -129,7 +129,10 @@ public static class TerrainMeshBuilder
         }
         // ...and the grid beyond them, sparser with the distance from the roads (and at full density along the land's
         // outer edge, so its shape stays).
-        var fromRoad = DistanceFromRoads(grid, samples, lastRow + MediumGrid);
+        var fromRoad = DistanceFromRoads(grid, allSamples, lastRow + MediumGrid);
+        // The rows replace the grid only next to the edges that have them (beside an edge the land does not meet, the
+        // grid stays: else nothing would be there but long triangles).
+        var fromRows = DistanceFromPoints(grid, samples.SelectMany(x => new[] { x.Left, x.RightEdge }).OfType<Vec3d>(), lastRow + 1);
         for (var r = 0; r < grid.Rows; r++)
             for (var c = 0; c < grid.Columns; c++)
             {
@@ -137,7 +140,7 @@ public static class TerrainMeshBuilder
                 var h = grid.Heights[k];
                 if (double.IsNaN(h)) continue;
                 var d = fromRoad[k];
-                if (d < lastRow + 1) continue;
+                if (fromRows[k] < lastRow + 1) continue;
                 var step = d < lastRow + DenseGrid ? 1 : d < lastRow + MediumGrid ? 2 : 4;
                 var border = double.IsNaN(grid.Height(c - 1, r)) || double.IsNaN(grid.Height(c + 1, r)) || double.IsNaN(grid.Height(c, r - 1)) || double.IsNaN(grid.Height(c, r + 1));
                 if (!border && (c % step != 0 || r % step != 0)) continue;
@@ -378,6 +381,29 @@ public static class TerrainMeshBuilder
     /// Per grid vertex its distance from the nearest road's edge (from the centre, less the road's half width there),
     /// metres, up to <paramref name="reach"/> beyond the edges (further: infinity).
     /// </summary>
+    /// <summary>Per grid vertex its (horizontal) distance from the nearest of the points, up to `reach` (further: infinity).</summary>
+    private static double[] DistanceFromPoints(TerrainGrid grid, IEnumerable<Vec3d> points, double reach)
+    {
+        var d = new double[grid.Columns * grid.Rows];
+        Array.Fill(d, double.PositiveInfinity);
+        foreach (var p in points)
+        {
+            var c0 = Math.Max(0, (int)Math.Floor((p.X - reach - grid.X0) / grid.Cell));
+            var c1 = Math.Min(grid.Columns - 1, (int)Math.Ceiling((p.X + reach - grid.X0) / grid.Cell));
+            var r0 = Math.Max(0, (int)Math.Floor((p.Z - reach - grid.Z0) / grid.Cell));
+            var r1 = Math.Min(grid.Rows - 1, (int)Math.Ceiling((p.Z + reach - grid.Z0) / grid.Cell));
+            for (var r = r0; r <= r1; r++)
+                for (var c = c0; c <= c1; c++)
+                {
+                    double dx = grid.X0 + c * grid.Cell - p.X, dz = grid.Z0 + r * grid.Cell - p.Z;
+                    var v = Math.Sqrt(dx * dx + dz * dz);
+                    var k = r * grid.Columns + c;
+                    if (v < d[k]) d[k] = v;
+                }
+        }
+        return d;
+    }
+
     private static double[] DistanceFromRoads(TerrainGrid grid, List<EdgeSample> samples, double reach)
     {
         var d = new double[grid.Columns * grid.Rows];
