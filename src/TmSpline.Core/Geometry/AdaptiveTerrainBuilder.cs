@@ -22,6 +22,11 @@ public static class AdaptiveTerrainBuilder
     /// <summary>Fine cell size, metres.</summary>
     public const double Cell = 0.5;
     private const double PullDistance = 16, FidelityFalloff = 10, MinFidelity = 0.06;
+    /// <summary>
+    /// Edges more than this above the land are not pinned (the land stays: a road high over it), metres; the pull reaches
+    /// out PullSlope metres per metre the land rises (at least PullDistance), a bank rather than a spire.
+    /// </summary>
+    private const double PinReach = 24, PullSlope = 1.5;
     private const double DriveRoom = 4, KeepClear = 0.5, BridgeGap = 3, Sunk = -2;
     /// <summary>Half the stadium's floor (TrackMap's 48 cells of 32 m), metres: inside, land under the ground sinks.</summary>
     private const double StadiumHalf = 768;
@@ -129,6 +134,9 @@ public static class AdaptiveTerrainBuilder
         var cut = new bool[n];
         bool Bridge(Vec3d e, Vec3d outward)
         {
+            // Too high over the land to hold it.
+            var at = CellAt(e.X, e.Z);
+            if (at >= 0 && !float.IsNaN(land[at]) && land[at] < e.Y - PinReach) return true;
             foreach (var d in new[] { 0.0, 1.0, 2.5 })
             {
                 var k = CellAt(e.X + outward.X * d, e.Z + outward.Z * d);
@@ -205,11 +213,14 @@ public static class AdaptiveTerrainBuilder
         var delta = new float[n];
         for (var i = 0; i < n; i++)
         {
-            if (nearest[i] < 0 || distance[i] * Cell > PullDistance) continue;
+            if (nearest[i] < 0) continue;
             var j = nearest[i];
             var at = float.IsNaN(land[j]) ? pinY[j] : land[j];
-            var w = Math.Clamp(distance[i] * Cell / PullDistance, 0, 1);
-            delta[i] = (float)((pinY[j] - at) * (1 - w * w * (3 - 2 * w)));
+            var rise = pinY[j] - at;
+            var reach = Math.Max(PullDistance, Math.Abs(rise) * PullSlope);
+            if (distance[i] * Cell > reach) continue;
+            var w = Math.Clamp(distance[i] * Cell / reach, 0, 1);
+            delta[i] = (float)(rise * (1 - w * w * (3 - 2 * w)));
         }
         delta = Blur(delta, columns, rows, (int)Math.Round(2 / Cell));
         var heights = new float[n];
