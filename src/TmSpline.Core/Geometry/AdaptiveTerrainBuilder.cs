@@ -132,6 +132,9 @@ public static class AdaptiveTerrainBuilder
         // Pins: the edges of road that holds land, in runs; not where another road lies below (a bridge); open ends.
         var pins = new List<TerrainPin>();
         var cut = new bool[n];
+        // The cut's quads (between two pinned edges of consecutive rings), in 8 m buckets for the exact test.
+        var quads = new List<(Vec3d A, Vec3d B, Vec3d C, Vec3d D)>();
+        var buckets = new Dictionary<(int, int), List<int>>();
         bool Bridge(Vec3d e, Vec3d outward)
         {
             // Too high over the land to hold it.
@@ -182,6 +185,14 @@ public static class AdaptiveTerrainBuilder
         }
         void FillQuad(Vec3d a, Vec3d b, Vec3d c, Vec3d d)
         {
+            var q = quads.Count;
+            quads.Add((a, b, c, d));
+            for (var bx = (int)Math.Floor(Math.Min(Math.Min(a.X, b.X), Math.Min(c.X, d.X)) / 8); bx <= (int)Math.Floor(Math.Max(Math.Max(a.X, b.X), Math.Max(c.X, d.X)) / 8); bx++)
+                for (var bz = (int)Math.Floor(Math.Min(Math.Min(a.Z, b.Z), Math.Min(c.Z, d.Z)) / 8); bz <= (int)Math.Floor(Math.Max(Math.Max(a.Z, b.Z), Math.Max(c.Z, d.Z)) / 8); bz++)
+                {
+                    if (!buckets.TryGetValue((bx, bz), out var list)) buckets[(bx, bz)] = list = [];
+                    list.Add(q);
+                }
             double minX = Math.Min(Math.Min(a.X, b.X), Math.Min(c.X, d.X)), maxX = Math.Max(Math.Max(a.X, b.X), Math.Max(c.X, d.X));
             double minZ = Math.Min(Math.Min(a.Z, b.Z), Math.Min(c.Z, d.Z)), maxZ = Math.Max(Math.Max(a.Z, b.Z), Math.Max(c.Z, d.Z));
             int c0 = Math.Max(0, (int)Math.Floor((minX - x0) / Cell)), c1 = Math.Min(columns - 1, (int)Math.Floor((maxX - x0) / Cell));
@@ -236,7 +247,17 @@ public static class AdaptiveTerrainBuilder
             if (Math.Abs(x) < StadiumHalf && Math.Abs(z) < StadiumHalf && h < 0.5) h = (float)Sunk;
             heights[i] = h;
         }
-        return (new TerrainField(x0, z0, Cell, columns, rows, heights, fidelity, cut), pins);
+        bool CutAt(double x, double z)
+        {
+            if (!buckets.TryGetValue(((int)Math.Floor(x / 8), (int)Math.Floor(z / 8)), out var list)) return false;
+            foreach (var q in list)
+            {
+                var (a, b, c, d) = quads[q];
+                if (InTriangle(x, z, a, b, c) || InTriangle(x, z, a, c, d)) return true;
+            }
+            return false;
+        }
+        return (new TerrainField(x0, z0, Cell, columns, rows, heights, fidelity, cut) { CutAt = CutAt }, pins);
     }
 
     /// <summary>Holds land: upright and not climbing or diving steeper than about 33 degrees (as TerrainMeshBuilder).</summary>

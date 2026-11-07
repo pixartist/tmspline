@@ -195,6 +195,41 @@ static class MapMode
         Console.WriteLine($"field {field.Columns}x{field.Rows} cells of {field.Cell} m, {pins.Count} pins ({pins.Sum(p => p.Points.Count)} points), {field.Cut.Count(c => c)} cut cells: {tFields} ms");
         Console.WriteLine($"mesh {mesh.Positions.Count} vertices, {mesh.Indices.Count / 3} triangles, {mesh.Rounds} rounds, worst error {mesh.WorstError:F2}, {mesh.RefusedSegments} pin segments refused: {tMesh} ms");
         Console.WriteLine($"export build: {chunks.Count} chunks, {chunks.Sum(c => c.Triangles.Count)} triangles: {tAll} ms");
+        // Pin segments (between consecutive mesh vertices on a pin) with no triangle on them: a gap at the road's edge.
+        var edgeUse = new Dictionary<(int, int), int>();
+        for (var t = 0; t < mesh.Indices.Count; t += 3)
+            for (var k = 0; k < 3; k++)
+            {
+                int u = mesh.Indices[t + k], v = mesh.Indices[t + (k + 1) % 3];
+                var key = (Math.Min(u, v), Math.Max(u, v));
+                edgeUse[key] = edgeUse.GetValueOrDefault(key) + 1;
+            }
+        var pinnedVertices = Enumerable.Range(0, mesh.Positions.Count).Where(i => mesh.Pinned[i]).ToList();
+        var byPos = pinnedVertices.ToDictionary(i => ((long)Math.Round(mesh.Positions[i].X * 200), (long)Math.Round(mesh.Positions[i].Z * 200)), i => i);
+        int segments = 0, bare = 0;
+        var examples = new List<string>();
+        foreach (var pin in pins)
+            for (var k = 0; k + 1 < pin.Points.Count; k++)
+            {
+                // Pins are split into PinSpacing pieces in the mesher: walk along this segment's pieces.
+                Vec3d p0 = pin.Points[k], p1 = pin.Points[k + 1];
+                var len = Math.Sqrt((p1.X - p0.X) * (p1.X - p0.X) + (p1.Z - p0.Z) * (p1.Z - p0.Z));
+                var nPieces = Math.Max(1, (int)Math.Ceiling(len / 1.5));
+                for (var j = 0; j < nPieces; j++)
+                {
+                    double ta = (double)j / nPieces, tb = (double)(j + 1) / nPieces;
+                    var ka = ((long)Math.Round((p0.X + (p1.X - p0.X) * ta) * 200), (long)Math.Round((p0.Z + (p1.Z - p0.Z) * ta) * 200));
+                    var kb = ((long)Math.Round((p0.X + (p1.X - p0.X) * tb) * 200), (long)Math.Round((p0.Z + (p1.Z - p0.Z) * tb) * 200));
+                    if (!byPos.TryGetValue(ka, out var ia) || !byPos.TryGetValue(kb, out var ib)) continue;
+                    segments++;
+                    if (edgeUse.GetValueOrDefault((Math.Min(ia, ib), Math.Max(ia, ib))) == 0)
+                    {
+                        bare++;
+                        if (examples.Count < 8) { var A = mesh.Positions[ia]; var B = mesh.Positions[ib]; double mx = (A.X + B.X) / 2, mz = (A.Z + B.Z) / 2, nx = -(B.Z - A.Z), nz = B.X - A.X; var nl = Math.Sqrt(nx * nx + nz * nz); nx /= nl; nz /= nl; string Side(double s) { double x = mx + nx * s, z = mz + nz * s; var k = field.CellAt(x, z); var covered = false; for (var t = 0; t < mesh.Indices.Count && !covered; t += 3) { var P = mesh.Positions[mesh.Indices[t]]; var Q = mesh.Positions[mesh.Indices[t + 1]]; var R = mesh.Positions[mesh.Indices[t + 2]]; double d1 = (Q.X - P.X) * (z - P.Z) - (Q.Z - P.Z) * (x - P.X), d2 = (R.X - Q.X) * (z - Q.Z) - (R.Z - Q.Z) * (x - Q.X), d3 = (P.X - R.X) * (z - R.Z) - (P.Z - R.Z) * (x - R.X); covered = (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0); } return (field.IsCut(x, z) ? "cut" : "land") + (covered ? "+mesh" : "-NOMESH"); } examples.Add($"({A.X:F1}, {A.Z:F1}) y {A.Y:F1}: {Side(0.3)} | {Side(-0.3)}"); }
+                    }
+                }
+            }
+        Console.WriteLine($"pin pieces checked {segments}, with no land triangle on them {bare}: {string.Join(" ", examples)}");
 
         // Picture: 2 px per metre: land shaded, cut blue, triangle edges, pins red.
         const double Scale = 2;

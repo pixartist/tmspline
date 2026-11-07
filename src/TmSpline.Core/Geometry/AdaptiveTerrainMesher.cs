@@ -10,6 +10,19 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public sealed record TerrainField(double X0, double Z0, double Cell, int Columns, int Rows, float[] Heights, float[] Fidelity, bool[] Cut)
 {
+    /// <summary>
+    /// The exact cut, when known (the roads' polygons between their pinned edges): a point on it is cut. Without it the
+    /// cells' Cut decides (at cell size: a thin triangle beside a pinned edge can fall in a cut cell).
+    /// </summary>
+    public Func<double, double, bool>? CutAt { get; init; }
+
+    public bool IsCut(double x, double z)
+    {
+        if (CutAt is { } exact) return exact(x, z);
+        var k = CellAt(x, z);
+        return k >= 0 && Cut[k];
+    }
+
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 
     /// <summary>Bilinear between the cell centres; NaN where one round the point has no land.</summary>
@@ -147,7 +160,7 @@ public static class AdaptiveTerrainMesher
                 double ay = heights[a], by = heights[b], cy = heights[c];
                 double mx = (ax + bx + cx) / 3, mz = (az + bz + cz) / 3;
                 var mid = field.CellAt(mx, mz);
-                if (mid >= 0 && field.Cut[mid]) continue;
+                if (field.IsCut(mx, mz)) continue;
                 if (double.IsNaN(ay) || double.IsNaN(by) || double.IsNaN(cy) || mid < 0 || float.IsNaN(field.Heights[mid])) continue;
                 var fid = mid >= 0 ? Math.Max(0.02, field.Fidelity[mid]) : 0.02;
                 // Size.
@@ -207,8 +220,9 @@ public static class AdaptiveTerrainMesher
         foreach (var (a, b, c, _) in cdt.Triangles())
         {
             if (double.IsNaN(heights[a]) || double.IsNaN(heights[b]) || double.IsNaN(heights[c])) continue;
-            var mid = field.CellAt((cdt.X(a) + cdt.X(b) + cdt.X(c)) / 3, (cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3);
-            if (mid < 0 || field.Cut[mid] || float.IsNaN(field.Heights[mid])) continue;
+            double ox = (cdt.X(a) + cdt.X(b) + cdt.X(c)) / 3, oz = (cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3;
+            var mid = field.CellAt(ox, oz);
+            if (mid < 0 || field.IsCut(ox, oz) || float.IsNaN(field.Heights[mid])) continue;
             foreach (var v in new[] { a, b, c })
             {
                 if (!index.TryGetValue(v, out var i))
