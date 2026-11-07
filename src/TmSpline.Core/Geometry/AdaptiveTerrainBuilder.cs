@@ -27,6 +27,13 @@ public static class AdaptiveTerrainBuilder
     /// out PullSlope metres per metre the land rises (at least PullDistance), a bank rather than a spire.
     /// </summary>
     private const double PinReach = 24, PullSlope = 1.5;
+    /// <summary>
+    /// Under road that holds land but is not cut out (a bridge), the land is raised to KeepClear under it when it is at
+    /// most FillReach lower, falling away at FillSlope (1: 45 degrees) round it: no open gap under a bridge.
+    /// </summary>
+    private const double FillReach = 40, FillSlope = 1;
+    /// <summary>Land more than this below a cut road (its edges' line) is under it, not at it: it is not cut, metres.</summary>
+    private const double CutDepth = 4;
     private const double DriveRoom = 4, KeepClear = 0.5, BridgeGap = 3, Sunk = -2;
     /// <summary>Half the stadium's floor (TrackMap's 48 cells of 32 m), metres: inside, land under the ground sinks.</summary>
     private const double StadiumHalf = 768;
@@ -76,6 +83,9 @@ public static class AdaptiveTerrainBuilder
         var keepOut = new float[n];
         Array.Fill(keepOut, float.PositiveInfinity);
         var steep = new bool[n];
+        // Per cell the lowest point of road that holds land (its underside, for the fill under bridges).
+        var holdBottom = new float[n];
+        Array.Fill(holdBottom, float.PositiveInfinity);
         foreach (var road in roads)
         {
             var distances = road.Rings.Select(r => r.Distance).ToArray();
@@ -105,7 +115,7 @@ public static class AdaptiveTerrainBuilder
                     // where it is not, e.g. one edge unpinned, it would otherwise poke through). Not the curbs: the
                     // land meets their tops at the pins.
                     keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
-                    if (holds) continue;
+                    if (holds) { holdBottom[k] = Math.Min(holdBottom[k], (float)p.Y); continue; }
                     steep[k] = true;
                     keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
                     // The room to drive: off the surface along its normal where that points down (upside down, walls).
@@ -129,6 +139,7 @@ public static class AdaptiveTerrainBuilder
                     if (k < 0) continue;
                     floor[k] = Math.Min(floor[k], (float)p.Y);
                     if (!holds) keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
+                    else holdBottom[k] = Math.Min(holdBottom[k], (float)p.Y);
                 }
             }
         }
@@ -138,6 +149,10 @@ public static class AdaptiveTerrainBuilder
         var cut = new bool[n];
         // The cut's quads (between two pinned edges of consecutive rings), in 8 m buckets for the exact test.
         var quads = new List<(Vec3d A, Vec3d B, Vec3d C, Vec3d D)>();
+        // Per cut cell the road's height (between its edges), and whether the land lies far below it (then it stays).
+        var roadY = new float[n];
+        Array.Fill(roadY, float.NegativeInfinity);
+        var deep = new bool[n];
         var buckets = new Dictionary<(int, int), List<int>>();
         bool Bridge(Vec3d e, Vec3d outward)
         {
@@ -205,7 +220,11 @@ public static class AdaptiveTerrainBuilder
                 for (var col = c0; col <= c1; col++)
                 {
                     double px = x0 + (col + 0.5) * Cell, pz = z0 + (r + 0.5) * Cell;
-                    if (InTriangle(px, pz, a, b, c) || InTriangle(px, pz, a, c, d)) cut[r * columns + col] = true;
+                    var y = InTriangle(px, pz, a, b, c) ? PlaneY(px, pz, a, b, c) : InTriangle(px, pz, a, c, d) ? PlaneY(px, pz, a, c, d) : double.NaN;
+                    if (double.IsNaN(y)) continue;
+                    var k = r * columns + col;
+                    cut[k] = true;
+                    roadY[k] = Math.Max(roadY[k], (float)y);
                 }
         }
 
@@ -238,6 +257,40 @@ public static class AdaptiveTerrainBuilder
             delta[i] = (float)(rise * (1 - w * w * (3 - 2 * w)));
         }
         delta = Blur(delta, columns, rows, (int)Math.Round(2 / Cell));
+        // Under a cut stretch far over the land (a bridge pinned at its edges): the land stays, it is not at the road.
+        for (var i = 0; i < n; i++)
+            if (cut[i] && !float.IsNaN(land[i]) && land[i] + delta[i] < roadY[i] - CutDepth) { deep[i] = true; cut[i] = false; }
+        // The fill under bridges: seeded under road that holds land where the land is lower (by at
+        // most FillReach), spread at FillSlope (a chamfer max-propagation).
+        var lift = new float[n];
+        Array.Fill(lift, float.NegativeInfinity);
+        for (var i = 0; i < n; i++)
+        {
+            // (Also under cut road: it is left out there, but the fill spreads from it to the land round a bridge; a road on
+            // the land has the land at its underside already, so it seeds nothing.)
+            if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i])) continue;
+            var top = holdBottom[i] - (float)KeepClear;
+            var gap = top - (land[i] + delta[i]);
+            if (gap > 0 && gap <= FillReach) lift[i] = top;
+        }
+        {
+            float ax = (float)(FillSlope * Cell), dg = (float)(FillSlope * Cell * Math.Sqrt(2));
+            void Up(int i, int j, float cost) { if (lift[j] - cost > lift[i]) lift[i] = lift[j] - cost; }
+            for (var r = 0; r < rows; r++)
+                for (var c = 0; c < columns; c++)
+                {
+                    var i = r * columns + c;
+                    if (c > 0) Up(i, i - 1, ax);
+                    if (r > 0) { Up(i, i - columns, ax); if (c > 0) Up(i, i - columns - 1, dg); if (c + 1 < columns) Up(i, i - columns + 1, dg); }
+                }
+            for (var r = rows - 1; r >= 0; r--)
+                for (var c = columns - 1; c >= 0; c--)
+                {
+                    var i = r * columns + c;
+                    if (c + 1 < columns) Up(i, i + 1, ax);
+                    if (r + 1 < rows) { Up(i, i + columns, ax); if (c + 1 < columns) Up(i, i + columns + 1, dg); if (c > 0) Up(i, i + columns - 1, dg); }
+                }
+        }
         var heights = new float[n];
         var fidelity = new float[n];
         var (_, toDense) = NearestTransform(pinY.Select((y, i) => steep[i] ? 0f : y).ToArray(), columns, rows);
@@ -245,7 +298,7 @@ public static class AdaptiveTerrainBuilder
         {
             fidelity[i] = (float)Math.Max(MinFidelity, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
             if (float.IsNaN(land[i])) { heights[i] = float.NaN; continue; }
-            var h = Math.Min(land[i] + delta[i], keepOut[i]);
+            var h = Math.Min(Math.Max(land[i] + delta[i], lift[i]), keepOut[i]);
             int c = i % columns, r = i / columns;
             double x = x0 + (c + 0.5) * Cell, z = z0 + (r + 0.5) * Cell;
             if (Math.Abs(x) < StadiumHalf && Math.Abs(z) < StadiumHalf && h < 0.5) h = (float)Sunk;
@@ -253,6 +306,8 @@ public static class AdaptiveTerrainBuilder
         }
         bool CutAt(double x, double z)
         {
+            var at = CellAt(x, z);
+            if (at >= 0 && deep[at]) return false;
             if (!buckets.TryGetValue(((int)Math.Floor(x / 8), (int)Math.Floor(z / 8)), out var list)) return false;
             foreach (var q in list)
             {
@@ -290,6 +345,16 @@ public static class AdaptiveTerrainBuilder
     }
 
     private static Vec3d V(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
+
+    /// <summary>The height at (px, pz) on the plane through a, b, c.</summary>
+    private static double PlaneY(double px, double pz, Vec3d a, Vec3d b, Vec3d c)
+    {
+        var det = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
+        if (Math.Abs(det) < 1e-12) return (a.Y + b.Y + c.Y) / 3;
+        var l1 = ((b.Z - c.Z) * (px - c.X) + (c.X - b.X) * (pz - c.Z)) / det;
+        var l2 = ((c.Z - a.Z) * (px - c.X) + (a.X - c.X) * (pz - c.Z)) / det;
+        return l1 * a.Y + l2 * b.Y + (1 - l1 - l2) * c.Y;
+    }
 
     private static bool InTriangle(double px, double pz, Vec3d a, Vec3d b, Vec3d c)
     {
