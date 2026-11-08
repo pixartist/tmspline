@@ -195,6 +195,22 @@ static class MapMode
         Console.WriteLine($"field {field.Columns}x{field.Rows} cells of {field.Cell} m, {pins.Count} pins ({pins.Sum(p => p.Points.Count)} points), {field.Cut.Count(c => c)} cut cells: {tFields} ms");
         Console.WriteLine($"mesh {mesh.Positions.Count} vertices, {mesh.Indices.Count / 3} triangles, {mesh.Rounds} rounds, worst error {mesh.WorstError:F2}, {mesh.RefusedSegments} pin segments refused: {tMesh} ms");
         Console.WriteLine($"export build: {chunks.Count} chunks, {chunks.Sum(c => c.Triangles.Count)} triangles: {tAll} ms");
+        // Lightmap UVs per chunk and material: NadeoImporter refuses a surface without area ("LightMap TexCoord Invalid Surface").
+        static void Surfaces(string label, List<MeshChunk> built)
+        {
+            var rows = built.SelectMany(chunk => chunk.Triangles.GroupBy(t => t.Material).Select(g =>
+            {
+                double Area(Triangle t)
+                {
+                    System.Numerics.Vector2 p = chunk.Uv1[t.A], q = chunk.Uv1[t.B], r = chunk.Uv1[t.C];
+                    return Math.Abs((double)(q.X - p.X) * (r.Y - p.Y) - (double)(q.Y - p.Y) * (r.X - p.X));
+                }
+                return (chunk.Name, Material: g.Key, Count: g.Count(), Total: g.Sum(Area));
+            })).OrderBy(x => x.Total).ToList();
+            var smallest = rows.Take(3).Select(x => $"{x.Name}/{x.Material}: {x.Count} tris, area {x.Total:E2}");
+            Console.WriteLine($"  {label}: {built.Count} chunks, surfaces without area {rows.Count(x => x.Total == 0)}; smallest {string.Join("; ", smallest)}");
+        }
+        Surfaces($"rock {grid.RockAngle}", chunks);
         // Pin segments (between consecutive mesh vertices on a pin) with no triangle on them: a gap at the road's edge.
         var edgeUse = new Dictionary<(int, int), int>();
         for (var t = 0; t < mesh.Indices.Count; t += 3)

@@ -80,10 +80,9 @@ public static class TerrainMeshBuilder
             var o = chunk.ItemOffset;
             chunk.Positions.Add(new Vector3((float)(xs[i] - o.X), (float)(ys[i] - o.Y), (float)(zs[i] - o.Z)));
             chunk.Normals.Add(normalOf[i]);
-            // Lightmap: the land over most of the chunk's square, the skirts in a strip beside it.
-            var light = new Vector2((float)(0.02 + 0.76 * Math.Clamp((xs[i] - o.X) / ChunkSize, 0, 1)), (float)(0.02 + 0.96 * Math.Clamp((zs[i] - o.Z) / ChunkSize, 0, 1)));
-            chunk.Uv0.Add(stone ? light : GroundUv(xs[i], zs[i]));
-            chunk.Uv1.Add(light);
+            // The lightmap (also the rock's first layer) comes once the chunk's extent is known, below.
+            chunk.Uv0.Add(stone ? default : GroundUv(xs[i], zs[i]));
+            chunk.Uv1.Add(default);
             vertexOf[(chunk, i, stone)] = chunk.Positions.Count - 1;
             return chunk.Positions.Count - 1;
         }
@@ -153,7 +152,51 @@ public static class TerrainMeshBuilder
                 MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, sm), outward);
             }
         }
+        // Lightmap: the land over most of the map of its chunk, the skirts in the strip beside it. By the chunk's real extent,
+        // which is more than its square (a triangle belongs to the chunk of its middle): clamped to the square, pieces beyond
+        // it fell flat, and a chunk whose rock was only such pieces was refused by the importer.
+        foreach (var group in vertexOf.GroupBy(kv => kv.Key.Item1))
+        {
+            var chunk = group.Key;
+            float x0 = group.Min(kv => chunk.Positions[kv.Value].X), z0 = group.Min(kv => chunk.Positions[kv.Value].Z);
+            var width = Math.Max(group.Max(kv => chunk.Positions[kv.Value].X) - x0, 1e-3f);
+            var depth = Math.Max(group.Max(kv => chunk.Positions[kv.Value].Z) - z0, 1e-3f);
+            foreach (var ((_, _, stone), v) in group)
+            {
+                var light = new Vector2(0.02f + 0.76f * (chunk.Positions[v].X - x0) / width, 0.02f + 0.96f * (chunk.Positions[v].Z - z0) / depth);
+                chunk.Uv1[v] = light;
+                if (stone) chunk.Uv0[v] = light;
+            }
+            foreach (var surface in chunk.Triangles.GroupBy(t => t.Material))
+                EnsureLightmapArea(chunk, surface.Key, surface.ToList());
+        }
         return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
+    }
+
+    /// <summary>A surface with less lightmap than this (doubled, 1 = the map) counts as none: a few square centimetres of land.</summary>
+    private const double MinLightmapArea = 1e-7;
+
+    /// <summary>
+    /// NadeoImporter refuses a chunk with a material that has no area in the lightmap ("LightMap TexCoord Invalid Surface").
+    /// A surface that small (a sliver of rock) is invisible: its corners take turns on a small triangle of the map.
+    /// </summary>
+    private static void EnsureLightmapArea(MeshChunk chunk, int material, List<Triangle> triangles)
+    {
+        var area = 0.0;
+        foreach (var t in triangles)
+        {
+            Vector2 p = chunk.Uv1[t.A], q = chunk.Uv1[t.B], r = chunk.Uv1[t.C];
+            area += Math.Abs((double)(q.X - p.X) * (r.Y - p.Y) - (double)(q.Y - p.Y) * (r.X - p.X));
+        }
+        if (area >= MinLightmapArea) return;
+        Vector2[] corners = [new(0.1f, 0.1f), new(0.2f, 0.1f), new(0.1f, 0.2f)];
+        var seen = new HashSet<int>();
+        foreach (var v in triangles.SelectMany(t => new[] { t.A, t.B, t.C }))
+        {
+            if (!seen.Add(v)) continue;
+            chunk.Uv1[v] = corners[(seen.Count - 1) % 3];
+            if (material != 0) chunk.Uv0[v] = chunk.Uv1[v];
+        }
     }
 
     /// <summary>The height map's height at (x, z), bilinear between its vertices; NaN where a vertex round it has none.</summary>
