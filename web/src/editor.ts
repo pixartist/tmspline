@@ -6,7 +6,7 @@ import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, 
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
-import { buildTerrainGrid, plantOnTerrain, terrainHeight } from "./ownTerrain";
+import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
   add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
@@ -831,10 +831,36 @@ export class Editor {
       m.receiveShadow = true;
       m.castShadow = true;
       this.setTerrainMesh(m);
+      this.settleTrees(mesh);
     }).catch((err) => {
       if (build === this.terrainBuild) this.setBusy("terrain", null);
       console.error("Terrain preview failed", err);
     });
+  }
+
+  /**
+   * Stands the generated trees on the finished mesh (they were placed on the grid, before the land was fitted to the
+   * roads), not below the stadium's ground; a tree where the mesh has no land (cut out at a road) goes. Not an undo step:
+   * it only follows from the land.
+   */
+  private settleTrees(mesh: { positions: Float32Array; indices: Uint32Array }): void {
+    if (mesh.indices.length === 0 || !this.map.items) return;
+    const surface = meshHeightAt(mesh);
+    let moved = false;
+    const kept = this.map.items.filter((item) => {
+      if (!item.scenery) return true;
+      const [x, y, z] = item.position;
+      const land = surface(x, z);
+      if (land === null) { moved = true; return false; }
+      const h = Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT ? Math.max(0, land) : land;
+      if (Math.abs(h - y) >= 0.01) { item.position = [x, h, z]; moved = true; }
+      return true;
+    });
+    if (!moved) return;
+    if (kept.length) this.map.items = kept;
+    else delete this.map.items;
+    this.items.sync(this.map.items);
+    this.onChange();
   }
 
   private setTerrainMesh(mesh: THREE.Mesh | null): void {
@@ -1069,19 +1095,20 @@ export class Editor {
 
   /**
    * Replaces the generated scenery (blocks and trees) with a new one round the tracks and the other blocks (one undo
-   * step). Returns how many blocks and items it placed, or null when the block library lacks the theme's pieces.
+   * step). Returns how many blocks and items it placed, or null when the block library lacks the theme's pieces. When it
+   * placed them, the map keeps `saved` (the panel's settings) in that same step.
    */
-  async generateScenery(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
+  async generateScenery(options: SceneryLandOptions, saved: Record<string, unknown>): Promise<{ blocks: number; items: number } | null> {
     this.setBusy("generate", options.mode === "terrain" ? "Building the height map…" : "Placing the scenery…");
     try {
       await nextFrame();
-      return await this.generateSceneryNow(options);
+      return await this.generateSceneryNow(options, saved);
     } finally {
       this.setBusy("generate", null);
     }
   }
 
-  private async generateSceneryNow(options: SceneryLandOptions): Promise<{ blocks: number; items: number } | null> {
+  private async generateSceneryNow(options: SceneryLandOptions, saved: Record<string, unknown>): Promise<{ blocks: number; items: number } | null> {
     const lib = this.library;
     if (!lib) return null;
     if (options.mode === "terrain") {
@@ -1101,6 +1128,7 @@ export class Editor {
         if (items.length) this.map.items = items;
         else delete this.map.items;
         this.map.terrain = grid;
+        this.map.sceneryOptions = saved;
       });
       return { blocks: 0, items: trees.length };
     }
@@ -1144,6 +1172,7 @@ export class Editor {
       if (items.length) this.map.items = items;
       else delete this.map.items;
       delete this.map.terrain;
+      this.map.sceneryOptions = saved;
     });
     return { blocks: generated.blocks.length, items: generated.items.length };
   }

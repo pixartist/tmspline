@@ -362,6 +362,44 @@ export function terrainHeight(t: TerrainGrid, x: number, z: number): number | nu
   return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
 }
 
+/**
+ * The finished mesh's height at (x, z), null where it has no land (cut out at a road, off the land). The grid is only the
+ * land before it is fitted to the roads: near them the mesh can be metres higher or lower. Skirts have no area from above.
+ */
+export function meshHeightAt(mesh: { positions: Float32Array; indices: Uint32Array }): (x: number, z: number) => number | null {
+  const SIZE = 16;
+  const { positions: p, indices } = mesh;
+  const bucket = (c: number, r: number) => (c + 32768) * 65536 + (r + 32768);
+  const buckets = new Map<number, number[]>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const [a, b, c] = [indices[t] * 3, indices[t + 1] * 3, indices[t + 2] * 3];
+    const c0 = Math.floor(Math.min(p[a], p[b], p[c]) / SIZE), c1 = Math.floor(Math.max(p[a], p[b], p[c]) / SIZE);
+    const r0 = Math.floor(Math.min(p[a + 2], p[b + 2], p[c + 2]) / SIZE), r1 = Math.floor(Math.max(p[a + 2], p[b + 2], p[c + 2]) / SIZE);
+    for (let r = r0; r <= r1; r++)
+      for (let col = c0; col <= c1; col++) {
+        const k = bucket(col, r);
+        const list = buckets.get(k);
+        if (list) list.push(t);
+        else buckets.set(k, [t]);
+      }
+  }
+  return (x, z) => {
+    let best: number | null = null;
+    for (const t of buckets.get(bucket(Math.floor(x / SIZE), Math.floor(z / SIZE))) ?? []) {
+      const [a, b, c] = [indices[t] * 3, indices[t + 1] * 3, indices[t + 2] * 3];
+      const det = (p[b + 2] - p[c + 2]) * (p[a] - p[c]) + (p[c] - p[b]) * (p[a + 2] - p[c + 2]);
+      if (Math.abs(det) < 1e-3) continue;
+      const l1 = ((p[b + 2] - p[c + 2]) * (x - p[c]) + (p[c] - p[b]) * (z - p[c + 2])) / det;
+      const l2 = ((p[c + 2] - p[a + 2]) * (x - p[c]) + (p[a] - p[c]) * (z - p[c + 2])) / det;
+      const l3 = 1 - l1 - l2;
+      if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue;
+      const y = l1 * p[a + 1] + l2 * p[b + 1] + l3 * p[c + 1];
+      if (best === null || y > best) best = y;
+    }
+    return best;
+  };
+}
+
 /** Trees on the terrain: per 32 m cell with land, at the land's height, kept clear of the roads. */
 export function plantOnTerrain(t: TerrainGrid, options: SceneryLandOptions, footprint: Set<string>): VanillaItem[] {
   const cells = new Map<string, VanillaBlock>();

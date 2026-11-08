@@ -10,6 +10,41 @@ import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 /** The terrain brush (Off: the mouse edits as usual). */
 const paint = { brush: "off" as "off" | TerrainBrush, radius: 24, strength: 1 };
 const scenery = { mode: "fill" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, ownTerrain: { ...OWN_TERRAIN_DEFAULTS }, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
+
+/** What a map keeps of the panel when it generates (not the note or the height map view). */
+function sceneryToSave(): Record<string, unknown> {
+  const { note: _note, showHeightMap: _view, ...options } = scenery;
+  return structuredClone(options);
+}
+
+/** Puts a map's saved settings into the panel, within the fields' limits; whatever is missing or invalid stays as it is. */
+function restoreScenery(saved: Record<string, unknown>): void {
+  const number = (v: unknown, lo: number, hi: number, current: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : current);
+  const whole = (v: unknown, lo: number, hi: number, current: number) => Math.round(number(v, lo, hi, current));
+  const choice = <T extends string>(v: unknown, options: readonly T[], current: T) => (options.includes(v as T) ? (v as T) : current);
+  scenery.mode = choice(saved.mode, ["fill", "nestle", "terrain"], scenery.mode);
+  scenery.look = choice(saved.look, ["smooth", "hill", "alone"], scenery.look);
+  scenery.far = choice(saved.far, ["fit", "lower", "steps"], scenery.far);
+  scenery.theme = choice(saved.theme, SCENERY_THEMES.map((th) => th.id), scenery.theme);
+  scenery.forest = choice(saved.forest, ["none", ...FORESTS.map((f) => f.id)], scenery.forest);
+  if (typeof saved.hills === "boolean") scenery.hills = saved.hills;
+  scenery.band = whole(saved.band, 1, 24, scenery.band);
+  scenery.gap = whole(saved.gap, 0, 8, scenery.gap);
+  scenery.hillStep = whole(saved.hillStep, 1, 8, scenery.hillStep);
+  scenery.hillRise = whole(saved.hillRise, 0, 16, scenery.hillRise);
+  scenery.farRise = number(saved.farRise, 0, 4, scenery.farRise);
+  scenery.cliffs = whole(saved.cliffs, 0, 24, scenery.cliffs);
+  scenery.density = number(saved.density, 0, 1, scenery.density);
+  scenery.clearance = number(saved.clearance, 0, 64, scenery.clearance);
+  // In place: the panel's fields hold on to this object.
+  const own = (saved.ownTerrain && typeof saved.ownTerrain === "object" ? saved.ownTerrain : {}) as Record<string, unknown>;
+  const t = scenery.ownTerrain;
+  t.width = whole(own.width, 32, 1024, t.width);
+  t.smoothing = whole(own.smoothing, 0, 256, t.smoothing);
+  t.noise = number(own.noise, 0, 64, t.noise);
+  t.noiseSize = whole(own.noiseSize, 16, 512, t.noiseSize);
+  t.rockAngle = whole(own.rockAngle, 0, 90, t.rockAngle);
+}
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
@@ -237,7 +272,15 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     });
   });
 
+  // The panel follows the map's saved settings when they differ (another map loaded, undo of a Generate), by content:
+  // an undo of anything else brings back an equal copy and must not reset what was just typed into the panel.
+  let lastSceneryOptions: string | undefined;
   editor.onChange = () => {
+    const sceneryOptions = JSON.stringify(editor.map.sceneryOptions);
+    if (sceneryOptions !== lastSceneryOptions) {
+      lastSceneryOptions = sceneryOptions;
+      if (editor.map.sceneryOptions) restoreScenery(editor.map.sceneryOptions);
+    }
     axisButton.classList.toggle("active", editor.axisGizmoEnabled);
     insertButton.classList.toggle("active", editor.insertMode);
     for (const [kind, b] of placeButtons) b.classList.toggle("active", editor.placeMode === kind);
@@ -585,7 +628,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       {
         label: "Generate", onClick: async () => {
           const theme = SCENERY_THEMES.find((th) => th.id === scenery.theme) ?? SCENERY_THEMES[0];
-          const n = await editor.generateScenery({ ...scenery, theme });
+          const n = await editor.generateScenery({ ...scenery, theme }, sceneryToSave());
           editor.showHeightMap(scenery.mode === "nestle" && scenery.showHeightMap);
           scenery.note = n === null ? "The block library lacks pieces for these settings."
             : `Placed ${n.blocks} blocks${n.items ? ` and ${n.items} trees` : ""}.`;

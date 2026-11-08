@@ -220,6 +220,8 @@ export interface TrackMap {
   items?: VanillaItem[];
   /** Own terrain round the tracks (exported as custom items; see TerrainGrid). */
   terrain?: TerrainGrid;
+  /** The scenery panel's settings when it last generated here (only the panel reads them; checked there). */
+  sceneryOptions?: Record<string, unknown>;
 }
 
 /** The terrain's look and surface: the game's hill materials (grass, dirt with sand physics, ice). */
@@ -647,7 +649,8 @@ export function parseMap(json: string): TrackMap {
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
     } : undefined;
-  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...(terrain ? { terrain } : {}) };
+  const sceneryOptions = doc.sceneryOptions && typeof doc.sceneryOptions === "object" && !Array.isArray(doc.sceneryOptions) ? doc.sceneryOptions : undefined;
+  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...(terrain ? { terrain } : {}), ...(sceneryOptions ? { sceneryOptions } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */
