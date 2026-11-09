@@ -11,6 +11,9 @@ import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme }
  *    the first 32 m, so the land meets the road.
  * 3. Height noise on top, faded in over the same 32 m.
  *
+ * The optional rise with distance is part of what gets smoothed (2), so it fades in with the blend and has no crease
+ * halfway between two roads.
+ *
  * Only upright road (its driving surface facing up more than sideways, and not climbing too steeply, as in the
  * export's AdaptiveTerrainBuilder) shapes the land. Walls and upside-down road keep it out: below them, and below the space a car drives through on them (a few
  * metres off the driving surface, a square either side), the land stays lower.
@@ -31,9 +34,16 @@ export interface OwnTerrainOptions {
   noiseSize: number;
   /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
   rockAngle: number;
+  /** The land climbs this much with the distance from the nearest road, percent (100: a metre per metre; 0: flat). */
+  rise: number;
+  /** How it climbs: linear (steadily), or cosine (an S: flat at the road and at the land's edge, the same height there). */
+  riseCurve: RiseCurve;
 }
 
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50 };
+export const RISE_CURVES = ["linear", "cosine"] as const;
+export type RiseCurve = (typeof RISE_CURVES)[number];
+
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0, riseCurve: "linear" };
 
 /** Grid spacing, metres (also the size of the road squares for the caps and distances). */
 const CELL = 4;
@@ -43,6 +53,8 @@ const BLEND = 32;
 const SKIRT = 16;
 /** Land lower than the stadium's ground lies this deep, under it, metres. */
 const SUNK = -2;
+/** Land stays below this, metres (the export takes up to 1960). */
+const MAX_LAND = 1950;
 
 /** Off the driving surface (curbs), road counts for the land up to this much over the surface in its square, metres (not gates, signs). */
 const CURB_REACH = 3;
@@ -198,6 +210,16 @@ export function terrainSurface(theme: SceneryTheme): TerrainSurface {
 /** Smooth 0..1 ramp. */
 const smooth = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 
+/**
+ * The distance the rise climbs over, none at the road. Linear: its slope fades in over BLEND (the integral of `smooth`),
+ * then metre for metre. Cosine: an S over the land's width, level from there on.
+ */
+function riseDistance(d: number, width: number, curve: RiseCurve): number {
+  if (curve === "cosine") return (width * (1 - Math.cos(Math.PI * Math.min(1, d / width)))) / 2;
+  const t = d / BLEND;
+  return d < BLEND ? BLEND * (t ** 3 - t ** 4 / 2) : d - BLEND / 2;
+}
+
 /** Value noise in -1..1 (smooth, about `size` metres per bump), seeded by position. */
 function noise2(x: number, z: number, size: number): number {
   const hash = (i: number, j: number) => {
@@ -293,7 +315,8 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     valid[i] = 1;
   }
   // 2. Smoothed: three box blurs each way (close to a Gaussian of the smoothing's radius).
-  let smoothed: Float64Array = extended;
+  const slope = own.rise / 100;
+  let smoothed: Float64Array = slope > 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width, own.riseCurve)) : extended;
   const radius = Math.max(1, Math.round(own.smoothing / CELL / 1.7));
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
@@ -326,6 +349,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
 
   // Blend and noise (under the roads too: the export's mesh ends at their edges, the land there only shapes it).
   const heights: (number | null)[] = new Array(n).fill(null);
+  let highest = 0;
   for (let i = 0; i < n; i++) {
     if (!valid[i] || distance[i] > width) continue;
     const c = i % columns, r = Math.floor(i / columns);
@@ -339,13 +363,16 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     const sc = sx0 + c, sr = sz0 + r;
     const capOf = (k: string) => (tops.has(k) ? Infinity : caps.get(k) ?? Infinity);
     const limit = Math.min(ceiling[i], capOf(key(sc, sr)), capOf(key(sc - 1, sr)), capOf(key(sc, sr - 1)), capOf(key(sc - 1, sr - 1)));
-    h = Math.min(h, limit);
+    h = Math.min(h, limit, MAX_LAND);
+    highest = Math.max(highest, h);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land, so no skirt). Outside it there is no ground: land ends there.
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;
   }
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: SKIRT, rockAngle: own.rockAngle };
+  // Rising land ends high up: its skirt reaches the ground, or the edge would float.
+  const skirt = slope > 0 ? Math.max(SKIRT, highest - SUNK) : SKIRT;
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt, rockAngle: own.rockAngle };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

@@ -4,7 +4,7 @@ import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, SCENERY_THEMES } from "./scenery";
-import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
+import { OWN_TERRAIN_DEFAULTS, RISE_CURVES } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
 /** The terrain brush (Off: the mouse edits as usual). */
@@ -44,6 +44,9 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.noise = number(own.noise, 0, 64, t.noise);
   t.noiseSize = whole(own.noiseSize, 16, 512, t.noiseSize);
   t.rockAngle = whole(own.rockAngle, 0, 90, t.rockAngle);
+  // Maps saved before this option had no rise.
+  t.rise = number(own.rise, 0, 100, OWN_TERRAIN_DEFAULTS.rise);
+  t.riseCurve = choice(own.riseCurve, RISE_CURVES, OWN_TERRAIN_DEFAULTS.riseCurve);
 }
 import {
   appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
@@ -529,7 +532,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
-    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}`
+    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${scenery.ownTerrain.rise > 0}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
@@ -596,6 +599,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(64, v))), 1);
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
+      numberField(root, "Rise away from the track (%, 0 = off)", () => t.rise, (v) => { t.rise = Math.max(0, Math.min(100, v)); relayout(); }, 5);
+      if (t.rise > 0)
+        selectField(root, "Rise shape", RISE_CURVES, () => t.riseCurve, (v) => (t.riseCurve = v as typeof t.riseCurve), false,
+          { linear: "Linear (steady)", cosine: "Cosine (S-curve, level at the edge)" });
     }
     if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     if (!own) numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);

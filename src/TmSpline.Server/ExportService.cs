@@ -257,8 +257,8 @@ public sealed partial class ExportService
         {
             if (terrain.Columns < 2 || terrain.Rows < 2 || (long)terrain.Columns * terrain.Rows > MaxTerrainVertices || terrain.Heights.Length != terrain.Columns * terrain.Rows)
                 throw new ExportRejectedException($"The terrain grid must have 2 to {MaxTerrainVertices} vertices, one height each");
-            if (!double.IsFinite(terrain.Cell) || terrain.Cell < 4 || terrain.Cell > 64 || !double.IsFinite(terrain.Skirt) || terrain.Skirt < 0 || terrain.Skirt > 64)
-                throw new ExportRejectedException("The terrain's cells must be 4 to 64 m, its skirt 0 to 64 m");
+            if (!double.IsFinite(terrain.Cell) || terrain.Cell < 4 || terrain.Cell > 64 || !double.IsFinite(terrain.Skirt) || terrain.Skirt < 0 || terrain.Skirt > MaxHeight + 16)
+                throw new ExportRejectedException($"The terrain's cells must be 4 to 64 m, its skirt 0 to {MaxHeight + 16:0} m");
             if (!double.IsFinite(terrain.X0) || !double.IsFinite(terrain.Z0) || Math.Abs(terrain.X0) > MaxOffset + 512 || Math.Abs(terrain.Z0) > MaxOffset + 512
                 || Math.Abs(terrain.X0 + terrain.Cell * (terrain.Columns - 1)) > MaxOffset + 512 || Math.Abs(terrain.Z0 + terrain.Cell * (terrain.Rows - 1)) > MaxOffset + 512)
                 throw new ExportRejectedException($"The terrain must stay within {MaxOffset} m of the map's centre");
