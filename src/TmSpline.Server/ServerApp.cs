@@ -118,7 +118,13 @@ public static class ServerApp
             .RequireRateLimiting("export")
             .DisableAntiforgery();
 
-            app.MapGet("/api/game/latest", () => gameMaps.Poll() is { } latest ? Results.Ok(latest) : Results.NoContent());
+            // Polled once a second by the plugin. Each request comes on a new connection and the game keeps the socket for as
+            // long as it runs unless the response closes the connection: left open, the machine runs out of ports within hours.
+            app.MapGet("/api/game/latest", (HttpContext context) =>
+            {
+                context.Response.Headers.Connection = "close";
+                return gameMaps.Poll() is { } latest ? Results.Ok(latest) : Results.NoContent();
+            });
 
             // The plugin saved the open map: merge the waiting export into it.
             app.MapPost("/api/game/apply", (string id) =>
