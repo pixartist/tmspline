@@ -279,19 +279,30 @@ public static class RoadMeshBuilder
     }
 
     /// <summary>
-    /// Where land beside the road meets it on side ±1, in world space: the curb's outer top corner where the segment has
-    /// borders (as built in Profile), the driving surface's edge where it has none.
+    /// Where land beside the road meets it on side ±1, in world space: the top of the curb's outer face where the segment has
+    /// borders (as built in Profile), the driving surface's edge where it has none. The top is the world's: past upright walls
+    /// (a road rolling up into a tube) the curb is upside down and the face's other end is the one that faces the land.
     /// </summary>
     public static Vec3d EdgeContact(Ring ring, TrackSegment segment, int side)
     {
         var s = new RoadMeshSettings();
         var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
-        var (e, t, n) = CurbFrame(ring, arc, side * ring.Width * 0.5);
+        var edge = side * ring.Width * 0.5;
+        var (e, t, n) = CurbFrame(ring, arc, edge);
         var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
-        var x = e.X + t.X * side * bt + n.X * bh;
-        var y = e.Y + t.Y * side * bt + n.Y * bh;
-        return ring.Position + ring.Right * x + ring.Up * y;
+        (double X, double Y) contact = (e.X + t.X * side * bt + n.X * bh, e.Y + t.Y * side * bt + n.Y * bh);
+        if (segment.Borders && n.Y < 0)
+        {
+            // Along the outer face, so the line has no step where the curb passes upright.
+            var (_, other) = CurbBottom(ring, arc, edge, side, bt, s.Thickness);
+            var k = Math.Clamp(-n.Y / CurbTurnOver, 0, 1);
+            contact = (contact.X + (other.X - contact.X) * k, contact.Y + (other.Y - contact.Y) * k);
+        }
+        return ring.Position + ring.Right * contact.X + ring.Up * contact.Y;
     }
+
+    /// <summary>How far past upright (the curb's up, downwards) the land's contact has moved along the curb's outer face to its other end.</summary>
+    private const double CurbTurnOver = 0.25;
 
     /// <summary>The direction the driving surface runs in at its edge on side ±1, outwards, in world space.</summary>
     public static Vec3d EdgeOutward(Ring ring, int side)

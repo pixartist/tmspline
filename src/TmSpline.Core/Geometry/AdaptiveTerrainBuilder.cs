@@ -45,6 +45,14 @@ public static class AdaptiveTerrainBuilder
     private const double EdgeStrip = 4;
     /// <summary>A road whose middle lies more than this below its edges' line is hollow (a U), metres.</summary>
     private const double HollowSag = 1;
+    /// <summary>The land beside a rolled-up road is read this far past its side, metres.</summary>
+    private const double FlankOffset = 2;
+    /// <summary>A rolled-up road needs its up at least this upright to be buried (not upside down).</summary>
+    private const double RolledUp = 0.2;
+    /// <summary>A rolled-up road's slot counts as closed where its edges are nearer than this, metres.</summary>
+    private const double SlotClosed = 3;
+    /// <summary>Land over a buried road, metres, and the least fidelity there (it must not come through the mesh's error).</summary>
+    private const double Cover = 1, BuriedFidelity = 0.4;
     private const double DriveRoom = 4, KeepClear = 0.5, BridgeGap = 3, Sunk = -2;
     /// <summary>Half the stadium's floor (TrackMap's 48 cells of 32 m), metres: inside, land under the ground sinks.</summary>
     private const double StadiumHalf = 768;
@@ -97,8 +105,12 @@ public static class AdaptiveTerrainBuilder
         // Whose lowest point that is: its road and its distance along it (a wall's own foot is no road under its edge).
         var floorRoad = new int[n];
         var floorAlong = new float[n];
+        // And the highest point of any road (what land over a buried road has to clear).
+        var roof = new float[n];
+        Array.Fill(roof, float.NegativeInfinity);
         void Lower(int k, double y, int roadIndex, double along)
         {
+            roof[k] = Math.Max(roof[k], (float)y);
             if (y >= floor[k]) return;
             floor[k] = (float)y;
             floorRoad[k] = roadIndex;
@@ -206,10 +218,50 @@ public static class AdaptiveTerrainBuilder
             }
             return false;
         }
+        // A road rolled up past upright walls (a tube) is buried, unless most of it stands clear of the land (then it is a bridge).
+        bool[] BuriedRings(Road road)
+        {
+            var list = road.Rings;
+            bool Candidate(Ring ring)
+            {
+                if (Math.Abs(ring.Curve) <= Math.PI || ring.Up.Y < RolledUp) return false;
+                var segment = road.Track.Segments[Math.Clamp(ring.Segment, 0, road.Track.Segments.Count - 1)];
+                return (RoadMeshBuilder.EdgeContact(ring, segment, -1).Y + RoadMeshBuilder.EdgeContact(ring, segment, 1).Y) / 2 - ring.Position.Y > HollowSag;
+            }
+            // Whether the land just past the road's side, straight out from its middle, comes up to about its floor.
+            bool LandBeside(Ring ring, int side)
+            {
+                var across = new Vec3d(ring.Right.X, 0, ring.Right.Z);
+                across = (across.Length > 1e-9 ? across.Normalized() : across) * side;
+                for (var d = 0.0; d <= ring.Width; d += 1)
+                {
+                    var k = CellAt(ring.Position.X + across.X * d, ring.Position.Z + across.Z * d);
+                    if (k < 0) return false;
+                    if (!float.IsInfinity(floor[k])) continue;
+                    var past = CellAt(ring.Position.X + across.X * (d + FlankOffset), ring.Position.Z + across.Z * (d + FlankOffset));
+                    return past >= 0 && !float.IsNaN(land[past]) && land[past] >= ring.Position.Y - CutDepth;
+                }
+                return false;
+            }
+            // Decided per whole tube: no mound starting and stopping along it.
+            var buried = new bool[list.Count];
+            for (var start = 0; start < list.Count; start++)
+            {
+                if (!Candidate(list[start])) continue;
+                var end = start;
+                while (end + 1 < list.Count && Candidate(list[end + 1])) end++;
+                var atLand = Enumerable.Range(start, end - start + 1).Count(i => LandBeside(list[i], -1) || LandBeside(list[i], 1));
+                if (atLand * 2 >= end - start + 1) Array.Fill(buried, true, start, end - start + 1);
+                start = end;
+            }
+            return buried;
+        }
+        var rolledRings = new bool[roads.Count][];
         for (var roadIndex = 0; roadIndex < roads.Count; roadIndex++)
         {
             var road = roads[roadIndex];
             var rings = road.Rings;
+            rolledRings[roadIndex] = BuriedRings(road);
             // Round a closed track the distances wrap.
             var loop = road.Track.Closed ? rings[^1].Distance : 0;
             var edges = new (Vec3d L, Vec3d R, bool PinL, bool PinR, EdgeTilt TiltL, EdgeTilt TiltR)[rings.Count];
@@ -228,6 +280,15 @@ public static class AdaptiveTerrainBuilder
                 var r = RoadMeshBuilder.EdgeContact(rings[i], segment, 1);
                 var right = new Vec3d(rings[i].Right.X, 0, rings[i].Right.Z);
                 right = right.Length > 1e-9 ? right.Normalized() : right;
+                if (rolledRings[roadIndex][i])
+                {
+                    // Buried: the land holds on to the edges along the open slot and lets go where the slot closes, running on
+                    // over the top. It leaves the edges over the shell: no alignment with the surface.
+                    var open = (l - r).Length >= SlotClosed;
+                    var reach = Math.Max(OwnSection, rings[i].Width * 2);
+                    edges[i] = (l, r, open, open, new EdgeTilt(0, right * -1, rings[i].Distance, reach), new EdgeTilt(0, right, rings[i].Distance, reach));
+                    continue;
+                }
                 var holds = Holds(rings[i]);
                 bool pinL = holds && !Bridge(l, right * -1, roadIndex, rings[i], loop), pinR = holds && !Bridge(r, right, roadIndex, rings[i], loop);
                 // A hollow road with only one edge pinned has no cut: the land inside would hang from that edge down to under
@@ -296,6 +357,17 @@ public static class AdaptiveTerrainBuilder
                     cutAlong[k] = (float)ring.Distance;
                     cutReach[k] = (float)Math.Max(OwnSection, ring.Width * 2);
                 }
+        }
+
+        // The columns of a buried road: the land lies over it, nothing pushes it under the road.
+        var ringDistances = roads.Select(road => road.Rings.Select(ring => ring.Distance).ToArray()).ToArray();
+        var rolled = new bool[n];
+        for (var i = 0; i < n; i++)
+        {
+            if (float.IsInfinity(floor[i])) continue;
+            var at = Array.BinarySearch(ringDistances[floorRoad[i]], (double)floorAlong[i]);
+            if (at < 0) at = Math.Clamp(~at, 0, ringDistances[floorRoad[i]].Length - 1);
+            rolled[i] = rolledRings[floorRoad[i]][at];
         }
 
         // The solve: the land pulled to the pins, fading out over PullDistance (from each cell's nearest pin point).
@@ -368,7 +440,7 @@ public static class AdaptiveTerrainBuilder
         }
         for (var i = 0; i < n; i++)
         {
-            if (!cut[i] || float.IsNaN(land[i]) || distance[i] * Cell <= EdgeStrip) continue;
+            if (!cut[i] || rolled[i] || float.IsNaN(land[i]) || distance[i] * Cell <= EdgeStrip) continue;
             var own = floorRoad[i] == cutRoad[i] && Apart(cutRoad[i], floorAlong[i], cutAlong[i]) <= cutReach[i];
             if (land[i] + delta[i] < (own ? Math.Min(roadY[i], floor[i]) : roadY[i]) - CutDepth) { deep[i] = true; cut[i] = false; }
         }
@@ -380,6 +452,12 @@ public static class AdaptiveTerrainBuilder
         {
             // Only under bridges: road whose edges are not pinned (no cut there), or a pinned stretch far over the land
             // (deep). Road the land meets keeps the pins' banks.
+            // A buried road: the land rises over its top, a hill round it (the fade below).
+            if (rolled[i])
+            {
+                if (!cut[i] && !float.IsNaN(land[i]) && roof[i] + (float)Cover > land[i] + delta[i]) seedTop[i] = roof[i] + (float)Cover;
+                continue;
+            }
             if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i]) || !(deep[i] || float.IsNegativeInfinity(roadY[i]))) continue;
             // A road's own wall behind its pinned edge is no bridge.
             if (BehindOwnEdge(i)) continue;
@@ -421,7 +499,12 @@ public static class AdaptiveTerrainBuilder
         {
             fidelity[i] = (float)Math.Max(MinFidelity, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
             if (float.IsNaN(land[i])) { heights[i] = float.NaN; continue; }
-            var h = Math.Min(land[i] + delta[i] + fill[i] + align[i], BehindOwnEdge(i) ? keepOut[i] : Math.Min(keepOut[i], holdKeep[i]));
+            var free = land[i] + delta[i] + fill[i] + align[i];
+            // Over a buried road the land stays above it, the cover growing in from the edges it holds on to.
+            if (rolled[i]) fidelity[i] = Math.Max(fidelity[i], (float)BuriedFidelity);
+            var h = rolled[i]
+                ? cut[i] ? free : Math.Max(free, roof[i] + (float)(Cover * Math.Clamp(distance[i] * Cell / 2, 0, 1)))
+                : Math.Min(free, BehindOwnEdge(i) ? keepOut[i] : Math.Min(keepOut[i], holdKeep[i]));
             int c = i % columns, r = i / columns;
             double x = x0 + (c + 0.5) * Cell, z = z0 + (r + 0.5) * Cell;
             if (Math.Abs(x) < StadiumHalf && Math.Abs(z) < StadiumHalf && h < 0.5) h = (float)Sunk;
