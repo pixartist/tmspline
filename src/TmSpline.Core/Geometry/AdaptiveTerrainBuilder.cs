@@ -32,14 +32,28 @@ public static class AdaptiveTerrainBuilder
     /// most FillReach lower, fading out round it like the pins' pull: no open gap under a bridge.
     /// </summary>
     private const double FillReach = 8;
+    /// <summary>Road of the same track within this many metres along it (at least two road widths) is the road's own cross-section.</summary>
+    private const double OwnSection = 16;
+    /// <summary>
+    /// Off a pinned edge the land first runs on in the driving surface's direction (at most AlignSlope steep, so it stays
+    /// grass), fading into its natural shape over AlignDistance metres.
+    /// </summary>
+    private const double AlignSlope = 0.7, AlignDistance = 8;
     /// <summary>Land more than this below a cut road (its edges' line) is under it, not at it: it is not cut, metres.</summary>
     private const double CutDepth = 4;
+    /// <summary>Within this many metres of a pinned edge a cut stretch is always cut.</summary>
+    private const double EdgeStrip = 4;
+    /// <summary>A road whose middle lies more than this below its edges' line is hollow (a U), metres.</summary>
+    private const double HollowSag = 1;
     private const double DriveRoom = 4, KeepClear = 0.5, BridgeGap = 3, Sunk = -2;
     /// <summary>Half the stadium's floor (TrackMap's 48 cells of 32 m), metres: inside, land under the ground sinks.</summary>
     private const double StadiumHalf = 768;
 
     /// <summary>The road geometry of one track for the builder.</summary>
     private sealed record Road(Track Track, List<Ring> Rings, MeshChunk Mesh);
+
+    /// <summary>A pin point's way out: the slope the land leaves it at, outwards (horizontal), its distance along the road, and how far along counts as the road's own cross-section.</summary>
+    private readonly record struct EdgeTilt(double Slope, Vec3d Out, double Along, double OwnReach);
 
     public static (TerrainField Field, List<TerrainPin> Pins) Fields(TerrainGrid grid, TrackMap map)
     {
@@ -80,14 +94,28 @@ public static class AdaptiveTerrainBuilder
         // The roads: lowest point per cell (for the bridges), the keep-out of road that holds no land.
         var floor = new float[n];
         Array.Fill(floor, float.PositiveInfinity);
+        // Whose lowest point that is: its road and its distance along it (a wall's own foot is no road under its edge).
+        var floorRoad = new int[n];
+        var floorAlong = new float[n];
+        void Lower(int k, double y, int roadIndex, double along)
+        {
+            if (y >= floor[k]) return;
+            floor[k] = (float)y;
+            floorRoad[k] = roadIndex;
+            floorAlong[k] = (float)along;
+        }
         var keepOut = new float[n];
         Array.Fill(keepOut, float.PositiveInfinity);
+        // The same under road that holds land, kept apart: behind a pinned edge the road's own wall does not push the land down.
+        var holdKeep = new float[n];
+        Array.Fill(holdKeep, float.PositiveInfinity);
         var steep = new bool[n];
         // Per cell the lowest point of road that holds land (its underside, for the fill under bridges).
         var holdBottom = new float[n];
         Array.Fill(holdBottom, float.PositiveInfinity);
-        foreach (var road in roads)
+        for (var roadIndex = 0; roadIndex < roads.Count; roadIndex++)
         {
+            var road = roads[roadIndex];
             var distances = road.Rings.Select(r => r.Distance).ToArray();
             bool HoldsAt(double d)
             {
@@ -98,23 +126,24 @@ public static class AdaptiveTerrainBuilder
             }
             var m = road.Mesh;
             // The driving surface's points in 2 m cubes, holding or not, for the rest of the road (curbs, sides, underside).
-            var near = new Dictionary<(int, int, int), bool>();
+            var near = new Dictionary<(int, int, int), (bool Holds, double Along)>();
             foreach (var t in m.Triangles)
             {
                 var onSurface = !float.IsNaN(m.Surface[t.A].X) && !float.IsNaN(m.Surface[t.B].X) && !float.IsNaN(m.Surface[t.C].X);
                 if (!onSurface) continue;
-                var holds = HoldsAt((m.Surface[t.A].X + m.Surface[t.B].X + m.Surface[t.C].X) / 3);
+                var along = (double)(m.Surface[t.A].X + m.Surface[t.B].X + m.Surface[t.C].X) / 3;
+                var holds = HoldsAt(along);
                 var normal = System.Numerics.Vector3.Normalize(m.Normals[t.A] + m.Normals[t.B] + m.Normals[t.C]);
                 foreach (var p in Points(m, t, Cell / 2))
                 {
-                    near[Cube(p)] = holds;
+                    near[Cube(p)] = (holds, along);
                     var k = CellAt(p.X, p.Z);
                     if (k < 0) continue;
-                    floor[k] = Math.Min(floor[k], (float)p.Y);
+                    Lower(k, p.Y, roadIndex, along);
                     // Under any driving surface the land stays below it (where it is cut out this does not matter;
                     // where it is not, e.g. one edge unpinned, it would otherwise poke through). Not the curbs: the
                     // land meets their tops at the pins.
-                    keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
+                    holdKeep[k] = Math.Min(holdKeep[k], (float)(p.Y - KeepClear));
                     if (holds) { holdBottom[k] = Math.Min(holdBottom[k], (float)p.Y); continue; }
                     steep[k] = true;
                     keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
@@ -134,10 +163,10 @@ public static class AdaptiveTerrainBuilder
                 if (onSurface) continue;
                 foreach (var p in Points(m, t, Cell / 2))
                 {
-                    if (!NearSurface(near, p, out var holds)) continue;
+                    if (!NearSurface(near, p, out var holds, out var along)) continue;
                     var k = CellAt(p.X, p.Z);
                     if (k < 0) continue;
-                    floor[k] = Math.Min(floor[k], (float)p.Y);
+                    Lower(k, p.Y, roadIndex, along);
                     if (!holds) keepOut[k] = Math.Min(keepOut[k], (float)(p.Y - KeepClear));
                     else holdBottom[k] = Math.Min(holdBottom[k], (float)p.Y);
                 }
@@ -146,6 +175,9 @@ public static class AdaptiveTerrainBuilder
 
         // Pins: the edges of road that holds land, in runs; not where another road lies below (a bridge); open ends.
         var pins = new List<TerrainPin>();
+        // Per pin (null: an open end) per point the slope the land leaves it at and the way out, horizontal.
+        var pinTilts = new List<EdgeTilt[]?>();
+        var pinRoads = new List<int>();
         var cut = new bool[n];
         // The cut's quads (between two pinned edges of consecutive rings), in 8 m buckets for the exact test.
         var quads = new List<(Vec3d A, Vec3d B, Vec3d C, Vec3d D)>();
@@ -153,8 +185,12 @@ public static class AdaptiveTerrainBuilder
         var roadY = new float[n];
         Array.Fill(roadY, float.NegativeInfinity);
         var deep = new bool[n];
+        // Which road's cross-section each cut cell belongs to.
+        var cutRoad = new int[n];
+        var cutAlong = new float[n];
+        var cutReach = new float[n];
         var buckets = new Dictionary<(int, int), List<int>>();
-        bool Bridge(Vec3d e, Vec3d outward)
+        bool Bridge(Vec3d e, Vec3d outward, int roadIndex, Ring ring, double length)
         {
             // Too high over the land to hold it.
             var at = CellAt(e.X, e.Z);
@@ -162,14 +198,29 @@ public static class AdaptiveTerrainBuilder
             foreach (var d in new[] { 0.0, 1.0, 2.5 })
             {
                 var k = CellAt(e.X + outward.X * d, e.Z + outward.Z * d);
-                if (k >= 0 && floor[k] < e.Y - BridgeGap - 1) return true;
+                if (k < 0 || floor[k] >= e.Y - BridgeGap - 1) continue;
+                // The road's own cross-section (a U's wall below its edge) is no road below it.
+                var apart = Math.Abs(floorAlong[k] - ring.Distance);
+                if (length > 0) apart = Math.Min(apart, length - apart);
+                if (floorRoad[k] != roadIndex || apart > Math.Max(OwnSection, ring.Width * 2)) return true;
             }
             return false;
         }
-        foreach (var road in roads)
+        for (var roadIndex = 0; roadIndex < roads.Count; roadIndex++)
         {
+            var road = roads[roadIndex];
             var rings = road.Rings;
-            var edges = new (Vec3d L, Vec3d R, bool PinL, bool PinR)[rings.Count];
+            // Round a closed track the distances wrap.
+            var loop = road.Track.Closed ? rings[^1].Distance : 0;
+            var edges = new (Vec3d L, Vec3d R, bool PinL, bool PinR, EdgeTilt TiltL, EdgeTilt TiltR)[rings.Count];
+            static EdgeTilt Tilt(Ring ring, int side, Vec3d right)
+            {
+                var along = RoadMeshBuilder.EdgeOutward(ring, side);
+                var outward = right * side;
+                // Past vertical (a wall rolling inwards) the surface has no way out: as steep as allowed.
+                var run = along.X * outward.X + along.Z * outward.Z;
+                return new EdgeTilt(Math.Clamp(along.Y / Math.Max(run, 1e-3), -AlignSlope, AlignSlope), outward, ring.Distance, Math.Max(OwnSection, ring.Width * 2));
+            }
             for (var i = 0; i < rings.Count; i++)
             {
                 var segment = road.Track.Segments[Math.Clamp(rings[i].Segment, 0, road.Track.Segments.Count - 1)];
@@ -178,31 +229,47 @@ public static class AdaptiveTerrainBuilder
                 var right = new Vec3d(rings[i].Right.X, 0, rings[i].Right.Z);
                 right = right.Length > 1e-9 ? right.Normalized() : right;
                 var holds = Holds(rings[i]);
-                edges[i] = (l, r, holds && !Bridge(l, right * -1), holds && !Bridge(r, right));
+                bool pinL = holds && !Bridge(l, right * -1, roadIndex, rings[i], loop), pinR = holds && !Bridge(r, right, roadIndex, rings[i], loop);
+                // A hollow road with only one edge pinned has no cut: the land inside would hang from that edge down to under
+                // the surface. Neither edge is pinned then, the land stays under the road.
+                if (pinL != pinR && (l.Y + r.Y) / 2 - rings[i].Position.Y > HollowSag) pinL = pinR = false;
+                edges[i] = (l, r, pinL, pinR, Tilt(rings[i], -1, right), Tilt(rings[i], 1, right));
             }
             foreach (var side in new[] { -1, 1 })
             {
                 List<Vec3d>? run = null;
+                List<EdgeTilt>? tilts = null;
                 for (var i = 0; i < rings.Count; i++)
                 {
                     var pinned = side < 0 ? edges[i].PinL : edges[i].PinR;
-                    if (pinned) (run ??= []).Add(side < 0 ? edges[i].L : edges[i].R);
-                    if ((!pinned || i == rings.Count - 1) && run is { Count: >= 2 }) pins.Add(new TerrainPin(run));
-                    if (!pinned) run = null;
+                    if (pinned)
+                    {
+                        (run ??= []).Add(side < 0 ? edges[i].L : edges[i].R);
+                        (tilts ??= []).Add(side < 0 ? edges[i].TiltL : edges[i].TiltR);
+                    }
+                    if ((!pinned || i == rings.Count - 1) && run is { Count: >= 2 })
+                    {
+                        pins.Add(new TerrainPin(run));
+                        pinTilts.Add([.. tilts!]);
+                        pinRoads.Add(roadIndex);
+                    }
+                    if (!pinned) { run = null; tilts = null; }
                 }
             }
             if (!road.Track.Closed)
                 foreach (var i in new[] { 0, rings.Count - 1 })
                     if (edges[i].PinL && edges[i].PinR)
+                    {
                         pins.Add(new TerrainPin([edges[i].L, rings[i].Position, edges[i].R]));
+                        pinTilts.Add(null);
+                        pinRoads.Add(-1);
+                    }
             // The cut: between the two pinned edges of consecutive rings.
             for (var i = 0; i + 1 < rings.Count; i++)
                 if (edges[i].PinL && edges[i].PinR && edges[i + 1].PinL && edges[i + 1].PinR)
-                {
-                    FillQuad(edges[i].L, edges[i].R, edges[i + 1].R, edges[i + 1].L);
-                }
+                    FillQuad(edges[i].L, edges[i].R, edges[i + 1].R, edges[i + 1].L, roadIndex, rings[i]);
         }
-        void FillQuad(Vec3d a, Vec3d b, Vec3d c, Vec3d d)
+        void FillQuad(Vec3d a, Vec3d b, Vec3d c, Vec3d d, int roadIndex, Ring ring)
         {
             var q = quads.Count;
             quads.Add((a, b, c, d));
@@ -225,13 +292,26 @@ public static class AdaptiveTerrainBuilder
                     var k = r * columns + col;
                     cut[k] = true;
                     roadY[k] = Math.Max(roadY[k], (float)y);
+                    cutRoad[k] = roadIndex;
+                    cutAlong[k] = (float)ring.Distance;
+                    cutReach[k] = (float)Math.Max(OwnSection, ring.Width * 2);
                 }
         }
 
         // The solve: the land pulled to the pins, fading out over PullDistance (from each cell's nearest pin point).
         var pinY = new float[n];
         Array.Fill(pinY, float.NaN);
-        foreach (var pin in pins)
+        var pinSlope = new float[n];
+        var pinOutX = new float[n];
+        var pinOutZ = new float[n];
+        var pinAlong = new float[n];
+        var pinOwnReach = new float[n];
+        var pinRoad = new int[n];
+        Array.Fill(pinRoad, -1);
+        for (var p = 0; p < pins.Count; p++)
+        {
+            var pin = pins[p];
+            var tilts = pinTilts[p];
             for (var k = 0; k + 1 < pin.Points.Count; k++)
             {
                 Vec3d a = pin.Points[k], b = pin.Points[k + 1];
@@ -240,9 +320,17 @@ public static class AdaptiveTerrainBuilder
                 {
                     var t = (double)s / steps;
                     var i = CellAt(a.X + (b.X - a.X) * t, a.Z + (b.Z - a.Z) * t);
-                    if (i >= 0) pinY[i] = (float)(a.Y + (b.Y - a.Y) * t);
+                    if (i < 0) continue;
+                    pinY[i] = (float)(a.Y + (b.Y - a.Y) * t);
+                    if (tilts is null) { pinSlope[i] = 0; pinRoad[i] = -1; continue; }
+                    pinRoad[i] = pinRoads[p];
+                    pinAlong[i] = (float)(tilts[k].Along + (tilts[k + 1].Along - tilts[k].Along) * t);
+                    pinOwnReach[i] = (float)tilts[k].OwnReach;
+                    pinSlope[i] = (float)(tilts[k].Slope + (tilts[k + 1].Slope - tilts[k].Slope) * t);
+                    (pinOutX[i], pinOutZ[i]) = ((float)tilts[k].Out.X, (float)tilts[k].Out.Z);
                 }
             }
+        }
         var (nearest, distance) = NearestTransform(pinY, columns, rows);
         var delta = new float[n];
         for (var i = 0; i < n; i++)
@@ -257,9 +345,33 @@ public static class AdaptiveTerrainBuilder
             delta[i] = (float)(rise * (1 - w * w * (3 - 2 * w)));
         }
         delta = Blur(delta, columns, rows, (int)Math.Round(2 / Cell));
-        // Under a cut stretch far over the land (a bridge pinned at its edges): the land stays, it is not at the road.
+        // Off the edges, on their outer side only: the land runs on in the surface's direction, fading into its own shape.
+        var align = new float[n];
         for (var i = 0; i < n; i++)
-            if (cut[i] && !float.IsNaN(land[i]) && land[i] + delta[i] < roadY[i] - CutDepth) { deep[i] = true; cut[i] = false; }
+        {
+            var j = nearest[i];
+            if (j < 0 || pinSlope[j] == 0) continue;
+            var d = distance[i] * Cell;
+            if (d >= AlignDistance) continue;
+            if ((i % columns - j % columns) * pinOutX[j] + (i / columns - j / columns) * pinOutZ[j] <= 0) continue;
+            var w = d / AlignDistance;
+            align[i] = (float)(pinSlope[j] * d * (1 - w * w * (3 - 2 * w)));
+        }
+        align = Blur(align, columns, rows, (int)Math.Round(1 / Cell));
+        // Under a cut stretch far over the land (a bridge pinned at its edges): the land stays, it is not at the road. Measured
+        // from the road's own surface where that is lowest in the cell (a U's middle is far below its edges' line; another road
+        // crossing below does not count), and never right at the edges: land kept there would join the pins through the road's side.
+        float Apart(int roadIndex, float along, float other)
+        {
+            var apart = Math.Abs(along - other);
+            return roads[roadIndex].Track.Closed ? Math.Min(apart, (float)roads[roadIndex].Rings[^1].Distance - apart) : apart;
+        }
+        for (var i = 0; i < n; i++)
+        {
+            if (!cut[i] || float.IsNaN(land[i]) || distance[i] * Cell <= EdgeStrip) continue;
+            var own = floorRoad[i] == cutRoad[i] && Apart(cutRoad[i], floorAlong[i], cutAlong[i]) <= cutReach[i];
+            if (land[i] + delta[i] < (own ? Math.Min(roadY[i], floor[i]) : roadY[i]) - CutDepth) { deep[i] = true; cut[i] = false; }
+        }
         // The fill under bridges: under them (see below) the land rises to KeepClear under their underside where it is at
         // most FillReach lower, fading out round them as the pins' pull does (further the more it rises), smoothed.
         var seedTop = new float[n];
@@ -269,6 +381,8 @@ public static class AdaptiveTerrainBuilder
             // Only under bridges: road whose edges are not pinned (no cut there), or a pinned stretch far over the land
             // (deep). Road the land meets keeps the pins' banks.
             if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i]) || !(deep[i] || float.IsNegativeInfinity(roadY[i]))) continue;
+            // A road's own wall behind its pinned edge is no bridge.
+            if (BehindOwnEdge(i)) continue;
             var top = holdBottom[i] - (float)KeepClear;
             var gap = top - (land[i] + delta[i]);
             if (gap > 0 && gap <= FillReach) seedTop[i] = top;
@@ -287,6 +401,19 @@ public static class AdaptiveTerrainBuilder
             fill[i] = (float)(rise * (1 - w * w * (3 - 2 * w)));
         }
         fill = Blur(fill, columns, rows, (int)Math.Round(2 / Cell));
+        // Behind a pinned edge, over that road's own wall (a wall leaning inwards lies under the land there): the land runs on
+        // from the edge, covering the wall's back; pushed below the wall's foot it would hang from the edge through the road.
+        bool BehindOwnEdge(int i)
+        {
+            var j = nearest[i];
+            if (j < 0 || pinRoad[j] < 0 || floorRoad[i] != pinRoad[j]) return false;
+            // Straight out from the edge: not the cells past the end of a pinned stretch, those are on the road. Right at the
+            // edge the cells' grid is too coarse for a direction.
+            int dc = i % columns - j % columns, dr = i / columns - j / columns;
+            var length = Math.Sqrt(dc * dc + dr * dr);
+            if (dc * pinOutX[j] + dr * pinOutZ[j] < (length > 4 ? 0.7 * length : -1)) return false;
+            return Apart(pinRoad[j], floorAlong[i], pinAlong[j]) <= pinOwnReach[j];
+        }
         var heights = new float[n];
         var fidelity = new float[n];
         var (_, toDense) = NearestTransform(pinY.Select((y, i) => steep[i] ? 0f : y).ToArray(), columns, rows);
@@ -294,7 +421,7 @@ public static class AdaptiveTerrainBuilder
         {
             fidelity[i] = (float)Math.Max(MinFidelity, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
             if (float.IsNaN(land[i])) { heights[i] = float.NaN; continue; }
-            var h = Math.Min(land[i] + delta[i] + fill[i], keepOut[i]);
+            var h = Math.Min(land[i] + delta[i] + fill[i] + align[i], BehindOwnEdge(i) ? keepOut[i] : Math.Min(keepOut[i], holdKeep[i]));
             int c = i % columns, r = i / columns;
             double x = x0 + (c + 0.5) * Cell, z = z0 + (r + 0.5) * Cell;
             if (Math.Abs(x) < StadiumHalf && Math.Abs(z) < StadiumHalf && h < 0.5) h = (float)Sunk;
@@ -320,12 +447,20 @@ public static class AdaptiveTerrainBuilder
 
     private static (int, int, int) Cube(Vec3d p) => ((int)Math.Floor(p.X / 2), (int)Math.Floor(p.Y / 2), (int)Math.Floor(p.Z / 2));
 
-    private static bool NearSurface(Dictionary<(int, int, int), bool> near, Vec3d p, out bool holds)
+    /// <summary>Whether p is by a driving surface; if so whether that holds land (by majority) and its distance along the road (the nearest cube's).</summary>
+    private static bool NearSurface(Dictionary<(int, int, int), (bool Holds, double Along)> near, Vec3d p, out bool holds, out double along)
     {
         var (x, y, z) = Cube(p);
-        int any = 0, holding = 0;
+        int any = 0, holding = 0, nearest = int.MaxValue;
+        along = 0;
         for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++)
-            if (near.TryGetValue((x + dx, y + dy, z + dz), out var h)) { any++; if (h) holding++; }
+            if (near.TryGetValue((x + dx, y + dy, z + dz), out var h))
+            {
+                any++;
+                if (h.Holds) holding++;
+                var off = Math.Abs(dx) + Math.Abs(dy) + Math.Abs(dz);
+                if (off < nearest) { nearest = off; along = h.Along; }
+            }
         holds = holding * 2 >= any;
         return any > 0;
     }

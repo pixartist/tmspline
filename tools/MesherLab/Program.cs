@@ -180,6 +180,93 @@ Console.WriteLine($"picture: {Path.GetFullPath(output)}");
 
 static class MapMode
 {
+    /// <summary>Land above the road inside the road's footprint (between its edges, on stretches that hold land).</summary>
+    private static void Pokes(TmSpline.Core.Model.TrackMap map, AdaptiveMesh mesh, TerrainField field, List<TerrainPin> pins)
+    {
+        const double Step = 0.2;
+        var top = new Dictionary<(int, int), float>();
+        (int, int) CellOf(double x, double z) => ((int)Math.Floor(x / Step), (int)Math.Floor(z / Step));
+        var quads = new List<(Vec3d A, Vec3d B, Vec3d C, Vec3d D)>();
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Low));
+            if (rings.Count < 2) continue;
+            var settings = new RoadMeshSettings { MaxChunkLength = double.PositiveInfinity, WorldSpace = true, MaxColumnAngleDegrees = MeshQualities.ColumnAngleDegrees(MeshQuality.Low) };
+            foreach (var chunk in RoadMeshBuilder.Build(track, rings, Vec3d.Zero, "T", settings))
+                foreach (var t in chunk.Triangles)
+                {
+                    System.Numerics.Vector3 a = chunk.Positions[t.A], b = chunk.Positions[t.B], c = chunk.Positions[t.C];
+                    var longest = Math.Max((a - b).Length(), Math.Max((b - c).Length(), (c - a).Length()));
+                    var s = Math.Min(256, Math.Max(1, (int)Math.Ceiling(longest / Step)));
+                    for (var u = 0; u <= s; u++)
+                        for (var v = 0; u + v <= s; v++)
+                        {
+                            var p = a * (1 - (float)(u + v) / s) + b * ((float)u / s) + c * ((float)v / s);
+                            var k = CellOf(p.X, p.Z);
+                            top[k] = Math.Max(top.GetValueOrDefault(k, float.NegativeInfinity), p.Y);
+                        }
+                }
+            bool Holds(Ring r) => r.Up.Y >= 0.5 && Math.Abs(r.Tangent.Normalized().Y) <= 0.55;
+            for (var i = 0; i + 1 < rings.Count; i++)
+            {
+                if (!Holds(rings[i]) || !Holds(rings[i + 1])) continue;
+                var segment = track.Segments[Math.Clamp(rings[i].Segment, 0, track.Segments.Count - 1)];
+                var next = track.Segments[Math.Clamp(rings[i + 1].Segment, 0, track.Segments.Count - 1)];
+                quads.Add((RoadMeshBuilder.EdgeContact(rings[i], segment, -1), RoadMeshBuilder.EdgeContact(rings[i], segment, 1),
+                    RoadMeshBuilder.EdgeContact(rings[i + 1], next, 1), RoadMeshBuilder.EdgeContact(rings[i + 1], next, -1)));
+            }
+        }
+        var buckets = new Dictionary<(int, int), List<int>>();
+        for (var q = 0; q < quads.Count; q++)
+        {
+            var (a, b, c, d) = quads[q];
+            for (var x = (int)Math.Floor(new[] { a.X, b.X, c.X, d.X }.Min() / 8); x <= (int)Math.Floor(new[] { a.X, b.X, c.X, d.X }.Max() / 8); x++)
+                for (var z = (int)Math.Floor(new[] { a.Z, b.Z, c.Z, d.Z }.Min() / 8); z <= (int)Math.Floor(new[] { a.Z, b.Z, c.Z, d.Z }.Max() / 8); z++)
+                {
+                    if (!buckets.TryGetValue((x, z), out var list)) buckets[(x, z)] = list = [];
+                    list.Add(q);
+                }
+        }
+        static bool In(double px, double pz, Vec3d a, Vec3d b, Vec3d c)
+        {
+            double d1 = (b.X - a.X) * (pz - a.Z) - (b.Z - a.Z) * (px - a.X), d2 = (c.X - b.X) * (pz - b.Z) - (c.Z - b.Z) * (px - b.X), d3 = (a.X - c.X) * (pz - c.Z) - (a.Z - c.Z) * (px - c.X);
+            return (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0);
+        }
+        var poked = new Dictionary<(int, int), float>();
+        for (var t = 0; t < mesh.Indices.Count; t += 3)
+        {
+            System.Numerics.Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
+            var longest = Math.Max((a - b).Length(), Math.Max((b - c).Length(), (c - a).Length()));
+            var s = Math.Min(128, Math.Max(1, (int)Math.Ceiling(longest / (Step * 2))));
+            for (var u = 0; u <= s; u++)
+                for (var v = 0; u + v <= s; v++)
+                {
+                    var p = a * (1 - (float)(u + v) / s) + b * ((float)u / s) + c * ((float)v / s);
+                    if (!top.TryGetValue(CellOf(p.X, p.Z), out var roadTop)) continue;
+                    var above = p.Y - roadTop;
+                    if (above < 0.05f || above > 6) continue;
+                    if (!buckets.TryGetValue(((int)Math.Floor(p.X / 8), (int)Math.Floor(p.Z / 8)), out var list)) continue;
+                    if (!list.Any(q => In(p.X, p.Z, quads[q].A, quads[q].B, quads[q].C) || In(p.X, p.Z, quads[q].A, quads[q].C, quads[q].D))) continue;
+                    var k = ((int)Math.Floor(p.X / 0.5), (int)Math.Floor(p.Z / 0.5));
+                    poked[k] = Math.Max(poked.GetValueOrDefault(k), above);
+                }
+        }
+        var worst = poked.OrderByDescending(kv => kv.Value).Take(4).Select(kv => $"({kv.Key.Item1 * 0.5:F0}, {kv.Key.Item2 * 0.5:F0}) {kv.Value:F2} m");
+        Console.WriteLine($"land over the road inside its edges: {poked.Count} cells of 0.5 m, {poked.Count(kv => kv.Value > 0.3f)} over 0.3 m; worst {string.Join("; ", worst)}");
+        // Where: per 16 m square, with the nearest ring and whether the land is cut there.
+        foreach (var g in poked.Where(kv => kv.Value > 0.3f).GroupBy(kv => (kv.Key.Item1 / 32, kv.Key.Item2 / 32)).OrderByDescending(g => g.Count()).Take(12))
+        {
+            var kv = g.MaxBy(e => e.Value);
+            double x = (kv.Key.Item1 + 0.5) * 0.5, z = (kv.Key.Item2 + 0.5) * 0.5;
+            var (ring, across) = map.Tracks.SelectMany(t => TrackSampler.Sample(t, MeshQualities.Sampler(MeshQuality.Low)))
+                .Select(r => (r, Across: (x - r.Position.X) * r.Right.X + (z - r.Position.Z) * r.Right.Z, Off: Math.Pow(x - r.Position.X, 2) + Math.Pow(z - r.Position.Z, 2)))
+                .MinBy(e => e.Off) is var m ? (m.r, m.Across) : default;
+            var pin = pins.SelectMany(p => p.Points).Min(p => Math.Sqrt(Math.Pow(p.X - x, 2) + Math.Pow(p.Z - z, 2)));
+            Console.WriteLine($"  ({x:F0}, {z:F0}): {g.Count()} cells, worst {kv.Value:F1} m over top {top.GetValueOrDefault(CellOf(x, z)):F1}; ring at {ring.Distance:F0} m, y {ring.Position.Y:F1}, up.y {ring.Up.Y:F2}, width {ring.Width:F0}, across {across:F1}; cut {field.IsCut(x, z)}, nearest pin {pin:F1} m, land {field.Heights[field.CellAt(x, z)]:F1}");
+        }
+    }
+
     public static void Run(string mapFile, string output)
     {
         var map = TmSpline.Core.Model.TrackJson.ParseMap(File.ReadAllText(mapFile));
@@ -211,6 +298,7 @@ static class MapMode
             Console.WriteLine($"  {label}: {built.Count} chunks, surfaces without area {rows.Count(x => x.Total == 0)}; smallest {string.Join("; ", smallest)}");
         }
         Surfaces($"rock {grid.RockAngle}", chunks);
+        Pokes(map, mesh, field, pins);
         // Pin segments (between consecutive mesh vertices on a pin) with no triangle on them: a gap at the road's edge.
         var edgeUse = new Dictionary<(int, int), int>();
         for (var t = 0; t < mesh.Indices.Count; t += 3)

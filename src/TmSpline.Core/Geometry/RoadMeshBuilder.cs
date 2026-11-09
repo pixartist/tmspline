@@ -293,6 +293,15 @@ public static class RoadMeshBuilder
         return ring.Position + ring.Right * x + ring.Up * y;
     }
 
+    /// <summary>The direction the driving surface runs in at its edge on side ±1, outwards, in world space.</summary>
+    public static Vec3d EdgeOutward(Ring ring, int side)
+    {
+        var arc = SurfaceArc.For(ring, 0, 0, 0, 1, new RoadMeshSettings());
+        var s = side * ring.Width * 0.5;
+        var (e, inner) = (arc.Point(s), arc.Point(s - side * 0.25));
+        return (ring.Right * (e.X - inner.X) + ring.Up * (e.Y - inner.Y)).Normalized();
+    }
+
     /// <summary>Height of the boost decal above the driving surface.</summary>
     private const double DecalLift = 0.02;
 
