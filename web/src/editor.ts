@@ -403,6 +403,7 @@ export class Editor {
    * (its terrain, say).
    */
   replaceMap(map: TrackMap): void {
+    this.setTerrainPaint(null);
     this.editMap((m) => {
       for (const key of Object.keys(m)) delete (m as unknown as Record<string, unknown>)[key];
       Object.assign(m, map);

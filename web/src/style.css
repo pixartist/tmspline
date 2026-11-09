@@ -114,7 +114,7 @@ dialog.export .importer p { margin: 4px 0 8px; }
 
 /* Cloud link (desktop app): sync state, Share, account. */
 .cloud { margin-left: auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.cloud-state { color: var(--muted); font-size: 12px; }
+.cloud-state, .app-version { color: var(--muted); font-size: 12px; }
 .cloud-state[data-state="offline"], .cloud-state[data-state="error"], .cloud-state[data-state="conflict"] { color: #ff9a6b; }
 .cloud-menu {
   position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 4px;

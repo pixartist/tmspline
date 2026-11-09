@@ -2,8 +2,8 @@ import type { Editor } from "./editor";
 import type { TrackMap } from "./track";
 import { bannerHost } from "./banners";
 import {
-  availableUpdate, cloudStatus, CloudSync, deleteTrack, listTracks, loadShared, loadTrack, openWebsite, shareTrack, signIn, signOut,
-  skipUpdate, unshareTrack, type CloudStatus, type CloudTrack,
+  availableUpdate, cloudStatus, CloudSync, deleteTrack, listTracks, loadShared, loadTrack, newerRelease, openWebsite, shareTrack, signIn, signOut,
+  skipUpdate, unshareTrack, type CloudStatus, type CloudTrack, type Release,
 } from "./cloud";
 
 /** What ui.ts calls into: the cloud parts, or null without a cloud link (the editor in a plain browser). */
@@ -28,7 +28,11 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
   const state = Object.assign(document.createElement("span"), { className: "cloud-state" });
   const shareButton = Object.assign(document.createElement("button"), { textContent: "Share", title: "Share this map with a link: everyone with a TMSpline account can open it" });
   const account = Object.assign(document.createElement("button"), { className: "account" });
-  area.append(state, shareButton, account);
+  const version = Object.assign(document.createElement("span"), { className: "app-version", title: "The TMSpline version you are running", textContent: status.appVersion ? `v${status.appVersion}` : "" });
+  const checkLabel = "Check for updates";
+  const checkButton = Object.assign(document.createElement("button"), { textContent: checkLabel, title: "See whether a newer TMSpline is out" });
+  version.hidden = checkButton.hidden = !status.appVersion;
+  area.append(state, version, checkButton, shareButton, account);
   header.appendChild(area);
 
   const container = editor.renderer.domElement.parentElement!;
@@ -59,19 +63,46 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
     // Releases are for signed-in users: checked once signed in (at startup or later).
     if (s?.signedIn && !updateChecked) {
       updateChecked = true;
-      void availableUpdate(s).then(async (release) => {
-        if (!release) return;
-        const text = `TMSpline ${release.version} is available${release.notes ? `: ${release.notes}` : "."}`;
-        // The app updates itself where it can (a release build on Windows); otherwise the website has the download.
-        const self = await fetch("/api/update", { headers: { "X-TMSpline": "1" } }).then((r) => (r.ok ? r.json() : null), () => null);
-        banner(text, [
-          self?.supported ? ["Install update", () => void installUpdate(release.version)] : ["Download", () => void openWebsite("/")],
-          ["Later", () => {}],
-          ["Skip this version", () => skipUpdate(release.version)],
-        ]);
+      void availableUpdate(s).then((release) => {
+        if (release) void offerUpdate(release);
       }, () => {});
     }
   };
+
+  let updateOffer: HTMLElement | null = null;
+  async function offerUpdate(release: Release): Promise<void> {
+    const text = `TMSpline ${release.version} is available${release.notes ? `: ${release.notes}` : "."}`;
+    // The app updates itself where it can (a release build on Windows); otherwise the website has the download.
+    const self = await fetch("/api/update", { headers: { "X-TMSpline": "1" } }).then((r) => (r.ok ? r.json() : null), () => null);
+    updateOffer?.remove();
+    updateOffer = banner(text, [
+      self?.supported ? ["Install update", () => void installUpdate(release.version)] : ["Download", () => void openWebsite("/")],
+      ["Later", () => {}],
+      ["Skip this version", () => skipUpdate(release.version)],
+    ]);
+  }
+
+  // Asked for by hand, so it always answers, and a version skipped earlier is offered again.
+  checkButton.addEventListener("click", async () => {
+    if (!status?.signedIn) {
+      banner("Sign in to check for updates.", [["Sign in", () => account.click()], ["Later", () => {}]]);
+      return;
+    }
+    checkButton.disabled = true;
+    checkButton.textContent = "Checking…";
+    try {
+      const release = await newerRelease(status);
+      if (release) await offerUpdate(release);
+      else {
+        checkButton.textContent = "Up to date ✓";
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    } catch (err) {
+      banner((err as Error).message, [["OK", () => {}]]);
+    }
+    checkButton.textContent = checkLabel;
+    checkButton.disabled = false;
+  });
 
   account.addEventListener("click", async () => {
     if (status?.signedIn) {

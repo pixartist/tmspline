@@ -34,23 +34,16 @@ export interface OwnTerrainOptions {
   noiseSize: number;
   /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
   rockAngle: number;
-  /** The land climbs this much with the distance from the nearest road, percent (100: a metre per metre; 0: flat). */
+  /** The land climbs to this share of its width at its crest near the outer edge, percent (0: flat), see RISE_PROFILE. */
   rise: number;
-  /** How it climbs: linear (steadily), or cosine (an S: flat at the road and at the land's edge, the same height there). */
-  riseCurve: RiseCurve;
 }
 
-export const RISE_CURVES = ["linear", "cosine"] as const;
-export type RiseCurve = (typeof RISE_CURVES)[number];
-
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0, riseCurve: "linear" };
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0 };
 
 /** Grid spacing, metres (also the size of the road squares for the caps and distances). */
 const CELL = 4;
 /** Over this many metres from a road the land blends from the road's shape into the smoothed, noisy land. */
 const BLEND = 32;
-/** Skirt under the land's outer edge, metres. */
-const SKIRT = 16;
 /** Land lower than the stadium's ground lies this deep, under it, metres. */
 const SUNK = -2;
 /** Land stays below this, metres (the export takes up to 1960). */
@@ -69,6 +62,8 @@ const MAX_PITCH = 0.55;
 const DRIVE_ROOM = 4;
 /** Land stays this much under walls, inverted road and the room they need, metres. */
 const KEEP_CLEAR = 0.5;
+/** Road whose two edges are nearer than this, though it is wider, is closed (a tube): as AdaptiveTerrainBuilder, metres. */
+const SLOT_CLOSED = 3;
 
 const key = (x: number, z: number) => `${x},${z}`;
 
@@ -77,9 +72,11 @@ export interface TerrainRoad { mesh: THREE.Mesh; surface: Float32Array }
 
 /**
  * The roads sampled for the land: per CELL square the top of its upright road (what the land continues), and the height
- * the land must stay under (walls and inverted road, and the room to drive on them).
+ * the land must stay under (walls and inverted road, and the room to drive on them). Closed road (a tube) has no say in
+ * the land's shape, the land runs over it (AdaptiveTerrainBuilder buries it): only its squares, in `tunnels`.
  */
-function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Map<string, number>; caps: Map<string, number> } {
+function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Map<string, number>; caps: Map<string, number>; tunnels: Set<string> } {
+  const tunnels = new Set<string>();
   // Upright road's heights per square; the land continues the lowest road in each (the top of its curbs).
   const heights = new Map<string, number[]>(), caps = new Map<string, number>();
   const tops = {
@@ -137,6 +134,25 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Ma
       const pitch = t.lengthSq() > 1e-9 ? Math.abs(t.normalize().y) : 0;
       uprightAt.set(b, m.n.y >= UPRIGHT && pitch <= MAX_PITCH);
     });
+    // Closed or not per metre along the road, by how far apart its two edges are.
+    const ends = new Map<number, { low: number; high: number; a: THREE.Vector3; b: THREE.Vector3 }>();
+    for (let i = 0; i < position.count; i++) {
+      if (!onSurface(road, i)) continue;
+      const d = Math.round(road.surface[i * 2]), across = road.surface[i * 2 + 1];
+      const at = new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(road.mesh.matrixWorld);
+      const e = ends.get(d);
+      if (!e) { ends.set(d, { low: across, high: across, a: at, b: at.clone() }); continue; }
+      if (across < e.low) { e.low = across; e.a = at; }
+      if (across > e.high) { e.high = across; e.b = at; }
+    }
+    const closedNear = (d: number) => {
+      const b = Math.round(d);
+      for (let k = 0; k <= 4; k++) {
+        const e = ends.get(b + k) ?? ends.get(b - k);
+        if (e) return e.high - e.low > 2 * SLOT_CLOSED && e.a.distanceTo(e.b) < SLOT_CLOSED;
+      }
+      return false;
+    };
     const uprightNear = (d: number, fallback: boolean) => {
       const b = Math.round(d);
       for (let k = 0; k <= 4; k++) { const u = uprightAt.get(b + k) ?? uprightAt.get(b - k); if (u !== undefined) return u; }
@@ -147,7 +163,12 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Ma
       n.set(0, 0, 0);
       for (const i of [ia, ib, ic]) n.add(q.fromBufferAttribute(normals, i));
       n.transformDirection(road.mesh.matrixWorld);
-      const upright = uprightNear((road.surface[ia * 2] + road.surface[ib * 2] + road.surface[ic * 2]) / 3, n.y >= UPRIGHT);
+      const along = (road.surface[ia * 2] + road.surface[ib * 2] + road.surface[ic * 2]) / 3;
+      if (closedNear(along)) {
+        points(road, ia, ib, ic, 1, (v) => tunnels.add(column(v.x, v.z)));
+        return;
+      }
+      const upright = uprightNear(along, n.y >= UPRIGHT);
       points(road, ia, ib, ic, 1, (v) => {
         const k = voxel(v);
         votes.set(k, (votes.get(k) ?? 0) + (upright ? 1 : -1));
@@ -200,7 +221,7 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Ma
     lowest.set(k, top);
     if (i < list.length) under.set(k, top);
   }
-  return { tops: lowest, under, caps };
+  return { tops: lowest, under, caps, tunnels };
 }
 
 export function terrainSurface(theme: SceneryTheme): TerrainSurface {
@@ -211,13 +232,22 @@ export function terrainSurface(theme: SceneryTheme): TerrainSurface {
 const smooth = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 
 /**
- * The distance the rise climbs over, none at the road. Linear: its slope fades in over BLEND (the integral of `smooth`),
- * then metre for metre. Cosine: an S over the land's width, level from there on.
+ * The rise across the land, as [share of the width from the road, share of the crest's height]: almost flat by the road,
+ * curving up into a steep climb, a rounded crest near the outer edge, falling off a little behind it.
  */
-function riseDistance(d: number, width: number, curve: RiseCurve): number {
-  if (curve === "cosine") return (width * (1 - Math.cos(Math.PI * Math.min(1, d / width)))) / 2;
-  const t = d / BLEND;
-  return d < BLEND ? BLEND * (t ** 3 - t ** 4 / 2) : d - BLEND / 2;
+const RISE_PROFILE = [[0, 0], [0.21, 0.033], [0.41, 0.083], [0.51, 0.158], [0.61, 0.264], [0.656, 0.353], [0.74, 0.54], [0.787, 0.71],
+  [0.836, 0.833], [0.87, 0.936], [0.918, 0.986], [0.967, 1], [0.98, 0.97], [1, 0.897]];
+
+/** The distance the rise climbs over at `d` from the road: RISE_PROFILE as a smooth curve (cubic Hermite), its crest at the land's width. */
+function riseDistance(d: number, width: number): number {
+  const t = Math.min(1, Math.max(0, d / width)), p = RISE_PROFILE;
+  let i = 0;
+  while (i < p.length - 2 && t > p[i + 1][0]) i++;
+  const slope = (k: number) => (p[Math.min(p.length - 1, k + 1)][1] - p[Math.max(0, k - 1)][1]) / (p[Math.min(p.length - 1, k + 1)][0] - p[Math.max(0, k - 1)][0]);
+  const span = p[i + 1][0] - p[i][0], u = (t - p[i][0]) / span;
+  const h = (2 * u ** 3 - 3 * u ** 2 + 1) * p[i][1] + (u ** 3 - 2 * u ** 2 + u) * span * slope(i)
+    + (-2 * u ** 3 + 3 * u ** 2) * p[i + 1][1] + (u ** 3 - u ** 2) * span * slope(i + 1);
+  return h * width;
 }
 
 /** Value noise in -1..1 (smooth, about `size` metres per bump), seeded by position. */
@@ -260,7 +290,7 @@ function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows
 export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
   // Per road square its highest point (the curbs' tops or the surface's edge: the road's shape the land continues), and
   // under walls and inverted road the height the land stays below.
-  const { tops, under, caps } = roadShape(roads);
+  const { tops, under, caps, tunnels } = roadShape(roads);
   if (tops.size === 0) return null;
   const width = Math.max(BLEND, own.width);
   // The smoothing reaches past the land's edge, so the land there is smoothed like everywhere.
@@ -268,7 +298,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
 
   // The grid: a vertex at each road square's lower corner, over the roads and `reach` round them.
   let sx0 = Infinity, sz0 = Infinity, sx1 = -Infinity, sz1 = -Infinity;
-  for (const k of tops.keys()) {
+  for (const k of [...tops.keys(), ...tunnels]) {
     const [x, z] = k.split(",").map(Number);
     sx0 = Math.min(sx0, x); sz0 = Math.min(sz0, z); sx1 = Math.max(sx1, x); sz1 = Math.max(sz1, z);
   }
@@ -281,42 +311,50 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
   // The nearest road square in a straight line, for every vertex (vertex (c, r) stands on square (c, r)'s corner): a
   // two-pass Euclidean distance transform, each vertex taking its neighbours' nearest road square where that is nearer.
   const n = columns * rows;
-  const srcX = new Int32Array(n).fill(-1), srcZ = new Int32Array(n).fill(-1);
-  for (const k of tops.keys()) {
-    const [x, z] = k.split(",").map(Number);
-    srcX[(z - sz0) * columns + (x - sx0)] = x - sx0;
-    srcZ[(z - sz0) * columns + (x - sx0)] = z - sz0;
-  }
-  const dist2 = (i: number, x: number, z: number) => srcX[i] < 0 ? Infinity : (srcX[i] - x) ** 2 + (srcZ[i] - z) ** 2;
-  const relax = (x: number, z: number, dx: number, dz: number) => {
-    const nx = x + dx, nz = z + dz;
-    if (nx < 0 || nz < 0 || nx >= columns || nz >= rows) return;
-    const i = z * columns + x, j = nz * columns + nx;
-    if (dist2(j, x, z) < dist2(i, x, z)) { srcX[i] = srcX[j]; srcZ[i] = srcZ[j]; }
+  const nearestSquare = (squares: Iterable<string>) => {
+    const srcX = new Int32Array(n).fill(-1), srcZ = new Int32Array(n).fill(-1);
+    for (const k of squares) {
+      const [x, z] = k.split(",").map(Number);
+      srcX[(z - sz0) * columns + (x - sx0)] = x - sx0;
+      srcZ[(z - sz0) * columns + (x - sx0)] = z - sz0;
+    }
+    const dist2 = (i: number, x: number, z: number) => srcX[i] < 0 ? Infinity : (srcX[i] - x) ** 2 + (srcZ[i] - z) ** 2;
+    const relax = (x: number, z: number, dx: number, dz: number) => {
+      const nx = x + dx, nz = z + dz;
+      if (nx < 0 || nz < 0 || nx >= columns || nz >= rows) return;
+      const i = z * columns + x, j = nz * columns + nx;
+      if (dist2(j, x, z) < dist2(i, x, z)) { srcX[i] = srcX[j]; srcZ[i] = srcZ[j]; }
+    };
+    for (let z = 0; z < rows; z++) {
+      for (let x = 0; x < columns; x++) { relax(x, z, -1, 0); relax(x, z, 0, -1); relax(x, z, -1, -1); relax(x, z, 1, -1); }
+      for (let x = columns - 1; x >= 0; x--) relax(x, z, 1, 0);
+    }
+    for (let z = rows - 1; z >= 0; z--) {
+      for (let x = columns - 1; x >= 0; x--) { relax(x, z, 1, 0); relax(x, z, 0, 1); relax(x, z, 1, 1); relax(x, z, -1, 1); }
+      for (let x = 0; x < columns; x++) relax(x, z, -1, 0);
+    }
+    return { srcX, srcZ };
   };
-  for (let z = 0; z < rows; z++) {
-    for (let x = 0; x < columns; x++) { relax(x, z, -1, 0); relax(x, z, 0, -1); relax(x, z, -1, -1); relax(x, z, 1, -1); }
-    for (let x = columns - 1; x >= 0; x--) relax(x, z, 1, 0);
-  }
-  for (let z = rows - 1; z >= 0; z--) {
-    for (let x = columns - 1; x >= 0; x--) { relax(x, z, 1, 0); relax(x, z, 0, 1); relax(x, z, 1, 1); relax(x, z, -1, 1); }
-    for (let x = 0; x < columns; x++) relax(x, z, -1, 0);
-  }
+  const { srcX, srcZ } = nearestSquare(tops.keys());
+  const tunnel = nearestSquare(tunnels);
 
-  // 1. The roads' shape extended: each vertex at the top of its nearest road square.
-  const extended = new Float64Array(n), distance = new Float64Array(n), valid = new Uint8Array(n);
+  // 1. The roads' shape extended: each vertex at the top of its nearest road square. The land also reaches round tunnels,
+  // though they do not shape it.
+  const extended = new Float64Array(n), distance = new Float64Array(n), toLand = new Float64Array(n), valid = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     if (srcX[i] < 0) continue;
     const c = i % columns, r = Math.floor(i / columns);
     const d = Math.hypot(srcX[i] + 0.5 - c, srcZ[i] + 0.5 - r) * CELL;
-    if (d > reach) continue;
+    const near = tunnel.srcX[i] < 0 ? d : Math.min(d, Math.hypot(tunnel.srcX[i] + 0.5 - c, tunnel.srcZ[i] + 0.5 - r) * CELL);
+    if (near > reach) continue;
     distance[i] = d;
+    toLand[i] = near;
     extended[i] = tops.get(key(srcX[i] + sx0, srcZ[i] + sz0))!;
     valid[i] = 1;
   }
   // 2. Smoothed: three box blurs each way (close to a Gaussian of the smoothing's radius).
   const slope = own.rise / 100;
-  let smoothed: Float64Array = slope > 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width, own.riseCurve)) : extended;
+  let smoothed: Float64Array = slope > 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width)) : extended;
   const radius = Math.max(1, Math.round(own.smoothing / CELL / 1.7));
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
@@ -349,9 +387,8 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
 
   // Blend and noise (under the roads too: the export's mesh ends at their edges, the land there only shapes it).
   const heights: (number | null)[] = new Array(n).fill(null);
-  let highest = 0;
   for (let i = 0; i < n; i++) {
-    if (!valid[i] || distance[i] > width) continue;
+    if (!valid[i] || toLand[i] > width) continue;
     const c = i % columns, r = Math.floor(i / columns);
     const x = x0 + c * CELL, z = z0 + r * CELL;
     const w = smooth(distance[i] / BLEND);
@@ -364,15 +401,13 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     const capOf = (k: string) => (tops.has(k) ? Infinity : caps.get(k) ?? Infinity);
     const limit = Math.min(ceiling[i], capOf(key(sc, sr)), capOf(key(sc - 1, sr)), capOf(key(sc, sr - 1)), capOf(key(sc - 1, sr - 1)));
     h = Math.min(h, limit, MAX_LAND);
-    highest = Math.max(highest, h);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
-    // it (no hole in the land, so no skirt). Outside it there is no ground: land ends there.
+    // it (no hole in the land). Outside it there is no ground: land ends there.
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;
   }
-  // Rising land ends high up: its skirt reaches the ground, or the edge would float.
-  const skirt = slope > 0 ? Math.max(SKIRT, highest - SUNK) : SKIRT;
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt, rockAngle: own.rockAngle };
+  // No walls under the land's outer edge: they cost triangles and nobody drives there.
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

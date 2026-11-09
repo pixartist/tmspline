@@ -22,6 +22,8 @@ public static class AdaptiveTerrainBuilder
     /// <summary>Fine cell size, metres.</summary>
     public const double Cell = 0.5;
     private const double PullDistance = 16, FidelityFalloff = 10, MinFidelity = 0.06;
+    /// <summary>Beyond FarStart metres from every road the least fidelity falls to FarFidelity, over FarFade metres.</summary>
+    private const double FarStart = 48, FarFade = 32, FarFidelity = 0.02;
     /// <summary>
     /// Edges more than this above the land are not pinned (the land stays: a road high over it), metres; the pull reaches
     /// out PullSlope metres per metre the land rises (at least PullDistance), a bank rather than a spire.
@@ -105,12 +107,28 @@ public static class AdaptiveTerrainBuilder
         // Whose lowest point that is: its road and its distance along it (a wall's own foot is no road under its edge).
         var floorRoad = new int[n];
         var floorAlong = new float[n];
-        // And the highest point of any road (what land over a buried road has to clear).
-        var roof = new float[n];
-        Array.Fill(roof, float.NegativeInfinity);
+        // Roads rolled up past upright walls (tubes) per ring; their points are kept apart, for the land over them. The lowest
+        // point of every other road: a road crossing over a tube, which the land over the tube stays under.
+        bool RolledUpAt(Road road, Ring ring)
+        {
+            if (Math.Abs(ring.Curve) <= Math.PI || ring.Up.Y < RolledUp) return false;
+            var segment = road.Track.Segments[Math.Clamp(ring.Segment, 0, road.Track.Segments.Count - 1)];
+            return (RoadMeshBuilder.EdgeContact(ring, segment, -1).Y + RoadMeshBuilder.EdgeContact(ring, segment, 1).Y) / 2 - ring.Position.Y > HollowSag;
+        }
+        var rolledUp = roads.Select(road => road.Rings.Select(ring => RolledUpAt(road, ring)).ToArray()).ToArray();
+        var ringDistances = roads.Select(road => road.Rings.Select(ring => ring.Distance).ToArray()).ToArray();
+        // The road leading into a tube is part of it: no road crossing over it.
+        var ownOfTube = roads.Select((road, r) => ringDistances[r].Select(d => Enumerable.Range(0, road.Rings.Count)
+            .Any(j => rolledUp[r][j] && Math.Abs(ringDistances[r][j] - d) <= Math.Max(OwnSection, road.Rings[j].Width * 2))).ToArray()).ToArray();
+        var rolledPoints = new List<(int Cell, float Y, int Road, int Ring)>();
+        var otherFloor = new float[n];
+        Array.Fill(otherFloor, float.PositiveInfinity);
         void Lower(int k, double y, int roadIndex, double along)
         {
-            roof[k] = Math.Max(roof[k], (float)y);
+            var at = Array.BinarySearch(ringDistances[roadIndex], along);
+            if (at < 0) at = Math.Clamp(~at, 0, ringDistances[roadIndex].Length - 1);
+            if (rolledUp[roadIndex][at]) rolledPoints.Add((k, (float)y, roadIndex, at));
+            else if (!ownOfTube[roadIndex][at]) otherFloor[k] = Math.Min(otherFloor[k], (float)y);
             if (y >= floor[k]) return;
             floor[k] = (float)y;
             floorRoad[k] = roadIndex;
@@ -218,16 +236,11 @@ public static class AdaptiveTerrainBuilder
             }
             return false;
         }
-        // A road rolled up past upright walls (a tube) is buried, unless most of it stands clear of the land (then it is a bridge).
-        bool[] BuriedRings(Road road)
+        // A road rolled up past upright walls (a tube) is buried, unless all of it stands clear of the land (then it is a bridge).
+        bool[] BuriedRings(int roadIndex)
         {
-            var list = road.Rings;
-            bool Candidate(Ring ring)
-            {
-                if (Math.Abs(ring.Curve) <= Math.PI || ring.Up.Y < RolledUp) return false;
-                var segment = road.Track.Segments[Math.Clamp(ring.Segment, 0, road.Track.Segments.Count - 1)];
-                return (RoadMeshBuilder.EdgeContact(ring, segment, -1).Y + RoadMeshBuilder.EdgeContact(ring, segment, 1).Y) / 2 - ring.Position.Y > HollowSag;
-            }
+            var list = roads[roadIndex].Rings;
+            var candidate = rolledUp[roadIndex];
             // Whether the land just past the road's side, straight out from its middle, comes up to about its floor.
             bool LandBeside(Ring ring, int side)
             {
@@ -247,11 +260,11 @@ public static class AdaptiveTerrainBuilder
             var buried = new bool[list.Count];
             for (var start = 0; start < list.Count; start++)
             {
-                if (!Candidate(list[start])) continue;
+                if (!candidate[start]) continue;
                 var end = start;
-                while (end + 1 < list.Count && Candidate(list[end + 1])) end++;
-                var atLand = Enumerable.Range(start, end - start + 1).Count(i => LandBeside(list[i], -1) || LandBeside(list[i], 1));
-                if (atLand * 2 >= end - start + 1) Array.Fill(buried, true, start, end - start + 1);
+                while (end + 1 < list.Count && candidate[end + 1]) end++;
+                if (Enumerable.Range(start, end - start + 1).Any(i => LandBeside(list[i], -1) || LandBeside(list[i], 1)))
+                    Array.Fill(buried, true, start, end - start + 1);
                 start = end;
             }
             return buried;
@@ -261,7 +274,7 @@ public static class AdaptiveTerrainBuilder
         {
             var road = roads[roadIndex];
             var rings = road.Rings;
-            rolledRings[roadIndex] = BuriedRings(road);
+            rolledRings[roadIndex] = BuriedRings(roadIndex);
             // Round a closed track the distances wrap.
             var loop = road.Track.Closed ? rings[^1].Distance : 0;
             var edges = new (Vec3d L, Vec3d R, bool PinL, bool PinR, EdgeTilt TiltL, EdgeTilt TiltR)[rings.Count];
@@ -359,16 +372,20 @@ public static class AdaptiveTerrainBuilder
                 }
         }
 
-        // The columns of a buried road: the land lies over it, nothing pushes it under the road.
-        var ringDistances = roads.Select(road => road.Rings.Select(ring => ring.Distance).ToArray()).ToArray();
+        // The columns of a buried road and its top: the land lies over it, nothing but another road crossing above holds it down.
         var rolled = new bool[n];
-        for (var i = 0; i < n; i++)
-        {
-            if (float.IsInfinity(floor[i])) continue;
-            var at = Array.BinarySearch(ringDistances[floorRoad[i]], (double)floorAlong[i]);
-            if (at < 0) at = Math.Clamp(~at, 0, ringDistances[floorRoad[i]].Length - 1);
-            rolled[i] = rolledRings[floorRoad[i]][at];
-        }
+        var roof = new float[n];
+        Array.Fill(roof, float.NegativeInfinity);
+        foreach (var (cell, y, road, ring) in rolledPoints)
+            if (rolledRings[road][ring])
+            {
+                rolled[cell] = true;
+                roof[cell] = Math.Max(roof[cell], y);
+            }
+            else otherFloor[cell] = Math.Min(otherFloor[cell], y);
+        // Where another road passes above a buried one, the height the land stays under. Below the buried road's top it is that
+        // road's own continuation or a road under it: no limit.
+        float UnderCrossing(int i) => otherFloor[i] > roof[i] ? otherFloor[i] - (float)KeepClear : float.PositiveInfinity;
 
         // The solve: the land pulled to the pins, fading out over PullDistance (from each cell's nearest pin point).
         var pinY = new float[n];
@@ -455,7 +472,8 @@ public static class AdaptiveTerrainBuilder
             // A buried road: the land rises over its top, a hill round it (the fade below).
             if (rolled[i])
             {
-                if (!cut[i] && !float.IsNaN(land[i]) && roof[i] + (float)Cover > land[i] + delta[i]) seedTop[i] = roof[i] + (float)Cover;
+                var over = Math.Min(roof[i] + (float)Cover, UnderCrossing(i));
+                if (!cut[i] && !float.IsNaN(land[i]) && over > land[i] + delta[i]) seedTop[i] = over;
                 continue;
             }
             if (float.IsInfinity(holdBottom[i]) || float.IsNaN(land[i]) || !(deep[i] || float.IsNegativeInfinity(roadY[i]))) continue;
@@ -495,15 +513,19 @@ public static class AdaptiveTerrainBuilder
         var heights = new float[n];
         var fidelity = new float[n];
         var (_, toDense) = NearestTransform(pinY.Select((y, i) => steep[i] ? 0f : y).ToArray(), columns, rows);
+        var (_, toRoad) = NearestTransform(floor.Select(y => float.IsInfinity(y) ? float.NaN : 0f).ToArray(), columns, rows);
         for (var i = 0; i < n; i++)
         {
-            fidelity[i] = (float)Math.Max(MinFidelity, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
+            // Far from every road the land coarsens another step.
+            var far = Math.Clamp((toRoad[i] * Cell - FarStart) / FarFade, 0, 1);
+            var least = MinFidelity + (FarFidelity - MinFidelity) * far * far * (3 - 2 * far);
+            fidelity[i] = (float)Math.Max(least, Math.Exp(-toDense[i] * Cell / FidelityFalloff));
             if (float.IsNaN(land[i])) { heights[i] = float.NaN; continue; }
             var free = land[i] + delta[i] + fill[i] + align[i];
             // Over a buried road the land stays above it, the cover growing in from the edges it holds on to.
             if (rolled[i]) fidelity[i] = Math.Max(fidelity[i], (float)BuriedFidelity);
             var h = rolled[i]
-                ? cut[i] ? free : Math.Max(free, roof[i] + (float)(Cover * Math.Clamp(distance[i] * Cell / 2, 0, 1)))
+                ? cut[i] ? free : Math.Min(Math.Max(free, roof[i] + (float)(Cover * Math.Clamp(distance[i] * Cell / 2, 0, 1))), UnderCrossing(i))
                 : Math.Min(free, BehindOwnEdge(i) ? keepOut[i] : Math.Min(keepOut[i], holdKeep[i]));
             int c = i % columns, r = i / columns;
             double x = x0 + (c + 0.5) * Cell, z = z0 + (r + 0.5) * Cell;

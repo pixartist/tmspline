@@ -36,7 +36,7 @@ interface SharedTrack {
   data: unknown;
 }
 
-interface Release {
+export interface Release {
   version: string;
   notes: string | null;
 }
@@ -147,14 +147,21 @@ export async function signOut(): Promise<CloudStatus | null> {
   return cloudStatus();
 }
 
-/** A newer release than this app, unless the user dismissed that version. */
-export async function availableUpdate(status: CloudStatus): Promise<Release | null> {
-  if (!status.signedIn || !status.appVersion) return null;
+/** A newer release than this app (null: this is the latest); throws when the service cannot say. */
+export async function newerRelease(status: CloudStatus): Promise<Release | null> {
+  if (!status.appVersion) return null;
   const response = await api("GET", "app/latest");
-  if (response.status !== 200) return null;
+  if (response.status === 204) return null;
+  if (!response.ok) throw await problem(response, "Could not check for updates");
   const release = (await response.json()) as Release;
-  if (compareVersions(release.version, status.appVersion) <= 0) return null;
-  return localStorage.getItem(SKIPPED_UPDATE_KEY) === release.version ? null : release;
+  return compareVersions(release.version, status.appVersion) > 0 ? release : null;
+}
+
+/** The check at startup: a newer release, unless the user dismissed that version. */
+export async function availableUpdate(status: CloudStatus): Promise<Release | null> {
+  if (!status.signedIn) return null;
+  const release = await newerRelease(status);
+  return release && localStorage.getItem(SKIPPED_UPDATE_KEY) === release.version ? null : release;
 }
 
 export const skipUpdate = (version: string) => localStorage.setItem(SKIPPED_UPDATE_KEY, version);
