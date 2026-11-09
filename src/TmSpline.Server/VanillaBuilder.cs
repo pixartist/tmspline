@@ -95,7 +95,11 @@ public sealed class VanillaBuilder
             await process.WaitForExitAsync();
             await stderr;
             if (process.ExitCode != 0)
-                throw new InvalidOperationException($"VanillaLib exited with {process.ExitCode}: {string.Join(" ", errors.TakeLast(5))} {last}");
+            {
+                // A crash prints its cause and the crashing frames first; what follows is the thread pool's own frames.
+                _logger.LogError("VanillaLib exited with 0x{Code:X8} after \"{Last}\":{NewLine}{Errors}", process.ExitCode, last, Environment.NewLine, string.Join(Environment.NewLine, errors));
+                throw new InvalidOperationException($"VanillaLib exited with 0x{process.ExitCode:X8} after \"{last?.Trim()}\":\n{string.Join("\n", errors.Select(e => e.Trim()).Where(e => !e.StartsWith("---", StringComparison.Ordinal) && !e.StartsWith("Repeat ", StringComparison.Ordinal)).Take(6))}");
+            }
 
             var missing = ReadMissing();
             var blocks = CountBlocks(summary);
