@@ -115,6 +115,7 @@ static class Check
             }
         Held(map, ringsOf, land);
         Exposed(land, road);
+        Overhead(land, road, surface);
         var open = Topology(grid, land, road);
         Pictures(map, land, road, Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(mapFile)}_{builder}.png"), builder != "old" ? TerrainMeshBuilder.LastStitched : null, pokes, ringsOf, open);
     }
@@ -172,6 +173,40 @@ static class Check
             where[k] = where.GetValueOrDefault(k) + l / 2;
         }
         Console.WriteLine($"  exposed undersides: land {count[0]} ({area[0]:F0} m²), rock {count[1]} ({area[1]:F0} m²); worst at {string.Join(" ", where.OrderByDescending(kv => kv.Value).Take(8).Select(kv => $"({kv.Key.Item1},{kv.Key.Item2}):{kv.Value:F0}"))}");
+    }
+
+    /// <summary>Land straight over an up-facing driving surface with no road surface between (a sheet over a bank).</summary>
+    static void Overhead(List<Tri> land, List<Tri> road, List<(Vector3 A, Vector3 B, Vector3 C, Vector3 N, int Track, float Along, Vector3 Across)> surface)
+    {
+        var all = land.Concat(road).ToList();
+        var buckets = Buckets(all, t => (t.A, t.B, t.C), 8);
+        var cells = new Dictionary<(int, int), (float H, int Track, float Along)>();
+        foreach (var s in surface)
+        {
+            if (s.N.Y < 0.25f) continue;
+            foreach (var p in Samples(new Tri(s.A, s.B, s.C, 2), 1f))
+            {
+                var key = ((int)Math.Floor(p.X / 0.5f), (int)Math.Floor(p.Z / 0.5f));
+                if (cells.ContainsKey(key) || !buckets.TryGetValue(((int)Math.Floor(p.X / 8), (int)Math.Floor(p.Z / 8)), out var list)) continue;
+                var best = float.PositiveInfinity;
+                var kind = -1;
+                foreach (var i in list)
+                {
+                    var t = all[i];
+                    var det = (t.B.Z - t.C.Z) * (t.A.X - t.C.X) + (t.C.X - t.B.X) * (t.A.Z - t.C.Z);
+                    if (Math.Abs(det) < 1e-9f) continue;
+                    var l1 = ((t.B.Z - t.C.Z) * (p.X - t.C.X) + (t.C.X - t.B.X) * (p.Z - t.C.Z)) / det;
+                    var l2 = ((t.C.Z - t.A.Z) * (p.X - t.C.X) + (t.A.X - t.C.X) * (p.Z - t.C.Z)) / det;
+                    if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+                    var d = l1 * t.A.Y + l2 * t.B.Y + (1 - l1 - l2) * t.C.Y - p.Y;
+                    if (d > 0.3f && d < best) { best = d; kind = t.Kind; }
+                }
+                if (kind is 0 or 1) cells[key] = (best, s.Track, s.Along);
+            }
+        }
+        var groups = cells.Values.GroupBy(c => (c.Track, (int)(c.Along / 25))).OrderByDescending(g => g.Count()).Take(6);
+        Console.WriteLine($"  overhead: {cells.Count} cells of 0.5 m with land straight over a driving surface (no road between)" +
+            string.Concat(groups.Select(g => $"\n    track {g.Key.Track} at {g.Key.Item2 * 25}-{g.Key.Item2 * 25 + 25} m: {g.Count()} cells, {g.Min(c => c.H):F1}-{g.Max(c => c.H):F1} m over")));
     }
 
     static IEnumerable<Vector3> Samples(Tri t, float step)
@@ -332,6 +367,9 @@ static class Check
             if (examples.Count < 6) examples.Add($"({m.X:F0}, {m.Y:F0}, {m.Z:F0})");
         }
         Console.WriteLine($"  mesh: {nonManifold} non-manifold edges; {boundary} boundary edges, {open} open (not at a road or the outline, {openLength:F0} m) e.g. {string.Join(" ", examples)}");
+        if (Environment.GetEnvironmentVariable("CHECK_OPEN") is { } co)
+            foreach (var g in openAt.GroupBy(p => ((int)Math.Floor(p.X / 20), (int)Math.Floor(p.Z / 20))).OrderByDescending(g => g.Count()).Take(int.Parse(co)))
+                Console.WriteLine($"    open near ({g.Key.Item1 * 20 + 10}, {g.Average(p => p.Y):F0}, {g.Key.Item2 * 20 + 10}): {g.Count()} edges, y {g.Min(p => p.Y):F0}-{g.Max(p => p.Y):F0}");
         return openAt.GroupBy(p => ((int)Math.Floor(p.X / 30), (int)Math.Floor(p.Z / 30))).OrderByDescending(g => g.Count()).Take(6).Select(g => g.First()).ToList();
     }
 

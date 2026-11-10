@@ -75,6 +75,8 @@ public static class StitchedTerrain
         /// <summary>The section round the room, ring-local (right, up): rail L, deck L..R, rail R, arch R..L.</summary>
         public Vector2[] Poly = [];
         public Vector3[] W = [];
+        /// <summary>The driving surface's normal at the deck points (W[1 + k]).</summary>
+        public Vector3[] DeckNormal = [];
         public Vector3 Centre;
         public Vector3 MeanNormal;
         public float Chord;
@@ -276,6 +278,8 @@ public static class StitchedTerrain
                 road.Dist = road.S.Select(s => (float)s.R.Distance).ToArray();
                 roads.Add(road);
             }
+            Decks();
+            if (Environment.GetEnvironmentVariable("TMSPLINE_SKY") != "off") Sky();
             // The rooms between consecutive stations, in plan buckets.
             foreach (var road in roads)
                 for (var i = 0; i + 1 < road.S.Count; i++)
@@ -297,6 +301,117 @@ public static class StitchedTerrain
                 }
         }
 
+        /// <summary>
+        /// The open sky over the driving surface: where a deck point faces up and no road surface is over it for
+        /// SkyClear metres, the room reaches straight up (to SkyHeight, or SkyEarth under the next road over it), so no
+        /// land hangs over a steep bank or into an open half-pipe. Under a road closer than that (a pipe's or a curl's
+        /// own top, the lap above, a low bridge) the room keeps its arch: the land wraps round as a tunnel.
+        /// </summary>
+        /// <summary>The decks' triangles (road, station) in plan buckets.</summary>
+        private readonly List<(Vector3 A, Vector3 B, Vector3 C, int Road, int Station)> deckTris = [];
+        private readonly Dictionary<(int, int), List<int>> deckBuckets = [];
+
+        private void Decks()
+        {
+            foreach (var road in roads)
+                for (var i = 0; i + 1 < road.S.Count; i++)
+                {
+                    var a = road.S[i].W;
+                    var b = road.S[i + 1].W;
+                    // Rail to rail (0 .. RailRight).
+                    for (var u = 0; u < RailRight; u++)
+                    {
+                        Add(a[u], a[u + 1], b[u + 1], road.Index, i);
+                        Add(a[u], b[u + 1], b[u], road.Index, i);
+                    }
+                }
+            void Add(Vector3 a, Vector3 b, Vector3 c, int road, int station)
+            {
+                var id = deckTris.Count;
+                deckTris.Add((a, b, c, road, station));
+                for (var bx = (int)Math.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X)) / Bucket); bx <= (int)Math.Floor(MathF.Max(a.X, MathF.Max(b.X, c.X)) / Bucket); bx++)
+                    for (var bz = (int)Math.Floor(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) / Bucket); bz <= (int)Math.Floor(MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) / Bucket); bz++)
+                    {
+                        if (!deckBuckets.TryGetValue((bx, bz), out var l)) deckBuckets[(bx, bz)] = l = [];
+                        l.Add(id);
+                    }
+            }
+        }
+
+        /// <summary>The decks' heights straight over or under (x, z), each with its road and station.</summary>
+        private IEnumerable<(float Y, int Road, int Station)> DecksAt(float x, float z)
+        {
+            if (!deckBuckets.TryGetValue(((int)Math.Floor(x / Bucket), (int)Math.Floor(z / Bucket)), out var list)) yield break;
+            foreach (var id in list)
+            {
+                var (a, b, c, road, station) = deckTris[id];
+                var det = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
+                if (MathF.Abs(det) < 1e-9f) continue;
+                var l1 = ((b.Z - c.Z) * (x - c.X) + (c.X - b.X) * (z - c.Z)) / det;
+                var l2 = ((c.Z - a.Z) * (x - c.X) + (a.X - c.X) * (z - c.Z)) / det;
+                if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+                yield return (l1 * a.Y + l2 * b.Y + (1 - l1 - l2) * c.Y, road, station);
+            }
+        }
+
+        private void Sky()
+        {
+            const float SkyHeight = 40, SkyEarth = 2.5f, SkyClear = ArchHeight + SkyEarth, FacesUp = 0.25f;
+            // The height of the nearest deck over p (straight up), infinity if none.
+            float Over(Vector3 p)
+            {
+                var best = float.PositiveInfinity;
+                foreach (var (y, _, _) in DecksAt(p.X, p.Z))
+                {
+                    var d = y - p.Y;
+                    if (d > 0.3f && d < best) best = d;
+                }
+                return best;
+            }
+            foreach (var road in roads)
+            {
+                var n = road.S.Count;
+                var raw = new float[n, DeckN + 1];
+                for (var i = 0; i < n; i++)
+                {
+                    var st = road.S[i];
+                    for (var k = 0; k <= DeckN; k++)
+                    {
+                        // Faded in with how much the surface faces up (no step where it turns past FacesUp).
+                        var ny = st.DeckNormal[k].Y;
+                        var face = Math.Clamp((ny - FacesUp) / 0.2f, 0, 1);
+                        if (face <= 0) continue;
+                        var over = Over(st.W[1 + k]);
+                        if (over < SkyClear) continue;
+                        raw[i, k] = MathF.Min(SkyHeight, over - SkyEarth) * face * face * (3 - 2 * face);
+                    }
+                }
+                // Smoothed along the road: the least over a few stations, then their mean (the walls' tops do not step
+                // from station to station; never higher than the road over it allows).
+                const int W = 3;
+                for (var i = 0; i < n; i++)
+                {
+                    var sky = new float[DeckN + 1];
+                    var any = false;
+                    for (var k = 0; k <= DeckN; k++)
+                    {
+                        float sum = 0;
+                        var cnt = 0;
+                        for (var j = Math.Max(0, i - W); j <= Math.Min(n - 1, i + W); j++)
+                        {
+                            var least = float.MaxValue;
+                            for (var m = Math.Max(0, j - W); m <= Math.Min(n - 1, j + W); m++) least = MathF.Min(least, raw[m, k]);
+                            sum += least;
+                            cnt++;
+                        }
+                        sky[k] = MathF.Min(raw[i, k], sum / cnt);
+                        if (sky[k] > ArchHeight) any = true; else sky[k] = 0;
+                    }
+                    if (any) Section(road.S[i], sky);
+                }
+            }
+        }
+
         private static List<Vector2> Hull(List<Vector2> p)
         {
             p = p.OrderBy(a => a.X).ThenBy(a => a.Y).ToList();
@@ -310,17 +425,19 @@ public static class StitchedTerrain
         }
 
         /// <summary>The station's section: rails, deck (tucked), arch; world points; mean normal; slot chord.</summary>
-        private static void Section(Station st)
+        private static void Section(Station st, float[]? sky = null)
         {
             var r = st.R;
             Vector2 Loc(Vector3 w) { var d = w - st.P; return new(Vector3.Dot(d, st.Right), Vector3.Dot(d, st.Up)); }
             var deck = new Vector2[DeckN + 1];
             var offset = new List<Vector2>();
             var nb = Vector2.Zero;
+            st.DeckNormal = new Vector3[DeckN + 1];
             for (var k = 0; k <= DeckN; k++)
             {
                 var q = RoadMeshBuilder.SurfaceSample(r, (k / (double)DeckN - 0.5) * r.Width);
                 var n = new Vector2((float)q.NX, (float)q.NY);
+                st.DeckNormal[k] = st.Right * n.X + st.Up * n.Y;
                 var pt = new Vector2((float)q.X, (float)q.Y);
                 deck[k] = pt - n * Tuck;
                 var rm = ArchHeight;
@@ -342,8 +459,27 @@ public static class StitchedTerrain
             {
                 var pts = new List<Vector2>(offset) { railL, railR, railL + nb * RimLift, railR + nb * RimLift };
                 pts.AddRange(deck);
+                // Out of the opening: the rails pushed ArchHeight from their chord, away from the deck (on a curled
+                // section the opening faces sideways or down, and the land in front of it would close it).
+                var chord = railR - railL;
+                var o = Vector2.Normalize(new Vector2(-chord.Y, chord.X));
+                var toDeck = Vector2.Dot(o, mid - (railL + railR) / 2);
+                if (MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
+                pts.Add(railL + o * ArchHeight);
+                pts.Add(railR + o * ArchHeight);
+                // The open sky over the deck (see Sky): straight up in the section's plane.
+                // The middle the hull's corners are ordered round: that of the hull without the sky (inside it either way;
+                // the sky's tall column would draw it away from the deck, and corners under a curled lip out of order).
+                var near = Hull(pts);
+                var c = near.Aggregate((a, b) => a + b) / near.Count;
+                var up = new Vector2(st.Right.Y, st.Up.Y);
+                if (sky is not null && up.LengthSquared() > 1e-4f)
+                {
+                    up = Vector2.Normalize(up);
+                    for (var k = 0; k <= DeckN; k++)
+                        if (sky[k] > 0) pts.Add(deck[k] + up * sky[k]);
+                }
                 var hull = Hull(pts);
-                var c = hull.Aggregate((a, b) => a + b) / hull.Count;
                 static float Ang(Vector2 v) => MathF.Atan2(v.Y, v.X);
                 static float Mod(float a) { a %= 2 * MathF.PI; return a < 0 ? a + 2 * MathF.PI : a; }
                 float aR = Ang(railR - c), aL = Ang(railL - c), aN = Ang(nb);
@@ -715,10 +851,17 @@ public static class StitchedTerrain
                     if (hold <= 0) continue;
                     var a = road.S[i].W;
                     var b = road.S[i + 1].W;
-                    for (var u = 1; u <= DeckN; u++)
+                    var na = road.S[i].DeckNormal;
+                    var nb = road.S[i + 1].DeckNormal;
+                    // A section curled over itself (an overhang): the land also goes over the curl's back, round it as
+                    // round a tunnel (the line between the rails runs through the curl).
+                    var curled = CurlLift && (Math.Abs(road.S[i].R.Curve) > Math.PI || Math.Abs(road.S[i + 1].R.Curve) > Math.PI);
+                    for (var u = 1; u < DeckN + 1; u++)
                     {
-                        Lift(a[u], a[u + 1], b[u + 1], hold, road.S[i].Centre);
-                        Lift(a[u], b[u + 1], b[u], hold, road.S[i].Centre);
+                        // The driving side: the surface's own normal at the quad's corners.
+                        var side = na[u - 1] + na[u] + nb[u - 1] + nb[u];
+                        Lift(a[u], a[u + 1], b[u + 1], hold, side, road.Index, i, curled);
+                        Lift(a[u], b[u + 1], b[u], hold, side, road.Index, i, curled);
                     }
                 }
 
@@ -749,16 +892,24 @@ public static class StitchedTerrain
         }
 
         /// <summary>Raises the ground at the cells whose middle lies under the triangle (plan) to DeckClear over it, by `hold`.</summary>
-        private void Lift(Vector3 a, Vector3 b, Vector3 c, float hold, Vector3 centre)
+        private void Lift(Vector3 a, Vector3 b, Vector3 c, float hold, Vector3 side, int road, int station, bool curled)
         {
+            // Not where it would bury the same stretch of road under it (a deck curled under itself, as a hump's lip).
+            const int Stretch = (int)(12 / StationStep);
             const float DeckClear = 0.5f;
-            // Only surface that faces up (not the underside of a section curled over itself).
+            // Surface whose driving side faces up; on a curled section also its top's back (driving side down).
             var nrm = Vector3.Cross(b - a, c - a);
             if (nrm.LengthSquared() < 1e-10f) return;
-            if (Vector3.Dot(nrm, centre - a) < 0) nrm = -nrm;
-            if (nrm.Y / nrm.Length() < 0.2f) return;
+            if (Vector3.Dot(nrm, side) < 0) nrm = -nrm;
+            var ny = nrm.Y / nrm.Length();
+            var back = curled && ny < -0.2f;
+            if (ny < 0.2f && !back) return;
             var det = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
             if (MathF.Abs(det) < 1e-6f) return;
+            if (!back)
+                foreach (var q in new[] { a, b, c, (a + b + c) / 3 })
+                    foreach (var (y, rd, s) in DecksAt(q.X, q.Z))
+                        if (rd == road && Math.Abs(s - station) <= Stretch && y < q.Y - 1) return;
             int c0 = Math.Max(0, (int)Math.Floor((MathF.Min(a.X, MathF.Min(b.X, c.X)) - x0) / Cell - 0.5));
             int c1 = Math.Min(cols - 1, (int)Math.Ceiling((MathF.Max(a.X, MathF.Max(b.X, c.X)) - x0) / Cell - 0.5));
             int r0 = Math.Max(0, (int)Math.Floor((MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) - z0) / Cell - 0.5));
@@ -774,7 +925,12 @@ public static class StitchedTerrain
                     var k = r * cols + col;
                     if (float.IsNaN(g[k])) continue;
                     var want = l1 * a.Y + l2 * b.Y + l3 * c.Y + DeckClear;
-                    if (want > g[k]) g[k] += (want - g[k]) * hold;
+                    if (want <= g[k]) continue;
+                    var buried = false;
+                    if (!back)
+                        foreach (var (y, rd, s) in DecksAt(px, pz))
+                        if (rd == road && Math.Abs(s - station) <= Stretch && y < want - DeckClear - 1) { buried = true; break; }
+                    if (!buried) g[k] += (want - g[k]) * hold;
                 }
         }
 
@@ -1121,6 +1277,9 @@ public static class StitchedTerrain
         /// <summary>Debug: TMSPLINE_LINING_RAY=off keeps lining the ground field covers even with open air behind it.</summary>
         private static readonly bool RayTest = Environment.GetEnvironmentVariable("TMSPLINE_LINING_RAY") != "off";
 
+        /// <summary>Debug: TMSPLINE_CURL=off leaves the land under a curled section's back (no lift over it).</summary>
+        private static readonly bool CurlLift = Environment.GetEnvironmentVariable("TMSPLINE_CURL") != "off";
+
         /// <summary>Longest piece of a fixed edge, metres.</summary>
         private const float PinPiece = 3;
 
@@ -1434,7 +1593,8 @@ public static class StitchedTerrain
                 // the room (the floor side) are never seen from outside.
                 var outward = -Vector3.Normalize(nrm);
                 var mid = (pa + pb + pc) / 3;
-                if (RayTest && outward.Y > -0.5f && !LandHit(mid, outward, 60) && !LandHit(mid, Vector3.UnitY, 200)) continue;
+                // (Up from a little way into the earth: on a vertical wall a ray up its face could pass the land's edge.)
+                if (RayTest && outward.Y > -0.5f && !LandHit(mid, outward, 60) && !LandHit(mid + outward * 0.3f, Vector3.UnitY, 200)) continue;
                 foreach (var v in new[] { ia, ib, ic }) normals[v] = normals.GetValueOrDefault(v) + nrm;
                 tris.Add((ia, ib, ic));
             }
