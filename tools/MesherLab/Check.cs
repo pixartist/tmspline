@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using SkiaSharp;
 using TmSpline.Core.Geometry;
@@ -58,10 +58,38 @@ static class Check
         }
         if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_EXPLAIN") is { } ex && TerrainMeshBuilder.LastStitched is { } dbg3)
         {
-            var xz = ex.Split(',').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-            Console.WriteLine($"  explain ({xz[0]}, {xz[1]}):\n{dbg3.Explain(xz[0], xz[1])}");
+            foreach (var one in ex.Split(';'))
+            {
+                var xz = one.Split(',').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                Console.WriteLine($"  explain ({xz[0]}, {xz[1]}):\n{dbg3.Explain(xz[0], xz[1])}");
+            }
         }
-        if (builder != "old") Console.WriteLine($"  budget: {TerrainMeshBuilder.TriangleBudget(grid, map)} land triangles");
+        if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_NEAR") is { } nearAt && TerrainMeshBuilder.LastStitched is { } dbn)
+        {
+            // The land and lining triangles round a point, each vertex marked P when it is a pin point.
+            var v = nearAt.Split(',').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            var nearPt = new Vector3(v[0], v[1], v[2]);
+            var pinPts = dbn.Pins.SelectMany(p => p.Points).Select(p => new Vector3((float)p.X, (float)p.Y, (float)p.Z)).ToList();
+            string Fmt(Vector3 p) => $"({p.X:F1},{p.Y:F1},{p.Z:F1}){(pinPts.Any(q => Vector3.DistanceSquared(q, p) < 1e-3f) ? "P" : "")}";
+            foreach (var pin in dbn.Pins)
+                if (pin.Points.Any(p => Vector3.Distance(new Vector3((float)p.X, (float)p.Y, (float)p.Z), nearPt) < 1.5f))
+                    Console.WriteLine($"  pin of {pin.Points.Count}: {string.Join(" ", pin.Points.Take(40).Select(p => $"({p.X:F1},{p.Y:F1},{p.Z:F1})"))}");
+            var L = dbn.Land;
+            for (var i = 0; i < L.Indices.Count; i += 3)
+            {
+                Vector3 a = L.Positions[L.Indices[i]], b = L.Positions[L.Indices[i + 1]], c = L.Positions[L.Indices[i + 2]];
+                if (Vector3.Distance((a + b + c) / 3, nearPt) > v[3]) continue;
+                var n = Vector3.Normalize(Vector3.Cross(b - a, c - a));
+                Console.WriteLine($"  land {Fmt(a)} {Fmt(b)} {Fmt(c)} ny {MathF.Abs(n.Y):F2}");
+            }
+            for (var i = 0; i < dbn.LiningIndices.Count; i += 3)
+            {
+                Vector3 a = dbn.LiningVertices[dbn.LiningIndices[i]].Position, b = dbn.LiningVertices[dbn.LiningIndices[i + 1]].Position, c = dbn.LiningVertices[dbn.LiningIndices[i + 2]].Position;
+                if (Vector3.Distance((a + b + c) / 3, nearPt) > v[3]) continue;
+                Console.WriteLine($"  lining {Fmt(a)} {Fmt(b)} {Fmt(c)}");
+            }
+        }
+        if (builder != "old") Console.WriteLine($"  budget:{TerrainMeshBuilder.TriangleBudget(grid, map)} land triangles");
         if (builder != "old" && TerrainMeshBuilder.LastStitched is { } st)
             Console.WriteLine($"  stages: {string.Join(", ", st.Milliseconds.Select(kv => $"{kv.Key} {kv.Value} ms"))}; pins {st.Pins.Count} ({st.Pins.Sum(p => p.Points.Count)} points), land {st.Land.Indices.Count / 3} triangles in {st.Land.Rounds} rounds, lining {st.LiningIndices.Count / 3}, refused {st.Land.RefusedSegments}");
         if (builder != "old" && TerrainMeshBuilder.LastStitched is { } stn) Console.WriteLine($"  notes: {stn.Notes.Count}; {string.Join(" | ", stn.Notes.Take(8))}");
