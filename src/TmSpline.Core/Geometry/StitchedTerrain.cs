@@ -80,6 +80,8 @@ public static class StitchedTerrain
         public Vector3 Centre;
         public Vector3 MeanNormal;
         public float Chord;
+        /// <summary>The floor's corner before a sideways opening: the arch's first point from the right rail (1) or the left (-1), 0 none.</summary>
+        public int FootEnd;
     }
 
     private sealed class Road
@@ -459,6 +461,11 @@ public static class StitchedTerrain
 
             // The arch: the hull of the deck's offset, the rails and the rails lifted, from the right rail round the opening to the left.
             List<Vector2> chain;
+            // The floor's corner (see below): which end of the arch it is at (1 the right rail's, -1 the left's), how far
+            // (0..1) the opening faces sideways.
+            var foot = Vector2.Zero;
+            var footEnd = 0;
+            var footW = 0f;
             if (st.Chord < 3f) chain = [railR, railL];
             else
             {
@@ -470,8 +477,33 @@ public static class StitchedTerrain
                 var o = Vector2.Normalize(new Vector2(-chord.Y, chord.X));
                 var toDeck = Vector2.Dot(o, mid - (railL + railR) / 2);
                 if (MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
-                pts.Add(railL + o * ArchHeight);
-                pts.Add(railR + o * ArchHeight);
+                Vector2 oL = o * ArchHeight, oR = oL;
+                // Where the opening faces sideways (a wall, an overhang, a pipe on its side) the lower rail's goes out
+                // level instead: the floor in front of the wall, to under all of a deck leaning over it. The room's
+                // underside is then the floor's level from the rail on, and the land in front meets it there (sloping
+                // up along the arch it met the land metres over the rail: a bank of rock before the driving surface).
+                var upw = new Vector2(st.Right.Y, st.Up.Y);
+                if (upw.LengthSquared() > 1e-4f)
+                {
+                    upw = Vector2.Normalize(upw);
+                    footW = 1 - SS(0.35f, 0.7f, MathF.Abs(Vector2.Dot(o, upw)));
+                    if (footW > 0)
+                    {
+                        var level = new Vector2(upw.Y, -upw.X);
+                        if (Vector2.Dot(level, o) < 0) level = -level;
+                        var low = Vector2.Dot(railR, upw) < Vector2.Dot(railL, upw) ? railR : railL;
+                        var reach = ArchHeight;
+                        foreach (var d in deck) reach = MathF.Max(reach, Vector2.Dot(d - low, level) + 1);
+                        // A little under the rail's level at its far end: the land in front (at the rail's level or just
+                        // under it) then meets the arch rising from the corner, at its own height, one clean line; level
+                        // with it the two met wherever the ground's cells stepped (a sawtooth of small holes).
+                        var push = Vector2.Lerp(o * ArchHeight, level * reach - upw * 0.3f, footW);
+                        if (low == railR) { oR = push; footEnd = 1; } else { oL = push; footEnd = -1; }
+                        foot = low + push;
+                    }
+                }
+                pts.Add(railL + oL);
+                pts.Add(railR + oR);
                 // The open sky over the deck (see Sky): straight up in the section's plane.
                 // The middle the hull's corners are ordered round: that of the hull without the sky (inside it either way;
                 // the sky's tall column would draw it away from the deck, and corners under a curled lip out of order).
@@ -495,6 +527,16 @@ public static class StitchedTerrain
                 foreach (var (v, t) in hull.Select(v => (v, dir > 0 ? Mod(Ang(v - c) - aR) : Mod(aR - Ang(v - c)))).Where(x => x.Item2 > 1e-3f && x.Item2 < span - 1e-3f).OrderBy(x => x.Item2))
                     if ((v - railR).Length() > 0.05f && (v - railL).Length() > 0.05f) chain.Add(v);
                 chain.Add(railL);
+                // The floor's corner only where it is the hull's corner next to its rail.
+                // The floor's corner only where it is one of the hull's first corners from its rail (the rim's lift may
+                // stand between them).
+                if (footEnd != 0)
+                {
+                    var at = -1;
+                    for (var i = 1; i <= 2 && i + 1 < chain.Count; i++)
+                        if ((chain[footEnd > 0 ? i : chain.Count - 1 - i] - foot).Length() < 0.05f) { at = i; break; }
+                    if (at < 0) footEnd = 0;
+                }
                 // Rounded corners (Chaikin, ends kept).
                 for (var pass = 0; pass < 2 && chain.Count > 2; pass++)
                 {
@@ -517,15 +559,23 @@ public static class StitchedTerrain
                 for (var i = 1; i < chain.Count; i++) len[i] = len[i - 1] + (chain[i] - chain[i - 1]).Length();
                 var total = Math.Max(1e-4f, len[^1]);
                 var j = 0;
+                // The floor's corner is the arch's first point from its rail (not rounded off, however long the arch):
+                // the others share what is left.
+                var footLen = footEnd == 0 ? 0 : MathF.Min((foot - (footEnd > 0 ? railR : railL)).Length(), total * 0.5f);
                 for (var k = 0; k <= ArchN; k++)
                 {
                     var s = total * k / ArchN;
+                    if (footEnd > 0 && k >= 1) s += (footLen + (total - footLen) * (k - 1) / (ArchN - 1) - s) * footW;
+                    if (footEnd < 0 && k <= ArchN - 1) s += ((total - footLen) * k / (ArchN - 1) - s) * footW;
                     while (j + 2 < chain.Count && len[j + 1] < s) j++;
                     var seg = Math.Max(1e-6f, len[j + 1] - len[j]);
                     arch[k] = Vector2.Lerp(chain[j], chain[j + 1], Math.Clamp((s - len[j]) / seg, 0, 1));
                 }
                 arch[0] = railR;
                 arch[ArchN] = railL;
+                if (footEnd > 0) arch[1] = Vector2.Lerp(arch[1], foot, footW);
+                if (footEnd < 0) arch[ArchN - 1] = Vector2.Lerp(arch[ArchN - 1], foot, footW);
+                st.FootEnd = footW >= 0.5f ? footEnd : 0;
             }
             var poly = new Vector2[SectionPoints];
             poly[0] = railL;
@@ -1161,14 +1211,16 @@ public static class StitchedTerrain
                     else if (fb == 0 && ((ub == 0 && road.Exact[0][ib]) || (ub == RailRight && road.Exact[1][ib]))) { t = 1; rail = true; }
                     else
                     {
-                        // Secant steps on the true ground.
+                        // Secant steps on the true ground, every other one a bisection: where the ground steps (the foot of a
+                        // wall's fill, 20 m over the land in front within a cell) the secant's far end stays put and it
+                        // crawls; three such steps left the line metres up the arch, over the land it belongs to.
                         float lo = 0, hi = 1, flo = fa, fhi = fb;
-                        for (var it = 0; it < 3; it++)
+                        for (var it = 0; it < 16 && hi - lo > 1e-3f; it++)
                         {
                             var ft = F(Vector3.Lerp(a, b, t));
                             if (MathF.Abs(ft) < 0.005f) break;
                             if ((ft > 0) == (flo > 0)) { lo = t; flo = ft; } else { hi = t; fhi = ft; }
-                            t = Math.Clamp(lo + (hi - lo) * flo / (flo - fhi), lo, hi);
+                            t = it % 2 == 1 ? (lo + hi) / 2 : Math.Clamp(lo + (hi - lo) * flo / (flo - fhi), lo, hi);
                         }
                     }
                     var p = Vector3.Lerp(a, b, t);
@@ -1585,7 +1637,22 @@ public static class StitchedTerrain
                 var w = ChartWorld(road, mx, my, step, out var station);
                 // Under land, unless that land is cut out by this road's own room here (a section curled over itself);
                 // land cut out by another road over it still covers (earth between the two).
-                if (F(w) <= 0 || InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z), road.Index, mx - 12, mx + 12, only: true)) continue;
+                if (F(w) <= 0) continue;
+                if (InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z), road.Index, mx - 12, mx + 12, only: true))
+                {
+                    // The floor before a sideways opening stays all the same (under a deck leaning over it the ground is
+                    // the land behind the deck's top, cut out; the floor from the low rail to the land in front has earth
+                    // under it): the arch's first piece from the low rail, facing up into the room.
+                    var end = st[station].FootEnd;
+                    if (end == 0 || (end > 0 ? my > 2 * step : my < ylen - 2 * step)) continue;
+                    Vector3 At(int v) => exact.TryGetValue(v, out var e) ? e : ChartWorld(road, (float)cdt.X(v), (float)cdt.Z(v), step, out _);
+                    Vector3 fa = At(a), fb = At(b), fc = At(c);
+                    var fn = Vector3.Cross(fb - fa, fc - fa);
+                    if (fn.LengthSquared() < 1e-10f) continue;
+                    fn = Vector3.Normalize(fn);
+                    if (fn.Y < 0) fn = -fn;
+                    if (fn.Y < 0.7f || Vector3.Dot(fn, st[station].Centre - (fa + fb + fc) / 3) <= 0) continue;
+                }
                 int ia = Vert(a), ib = Vert(b), ic = Vert(c);
                 var pa = result.LiningVertices[ia].Position;
                 var pb = result.LiningVertices[ib].Position;

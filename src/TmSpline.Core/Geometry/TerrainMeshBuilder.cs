@@ -199,6 +199,7 @@ public static class TerrainMeshBuilder
         }
         // The lining (tunnel ceilings under land): rock, facing into the road's room; per chunk its own vertices.
         var liningOf = new Dictionary<(MeshChunk, int), int>();
+        var floorOf = new Dictionary<int, int>();
         if (stitched is { } st && st.LiningIndices.Count > 0)
             for (var t = 0; t + 2 < st.LiningIndices.Count; t += 3)
             {
@@ -219,6 +220,25 @@ public static class TerrainMeshBuilder
                     return chunk.Positions.Count - 1;
                 }
                 var facing = Vector3.Cross(B.Position - A.Position, C.Position - A.Position);
+                // A floor (the room over it, no steeper than the rock angle) is land like that beside it: grass, on the
+                // land's maps.
+                if (facing.LengthSquared() > 1e-12f && Vector3.Normalize(facing).Y >= (rocky ? rockBelow : 0.5f))
+                {
+                    int Fv(int i)
+                    {
+                        if (!floorOf.TryGetValue(i, out var id))
+                        {
+                            var lv = st.LiningVertices[i];
+                            xs.Add(lv.Position.X); ys.Add(lv.Position.Y); zs.Add(lv.Position.Z);
+                            onEdge.Add(false);
+                            normalOf.Add(lv.Normal.Y > 0 ? lv.Normal : Vector3.UnitY);
+                            floorOf[i] = id = xs.Count - 1;
+                        }
+                        return Vertex(chunk, id, false);
+                    }
+                    MeshChunk.AddFacing(chunk, new Triangle(Fv(a), Fv(b), Fv(c), 0), facing);
+                    continue;
+                }
                 MeshChunk.AddFacing(chunk, new Triangle(Lv(a), Lv(b), Lv(c), chunk.MaterialIndex(rock)), facing);
             }
         // Its lightmap: the strip beside the land's, one band per track in the chunk, along by its chart.
