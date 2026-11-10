@@ -61,6 +61,7 @@ static class Check
             var xz = ex.Split(',').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
             Console.WriteLine($"  explain ({xz[0]}, {xz[1]}):\n{dbg3.Explain(xz[0], xz[1])}");
         }
+        if (builder != "old") Console.WriteLine($"  budget: {TerrainMeshBuilder.TriangleBudget(grid, map)} land triangles");
         if (builder != "old" && TerrainMeshBuilder.LastStitched is { } st)
             Console.WriteLine($"  stages: {string.Join(", ", st.Milliseconds.Select(kv => $"{kv.Key} {kv.Value} ms"))}; pins {st.Pins.Count} ({st.Pins.Sum(p => p.Points.Count)} points), land {st.Land.Indices.Count / 3} triangles in {st.Land.Rounds} rounds, lining {st.LiningIndices.Count / 3}, refused {st.Land.RefusedSegments}");
         if (builder != "old" && TerrainMeshBuilder.LastStitched is { } stn) Console.WriteLine($"  notes: {stn.Notes.Count}; {string.Join(" | ", stn.Notes.Take(8))}");

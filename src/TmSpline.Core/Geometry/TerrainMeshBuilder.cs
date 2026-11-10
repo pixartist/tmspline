@@ -19,6 +19,31 @@ public static class TerrainMeshBuilder
     /// </summary>
     public static bool Stitched { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") != "old";
 
+    /// <summary>
+    /// What the map may weigh in all (the game's limit is 5 MB of custom items), and the fewest triangles the land gets even
+    /// when the road leaves less room.
+    /// </summary>
+    private const double MapBudgetBytes = 4_750_000;
+    private const int MinTriangles = 30_000;
+
+    /// <summary>
+    /// The land's triangles that fit beside the road at Normal quality (by the size estimates); 0 (no limit) when budgets
+    /// are switched off with TMSPLINE_TERRAIN_BUDGET=off.
+    /// </summary>
+    public static int TriangleBudget(TerrainGrid grid, TrackMap? map)
+    {
+        if (Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN_BUDGET") == "off") return 0;
+        var road = map is null ? 0 : MeshQualities.EstimateMapBytes(MeshQualities.BuildExport(map, MeshQualities.Default, 64).Meshes);
+        // Items: the chunks the land will cover.
+        var chunks = new HashSet<(int, int)>();
+        for (var r = 0; r < grid.Rows; r++)
+            for (var c = 0; c < grid.Columns; c++)
+                if (!double.IsNaN(grid.Height(c, r)))
+                    chunks.Add(((int)Math.Floor(c * grid.Cell / ChunkSize), (int)Math.Floor(r * grid.Cell / ChunkSize)));
+        var left = MapBudgetBytes - road - chunks.Count * 1_480.0;
+        return Math.Max(MinTriangles, (int)(left / 24.3));
+    }
+
     /// <summary>The last stitched build's details (for the checker).</summary>
     public static StitchedTerrainResult? LastStitched { get; private set; }
 
@@ -29,7 +54,7 @@ public static class TerrainMeshBuilder
         StitchedTerrainResult? stitched = null;
         if (Stitched)
         {
-            stitched = StitchedTerrain.Build(grid, map ?? new TrackMap());
+            stitched = StitchedTerrain.Build(grid, map ?? new TrackMap(), TriangleBudget(grid, map));
             LastStitched = stitched;
             mesh = stitched.Land;
         }

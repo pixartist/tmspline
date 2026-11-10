@@ -127,9 +127,10 @@ public static class StitchedTerrain
 
     private static Vector3 V(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
 
-    public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map) => new Builder(grid, map).Run();
+    /// <param name="maxTriangles">The land's triangle budget (0: none): the mesh gets coarser until it fits.</param>
+    public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
-    private sealed class Builder(TerrainGrid grid, TrackMap map)
+    private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
     {
         private readonly List<Road> roads = [];
         private readonly List<Rail> rails = [];
@@ -182,7 +183,19 @@ public static class StitchedTerrain
                     return !float.IsNaN(gy) && InRoom(new Vector3(p.X, gy - 0.02f, p.Z));
                 },
             };
-            var land = AdaptiveTerrainMesher.Build(field, pins, new MesherSettings(Tolerance: 0.08, MinEdge: 1.5, MaxEdge: 48, PinSpacing: PinPiece + 0.05, MaxRounds: 100, OutlineSpacing: 8));
+            // The budget: coarser (tolerance and shortest edge scaled up) until the land fits, at most five more tries.
+            var scale = 1.0;
+            AdaptiveMesh land;
+            var tries = 0;
+            while (true)
+            {
+                land = AdaptiveTerrainMesher.Build(field, pins, new MesherSettings(Tolerance: 0.08 * scale, MinEdge: 1.5 * Math.Sqrt(scale), MaxEdge: 48, PinSpacing: PinPiece + 0.05, MaxRounds: 100, OutlineSpacing: 8));
+                var count = land.Indices.Count / 3;
+                if (maxTriangles <= 0 || count <= maxTriangles || ++tries > 5) break;
+                // Triangles grow about with 1 / tolerance (error-driven insertion on smooth land).
+                scale *= Math.Clamp(1.15 * count / maxTriangles, 1.2, 4);
+            }
+            times["budget scale x100"] = (long)Math.Round(scale * 100);
             Lap("mesh");
             var result = new StitchedTerrainResult { Field = field, Pins = pins, Land = land, InRoom = p => InRoom(p), Explain = Explain };
             Lining(liningChains, result);
@@ -1081,6 +1094,9 @@ public static class StitchedTerrain
             return pins;
         }
 
+        /// <summary>Lining pieces smaller than this (square metres) are left out.</summary>
+        private const float MinLiningArea = 6;
+
         /// <summary>Longest piece of a fixed edge, metres.</summary>
         private const float PinPiece = 3;
 
@@ -1359,7 +1375,20 @@ public static class StitchedTerrain
                 var lv = result.LiningVertices[v];
                 result.LiningVertices[v] = lv with { Normal = nrm.LengthSquared() > 0 ? Vector3.Normalize(nrm) : -Vector3.UnitY };
             }
-            foreach (var (a, b, c) in tris) result.LiningIndices.AddRange([a, b, c]);
+            // Small pieces on their own (slivers where the ground just touches the arch, at tube mouths) are left out.
+            var parent = new Dictionary<int, int>();
+            int Find(int v) { while (parent.TryGetValue(v, out var p) && p != v) { var g2 = parent.GetValueOrDefault(p, p); parent[v] = g2; v = p; } return v; }
+            void Union(int a, int b) { int ra = Find(a), rb = Find(b); if (ra != rb) parent[ra] = rb; }
+            foreach (var (a, b, c) in tris) { parent.TryAdd(a, a); parent.TryAdd(b, b); parent.TryAdd(c, c); Union(a, b); Union(b, c); }
+            var area = new Dictionary<int, float>();
+            foreach (var (a, b, c) in tris)
+            {
+                var pa = result.LiningVertices[a].Position;
+                var r = Find(a);
+                area[r] = area.GetValueOrDefault(r) + 0.5f * Vector3.Cross(result.LiningVertices[b].Position - pa, result.LiningVertices[c].Position - pa).Length();
+            }
+            foreach (var (a, b, c) in tris)
+                if (area[Find(a)] >= MinLiningArea) result.LiningIndices.AddRange([a, b, c]);
         }
     }
 }
