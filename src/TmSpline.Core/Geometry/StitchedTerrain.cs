@@ -100,6 +100,8 @@ public static class StitchedTerrain
         public Vector3 C, O, T, N, Opp;
         /// <summary>0 at an open track's end, 1 from 4 m along it: across the road the ground meets the end's line there.</summary>
         public float A, Reach, Inward, Along, EndFade;
+        /// <summary>The station's mean surface normal's Y (how far the driving side faces up).</summary>
+        public float FacesUp;
         public int Road, Station, Side;
     }
 
@@ -726,7 +728,7 @@ public static class StitchedTerrain
                     for (var i = 0; i < n; i++)
                         rails.Add(new Rail
                         {
-                            C = st[i].W[sd == 0 ? 0 : RailRight], Opp = st[i].W[sd == 0 ? RailRight : 0], O = outward[sd, i], T = tangent[i], N = rimNormal[sd, i], A = a[i],
+                            C = st[i].W[sd == 0 ? 0 : RailRight], Opp = st[i].W[sd == 0 ? RailRight : 0], O = outward[sd, i], T = tangent[i], N = rimNormal[sd, i], A = a[i], FacesUp = st[i].MeanNormal.Y,
                             Reach = reach[sd, i], Inward = inward[sd, i], Along = road.Dist[i], EndFade = road.Track.Closed ? 1 : SS(0, 4, MathF.Min(road.Dist[i] - road.Dist[0], road.Dist[^1] - road.Dist[i])), Road = road.Index, Station = i, Side = sd,
                         });
                 }
@@ -1011,8 +1013,10 @@ public static class StitchedTerrain
                     var chord = s.C.Y + (s.Opp.Y - s.C.Y) * t;
                     // A steep section (a wall) is narrow from above: its line would cut through the driving surface.
                     // There the ground in its footprint stands at its top (inside the room), rising from the rail within 1.5 m.
+                    // Not where the driving side faces up (a wide steep bank): the top would stand far over its lower part,
+                    // over the open sky; there the ground stays on the line, under the deck.
                     var high = MathF.Max(s.C.Y, s.Opp.Y);
-                    var steep = SS(1.5f, 4f, MathF.Abs(s.Opp.Y - s.C.Y) / MathF.Max(0.5f, s.Inward)) * SS(0.2f, 1.5f, -h);
+                    var steep = SS(1.5f, 4f, MathF.Abs(s.Opp.Y - s.C.Y) / MathF.Max(0.5f, s.Inward)) * SS(0.2f, 1.5f, -h) * (1 - SS(0.1f, 0.3f, s.FacesUp));
                     y = chord + ((high - chord) * steep + InteriorLift * MathF.Min(SS(0.3f, 2.5f, -h), SS(0.3f, 2.5f, s.Inward + h))) * s.EndFade;
                 }
                 // Across its own road the height only has to stay inside the room: it takes no part in the level preference.
