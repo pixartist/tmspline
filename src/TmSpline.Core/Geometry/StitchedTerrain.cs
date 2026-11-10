@@ -82,7 +82,28 @@ public static class StitchedTerrain
         public float Chord;
         /// <summary>The floor's corner before a sideways opening: the arch's first point from the right rail (1) or the left (-1), 0 none.</summary>
         public int FootEnd;
+        /// <summary>How far (0..1) the land's edge on that side is the floor's corner instead of the rail.</summary>
+        public float FootW;
+
+        /// <summary>
+        /// The point the land holds on a side (0 left, 1 right): the rail, or before a sideways opening the floor's
+        /// corner (the arch's first point from the rail): the land's edge is that line by design, the floor between it
+        /// and the rail is built with the lining. Seen from above a wall's two rails lie on one line at two heights,
+        /// which one height per place cannot meet; the floor's corner lies out in front of both.
+        /// </summary>
+        public Vector3 Held(int sd)
+        {
+            var rail = sd == 0 ? 0 : RailRight;
+            if (!FootSeam || FootW <= 0 || FootEnd == 0 || (FootEnd > 0) != (sd == 1)) return W[rail];
+            return Vector3.Lerp(W[rail], W[sd == 1 ? RailRight + 1 : SectionPoints - 1], FootW);
+        }
+
+        /// <summary>FootW on the side that has the floor's corner, 0 on the other.</summary>
+        public float SeamW(int sd) => FootSeam && FootEnd != 0 && (FootEnd > 0) == (sd == 1) ? FootW : 0;
     }
+
+    /// <summary>Debug: TMSPLINE_FOOTSEAM=off keeps the land's edge at the rail before sideways openings.</summary>
+    private static readonly bool FootSeam = Environment.GetEnvironmentVariable("TMSPLINE_FOOTSEAM") != "off";
 
     private sealed class Road
     {
@@ -102,6 +123,8 @@ public static class StitchedTerrain
         public Vector3 C, O, T, N, Opp;
         /// <summary>0 at an open track's end, 1 from 4 m along it: across the road the ground meets the end's line there.</summary>
         public float A, Reach, Inward, Along, EndFade;
+        /// <summary>How far (plan, metres) the held point lies out from its rail (a floor's corner), 0 at the rail.</summary>
+        public float Floor;
         /// <summary>The station's mean surface normal's Y (how far the driving side faces up).</summary>
         public float FacesUp;
         public int Road, Station, Side;
@@ -493,7 +516,7 @@ public static class StitchedTerrain
                         if (Vector2.Dot(level, o) < 0) level = -level;
                         var low = Vector2.Dot(railR, upw) < Vector2.Dot(railL, upw) ? railR : railL;
                         var reach = ArchHeight;
-                        foreach (var d in deck) reach = MathF.Max(reach, Vector2.Dot(d - low, level) + 1);
+                        foreach (var d in deck) reach = MathF.Max(reach, Vector2.Dot(d - low, level) + 2);
                         // A little under the rail's level at its far end: the land in front (at the rail's level or just
                         // under it) then meets the arch rising from the corner, at its own height, one clean line; level
                         // with it the two met wherever the ground's cells stepped (a sawtooth of small holes).
@@ -575,7 +598,8 @@ public static class StitchedTerrain
                 arch[ArchN] = railL;
                 if (footEnd > 0) arch[1] = Vector2.Lerp(arch[1], foot, footW);
                 if (footEnd < 0) arch[ArchN - 1] = Vector2.Lerp(arch[ArchN - 1], foot, footW);
-                st.FootEnd = footW >= 0.5f ? footEnd : 0;
+                st.FootEnd = footEnd;
+                st.FootW = footEnd != 0 ? footW : 0;
             }
             var poly = new Vector2[SectionPoints];
             poly[0] = railL;
@@ -682,8 +706,8 @@ public static class StitchedTerrain
                     tangent[i] = ul > 0.15f ? tp / ul : lastT;
                     lastT = tangent[i];
                     var slope = MathF.Abs(s.T.Y) / MathF.Max(0.01f, ul);
-                    var cl = s.W[0];
-                    var cr = s.W[RailRight];
+                    var cl = s.Held(0);
+                    var cr = s.Held(1);
                     // The section's open side faces up enough (its mean normal), not upside down.
                     var nb = s.MeanNormal;
                     var nh = new Vector3(nb.X, 0, nb.Z);
@@ -694,7 +718,7 @@ public static class StitchedTerrain
                     {
                         var side = sd == 0 ? -1 : 1;
                         var c = sd == 0 ? cl : cr;
-                        var opp = sd == 0 ? cr : cl;
+                        var opp = s.W[sd == 0 ? RailRight : 0]; // (the other rail itself: its side of the road ends there, not at a floor's corner)
                         var o = u * side * sgn;
                         outward[sd, i] = o;
                         var q = RoadMeshBuilder.SurfaceSample(s.R, side * s.R.Width / 2);
@@ -720,7 +744,7 @@ public static class StitchedTerrain
                     for (var sd = 0; sd < 2; sd++)
                         if (score[sd, i] > 0)
                         {
-                            var c = st[i].W[sd == 0 ? 0 : RailRight];
+                            var c = st[i].Held(sd);
                             if (InRoom(c + Vector3.UnitY * 0.05f, road.Index, road.Dist[i] - 12, road.Dist[i] + 12)) score[sd, i] = -1;
                         }
                 road.A = [new float[n], new float[n]];
@@ -778,7 +802,7 @@ public static class StitchedTerrain
                     for (var i = 0; i < n; i++)
                         rails.Add(new Rail
                         {
-                            C = st[i].W[sd == 0 ? 0 : RailRight], Opp = st[i].W[sd == 0 ? RailRight : 0], O = outward[sd, i], T = tangent[i], N = rimNormal[sd, i], A = a[i], FacesUp = st[i].MeanNormal.Y,
+                            C = st[i].Held(sd), Opp = st[i].W[sd == 0 ? RailRight : 0], Floor = MathF.Max(0, Vector3.Dot(st[i].W[sd == 0 ? 0 : RailRight] - st[i].Held(sd), -outward[sd, i])), O = outward[sd, i], T = tangent[i], N = rimNormal[sd, i], A = a[i], FacesUp = st[i].MeanNormal.Y,
                             Reach = reach[sd, i], Inward = inward[sd, i], Along = road.Dist[i], EndFade = road.Track.Closed ? 1 : SS(0, 4, MathF.Min(road.Dist[i] - road.Dist[0], road.Dist[^1] - road.Dist[i])), Road = road.Index, Station = i, Side = sd,
                         });
                 }
@@ -1059,15 +1083,25 @@ public static class StitchedTerrain
                 }
                 else
                 {
-                    var t = s.Inward > 0.01f ? Math.Clamp(-h / s.Inward, 0, 1) : 0;
+                    // Over the floor between a floor's corner and its rail: just over the floor (inside the room, cut; the
+                    // floor itself is lining), level, so the ground has no step at the corner's line. The road's own
+                    // rules start at the rail.
+                    var inward = s.Inward - s.Floor;
+                    var past = -h - s.Floor;
+                    if (past <= 0)
+                    {
+                        hits.Add((i, d2, side, K, 0, s.C.Y + 0.5f * SS(0, 0.5f, -h)));
+                        continue;
+                    }
+                    var t = inward > 0.01f ? Math.Clamp(past / inward, 0, 1) : 0;
                     var chord = s.C.Y + (s.Opp.Y - s.C.Y) * t;
                     // A steep section (a wall) is narrow from above: its line would cut through the driving surface.
                     // There the ground in its footprint stands at its top (inside the room), rising from the rail within 1.5 m.
                     // Not where the driving side faces up (a wide steep bank): the top would stand far over its lower part,
                     // over the open sky; there the ground stays on the line, under the deck.
                     var high = MathF.Max(s.C.Y, s.Opp.Y);
-                    var steep = SS(1.5f, 4f, MathF.Abs(s.Opp.Y - s.C.Y) / MathF.Max(0.5f, s.Inward)) * SS(0.2f, 1.5f, -h) * (1 - SS(0.1f, 0.3f, s.FacesUp));
-                    y = chord + ((high - chord) * steep + InteriorLift * MathF.Min(SS(0.3f, 2.5f, -h), SS(0.3f, 2.5f, s.Inward + h))) * s.EndFade;
+                    var steep = SS(1.5f, 4f, MathF.Abs(s.Opp.Y - s.C.Y) / MathF.Max(0.5f, inward)) * SS(0.2f, 1.5f, past) * (1 - SS(0.1f, 0.3f, s.FacesUp));
+                    y = chord + ((high - chord) * steep + InteriorLift * MathF.Min(SS(0.3f, 2.5f, past), SS(0.3f, 2.5f, inward - past))) * s.EndFade;
                 }
                 // Across its own road the height only has to stay inside the room: it takes no part in the level preference.
                 if (h < 0) kn = 0;
@@ -1185,13 +1219,25 @@ public static class StitchedTerrain
                 for (var i = 0; i < n; i++)
                     for (var sd = 0; sd < 2; sd++)
                     {
-                        var c = st[i].W[sd == 0 ? 0 : RailRight];
+                        var c = st[i].Held(sd);
                         road.Exact[sd][i] = road.A[sd][i] >= 0.98f && MathF.Abs(GAt(c.X, c.Z) - c.Y) < Won;
                     }
                 var f = new float[n, U];
                 for (var i = 0; i < n; i++)
+                {
                     for (var u = 0; u < U; u++)
                         f[i, u] = (u == 0 && road.Exact[0][i]) || (u == RailRight && road.Exact[1][i]) ? 0 : F(st[i].W[u]);
+                    // The floor's corner as the land's line: the rail under the ground (the floor is lining), the corner
+                    // on it; between the two the line is where the held point is.
+                    for (var sd = 0; sd < 2; sd++)
+                    {
+                        var w = st[i].SeamW(sd);
+                        if (w <= 0 || !road.Exact[sd][i]) continue;
+                        int rail = sd == 0 ? 0 : RailRight, next = sd == 0 ? U - 1 : RailRight + 1;
+                        f[i, rail] = w;
+                        if (w >= 1) f[i, next] = 0; else if (f[i, next] < 0) f[i, next] = -(1 - w);
+                    }
+                }
                 road.F = f;
 
                 // Marching squares on the chart (along x round), round cyclic.
@@ -1207,7 +1253,9 @@ public static class StitchedTerrain
                     float fa = f[ia, ua], fb = f[ib, ub];
                     var t = fa / (fa - fb);
                     var rail = false;
-                    if (fa == 0 && ((ua == 0 && road.Exact[0][ia]) || (ua == RailRight && road.Exact[1][ia]))) { t = 0; rail = true; }
+                    // The designed line between a rail and the floor's corner: where the held point is, not searched for.
+                    if (type == 1 && ((ua == RailRight && road.Exact[1][ia] && st[ia].SeamW(1) > 0) || (ua == U - 1 && road.Exact[0][ia] && st[ia].SeamW(0) > 0))) rail = true;
+                    else if (fa == 0 && ((ua == 0 && road.Exact[0][ia]) || (ua == RailRight && road.Exact[1][ia]))) { t = 0; rail = true; }
                     else if (fb == 0 && ((ub == 0 && road.Exact[0][ib]) || (ub == RailRight && road.Exact[1][ib]))) { t = 1; rail = true; }
                     else
                     {
@@ -1637,8 +1685,13 @@ public static class StitchedTerrain
                 var w = ChartWorld(road, mx, my, step, out var station);
                 // Under land, unless that land is cut out by this road's own room here (a section curled over itself);
                 // land cut out by another road over it still covers (earth between the two).
-                if (F(w) <= 0) continue;
-                if (InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z), road.Index, mx - 12, mx + 12, only: true))
+                // The floor between a rail and the floor's corner the land holds: always (it is the land's strip there).
+                var seamSide = st[station].FootEnd > 0 ? 1 : 0;
+                var seamW = st[station].SeamW(seamSide);
+                var onFloor = seamW > 0 && road.Exact[seamSide][station] && (seamSide == 1 ? my < seamW * step : my > ylen - seamW * step);
+                if (onFloor) { }
+                else if (F(w) <= 0) continue;
+                else if (InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z), road.Index, mx - 12, mx + 12, only: true))
                 {
                     // The floor before a sideways opening stays all the same (under a deck leaning over it the ground is
                     // the land behind the deck's top, cut out; the floor from the low rail to the land in front has earth
