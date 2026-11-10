@@ -13,17 +13,37 @@ public static class TerrainMeshBuilder
     /// <summary>Size of a chunk (one item), metres.</summary>
     private const double ChunkSize = 128;
 
+    /// <summary>
+    /// The builder: StitchedTerrain (one land surface, rooms cut out, lining under covered road), or with the environment
+    /// variable TMSPLINE_TERRAIN=old the earlier AdaptiveTerrainBuilder.
+    /// </summary>
+    public static bool Stitched { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") != "old";
+
+    /// <summary>The last stitched build's details (for the checker).</summary>
+    public static StitchedTerrainResult? LastStitched { get; private set; }
+
     public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain")
     {
         if (grid.Columns < 2 || grid.Rows < 2) return [];
-        var (field, pins) = AdaptiveTerrainBuilder.Fields(grid, map ?? new TrackMap());
-        var mesh = AdaptiveTerrainMesher.Build(field, pins);
+        AdaptiveMesh mesh;
+        StitchedTerrainResult? stitched = null;
+        if (Stitched)
+        {
+            stitched = StitchedTerrain.Build(grid, map ?? new TrackMap());
+            LastStitched = stitched;
+            mesh = stitched.Land;
+        }
+        else
+        {
+            var (field, pins) = AdaptiveTerrainBuilder.Fields(grid, map ?? new TrackMap());
+            mesh = AdaptiveTerrainMesher.Build(field, pins);
+        }
         var xs = mesh.Positions.Select(p => (double)p.X).ToList();
         var ys = mesh.Positions.Select(p => (double)p.Y).ToList();
         var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
         var triangles = new List<(int A, int B, int C)>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
-        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix);
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, stitched);
     }
 
     /// <summary>
@@ -31,7 +51,7 @@ public static class TerrainMeshBuilder
     /// grass and rock (cut along the rock angle), lightmap UVs, skirts under the outer edge, square chunks.
     /// </summary>
     internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
-        List<(int A, int B, int C)> triangles, string namePrefix)
+        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null)
     {
         // Normals: the triangles' round each point, by area.
         var normals = new Vector3[xs.Count];
@@ -152,6 +172,48 @@ public static class TerrainMeshBuilder
                 MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, sm), outward);
             }
         }
+        // The lining (tunnel ceilings under land): rock, facing into the road's room; per chunk its own vertices.
+        var liningOf = new Dictionary<(MeshChunk, int), int>();
+        if (stitched is { } st && st.LiningIndices.Count > 0)
+            for (var t = 0; t + 2 < st.LiningIndices.Count; t += 3)
+            {
+                int a = st.LiningIndices[t], b = st.LiningIndices[t + 1], c = st.LiningIndices[t + 2];
+                LiningVertex A = st.LiningVertices[a], B = st.LiningVertices[b], C = st.LiningVertices[c];
+                var mid = (A.Position + B.Position + C.Position) / 3;
+                var chunk = ChunkAt(mid.X, mid.Z);
+                int Lv(int i)
+                {
+                    if (liningOf.TryGetValue((chunk, i), out var v)) return v;
+                    var lv = st.LiningVertices[i];
+                    var o = chunk.ItemOffset;
+                    chunk.Positions.Add(new Vector3((float)(lv.Position.X - o.X), (float)(lv.Position.Y - o.Y), (float)(lv.Position.Z - o.Z)));
+                    chunk.Normals.Add(lv.Normal);
+                    chunk.Uv0.Add(default);
+                    chunk.Uv1.Add(default);
+                    liningOf[(chunk, i)] = chunk.Positions.Count - 1;
+                    return chunk.Positions.Count - 1;
+                }
+                var facing = Vector3.Cross(B.Position - A.Position, C.Position - A.Position);
+                MeshChunk.AddFacing(chunk, new Triangle(Lv(a), Lv(b), Lv(c), chunk.MaterialIndex(rock)), facing);
+            }
+        // Its lightmap: the strip beside the land's, one band per track in the chunk, along by its chart.
+        foreach (var group in liningOf.GroupBy(kv => kv.Key.Item1))
+        {
+            var chunk = group.Key;
+            var byRoad = group.GroupBy(kv => stitched!.LiningVertices[kv.Key.Item2].Road).ToList();
+            for (var k = 0; k < byRoad.Count; k++)
+            {
+                var charts = byRoad[k].Select(kv => (kv.Value, stitched!.LiningVertices[kv.Key.Item2].Chart)).ToList();
+                float xa = charts.Min(c => c.Chart.X), xb = charts.Max(c => c.Chart.X), ya = charts.Min(c => c.Chart.Y), yb = charts.Max(c => c.Chart.Y);
+                float v0 = 0.02f + 0.96f * k / byRoad.Count, v1 = 0.02f + 0.96f * (k + 1) / byRoad.Count;
+                foreach (var (v, chart) in charts)
+                {
+                    var light = new Vector2(0.8f + 0.18f * (chart.Y - ya) / Math.Max(1e-3f, yb - ya), v0 + (v1 - v0) * (chart.X - xa) / Math.Max(1e-3f, xb - xa));
+                    chunk.Uv1[v] = light;
+                    chunk.Uv0[v] = light;
+                }
+            }
+        }
         // Lightmap: the land over most of the map of its chunk, the skirts in the strip beside it. By the chunk's real extent,
         // which is more than its square (a triangle belongs to the chunk of its middle): clamped to the square, pieces beyond
         // it fell flat, and a chunk whose rock was only such pieces was refused by the importer.
@@ -170,6 +232,10 @@ public static class TerrainMeshBuilder
             foreach (var surface in chunk.Triangles.GroupBy(t => t.Material))
                 EnsureLightmapArea(chunk, surface.Key, surface.ToList());
         }
+        var withLand = vertexOf.Keys.Select(k => k.Item1).ToHashSet();
+        foreach (var chunk in liningOf.Keys.Select(k => k.Item1).Distinct().Where(c => !withLand.Contains(c)))
+            foreach (var surface in chunk.Triangles.GroupBy(t => t.Material))
+                EnsureLightmapArea(chunk, surface.Key, surface.ToList());
         return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
     }
 

@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using TmSpline.Core.Model;
 
 namespace TmSpline.Core.Geometry;
@@ -15,6 +15,12 @@ public sealed record TerrainField(double X0, double Z0, double Cell, int Columns
     /// cells' Cut decides (at cell size: a thin triangle beside a pinned edge can fall in a cut cell).
     /// </summary>
     public Func<double, double, bool>? CutAt { get; init; }
+
+    /// <summary>
+    /// The exact cut by the mesh's own height: a finished triangle whose middle (x, y, z) this says is cut is left out. Without
+    /// it IsCut decides at the middle's plan position.
+    /// </summary>
+    public Func<double, double, double, bool>? CutAtHeight { get; init; }
 
     public bool IsCut(double x, double z)
     {
@@ -121,6 +127,9 @@ public static class AdaptiveTerrainMesher
             }
         }
 
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var timing = Environment.GetEnvironmentVariable("MESHER_TIMING") is not null;
+        if (timing) Console.WriteLine($"    mesher pins {clock.ElapsedMilliseconds} ms, {cdt.Count} points");
         // 2. A coarse start over the land, and the field's outline.
         var seed = Math.Max(1, (int)Math.Round(s.MaxEdge / field.Cell));
         for (var r = 0; r < field.Rows; r += seed)
@@ -215,6 +224,7 @@ public static class AdaptiveTerrainMesher
             if (cdt.Count == before) break;
         }
 
+        if (timing) Console.WriteLine($"    mesher refined {clock.ElapsedMilliseconds} ms");
         // 4. The mesh: land triangles only.
         var index = new Dictionary<int, int>();
         foreach (var (a, b, c, _) in cdt.Triangles())
@@ -222,7 +232,8 @@ public static class AdaptiveTerrainMesher
             if (double.IsNaN(heights[a]) || double.IsNaN(heights[b]) || double.IsNaN(heights[c])) continue;
             double ox = (cdt.X(a) + cdt.X(b) + cdt.X(c)) / 3, oz = (cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3;
             var mid = field.CellAt(ox, oz);
-            if (mid < 0 || field.IsCut(ox, oz) || float.IsNaN(field.Heights[mid])) continue;
+            if (mid < 0 || float.IsNaN(field.Heights[mid])) continue;
+            if (field.CutAtHeight is { } cutAt ? cutAt(ox, (heights[a] + heights[b] + heights[c]) / 3, oz) : field.IsCut(ox, oz)) continue;
             foreach (var v in new[] { a, b, c })
             {
                 if (!index.TryGetValue(v, out var i))

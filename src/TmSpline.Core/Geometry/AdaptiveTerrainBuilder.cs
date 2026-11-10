@@ -602,7 +602,7 @@ public static class AdaptiveTerrainBuilder
     }
 
     /// <summary>The editor grid's height at (x, z), bilinear between its vertices; NaN where a vertex round it has none.</summary>
-    private static double SampleGrid(TerrainGrid grid, double x, double z)
+    internal static double SampleGrid(TerrainGrid grid, double x, double z)
     {
         var fx = (x - grid.X0) / grid.Cell;
         var fz = (z - grid.Z0) / grid.Cell;
