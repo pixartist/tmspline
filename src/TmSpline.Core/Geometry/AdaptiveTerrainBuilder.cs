@@ -40,7 +40,7 @@ public static class AdaptiveTerrainBuilder
     /// Off a pinned edge the land first runs on in the driving surface's direction (at most AlignSlope steep, so it stays
     /// grass), fading into its natural shape over AlignDistance metres.
     /// </summary>
-    private const double AlignSlope = 0.7, AlignDistance = 8;
+    private const double AlignSlope = 0.7, AlignDistance = 20;
     /// <summary>Land more than this below a cut road (its edges' line) is under it, not at it: it is not cut, metres.</summary>
     private const double CutDepth = 4;
     /// <summary>Within this many metres of a pinned edge a cut stretch is always cut.</summary>
@@ -299,7 +299,7 @@ public static class AdaptiveTerrainBuilder
                     // over the top. It leaves the edges over the shell: no alignment with the surface.
                     var open = (l - r).Length >= SlotClosed;
                     var reach = Math.Max(OwnSection, rings[i].Width * 2);
-                    edges[i] = (l, r, open, open, new EdgeTilt(0, right * -1, rings[i].Distance, reach), new EdgeTilt(0, right, rings[i].Distance, reach));
+                    edges[i] = (l, r, open, open, new EdgeTilt(double.NaN, right * -1, rings[i].Distance, reach), new EdgeTilt(double.NaN, right, rings[i].Distance, reach));
                     continue;
                 }
                 var holds = Holds(rings[i]);
@@ -411,7 +411,7 @@ public static class AdaptiveTerrainBuilder
                     var i = CellAt(a.X + (b.X - a.X) * t, a.Z + (b.Z - a.Z) * t);
                     if (i < 0) continue;
                     pinY[i] = (float)(a.Y + (b.Y - a.Y) * t);
-                    if (tilts is null) { pinSlope[i] = 0; pinRoad[i] = -1; continue; }
+                    if (tilts is null) { pinSlope[i] = float.NaN; pinRoad[i] = -1; continue; }
                     pinRoad[i] = pinRoads[p];
                     pinAlong[i] = (float)(tilts[k].Along + (tilts[k + 1].Along - tilts[k].Along) * t);
                     pinOwnReach[i] = (float)tilts[k].OwnReach;
@@ -439,12 +439,13 @@ public static class AdaptiveTerrainBuilder
         for (var i = 0; i < n; i++)
         {
             var j = nearest[i];
-            if (j < 0 || pinSlope[j] == 0) continue;
+            if (j < 0 || float.IsNaN(pinSlope[j]) || float.IsNaN(land[i])) continue;
             var d = distance[i] * Cell;
             if (d >= AlignDistance) continue;
             if ((i % columns - j % columns) * pinOutX[j] + (i / columns - j / columns) * pinOutZ[j] <= 0) continue;
+            // Blends from the line off the edge to the land's own height (smootherstep: no change of curvature where it starts or ends).
             var w = d / AlignDistance;
-            align[i] = (float)(pinSlope[j] * d * (1 - w * w * (3 - 2 * w)));
+            align[i] = (float)((pinY[j] + pinSlope[j] * d - land[i] - delta[i]) * (1 - w * w * w * (w * (6 * w - 15) + 10)));
         }
         align = Blur(align, columns, rows, (int)Math.Round(1 / Cell));
         // Under a cut stretch far over the land (a bridge pinned at its edges): the land stays, it is not at the road. Measured
@@ -547,8 +548,8 @@ public static class AdaptiveTerrainBuilder
         return (new TerrainField(x0, z0, Cell, columns, rows, heights, fidelity, cut) { CutAt = CutAt }, pins);
     }
 
-    /// <summary>Holds land: upright and not climbing or diving steeper than about 33 degrees (as TerrainMeshBuilder).</summary>
-    private static bool Holds(Ring ring) => ring.Up.Y >= 0.5 && Math.Abs(ring.Tangent.Normalized().Y) <= 0.55;
+    /// <summary>Holds land: banked less than about 84 degrees and not climbing or diving steeper than about 33 degrees (ownTerrain.ts decides the same).</summary>
+    private static bool Holds(Ring ring) => ring.Up.Y >= 0.1 && Math.Abs(ring.Tangent.Normalized().Y) <= 0.55;
 
     private static (int, int, int) Cube(Vec3d p) => ((int)Math.Floor(p.X / 2), (int)Math.Floor(p.Y / 2), (int)Math.Floor(p.Z / 2));
 

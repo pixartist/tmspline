@@ -56,7 +56,7 @@ const LAYER_GAP = 4;
 /** Near a road the land rises at most this steeply over it (1: 45 degrees), so it ramps up under a bridge, no wall. */
 const MAX_RISE = 1;
 /** Road facing up less than this (the normal's y) or climbing steeper than MAX_PITCH (sine) holds no land (walls, loops). */
-const UPRIGHT = 0.5;
+const UPRIGHT = 0.1;
 const MAX_PITCH = 0.55;
 /** On walls and upside-down road: how far off the driving surface a car needs room, metres. */
 const DRIVE_ROOM = 4;

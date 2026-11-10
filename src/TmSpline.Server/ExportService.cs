@@ -39,7 +39,8 @@ public sealed class ExportRequestDto
 }
 
 /// <summary>Size estimate of one export quality (see MeshQualities.EstimateMapBytes).</summary>
-public sealed record ExportEstimateDto(MeshQuality Quality, int Items, int Triangles, long Bytes, long MinBytes, long MaxBytes);
+/// <param name="TerrainBytes">The part of the sizes that is the own terrain: the same at every quality.</param>
+public sealed record ExportEstimateDto(MeshQuality Quality, int Items, int Triangles, long Bytes, long MinBytes, long MaxBytes, long TerrainBytes);
 
 public sealed class ExportRejectedException(string message) : Exception(message);
 public sealed class ServerBusyException() : Exception("The export queue is full, please try again in a minute.");
@@ -82,12 +83,15 @@ public sealed partial class ExportService
     public List<ExportEstimateDto> Estimate(ExportRequestDto request)
     {
         var (map, _) = Validate(request);
+        // The terrain does not depend on the quality: built once, and only the road's share of the size is uncertain by quality.
+        var land = map.Terrain is { } grid ? TerrainMeshBuilder.Build(grid, map) : new List<MeshChunk>();
+        var terrainBytes = MeshQualities.EstimateTerrainBytes(land);
         return Enum.GetValues<MeshQuality>().AsParallel().AsOrdered().Select(q =>
         {
             var (_, meshes) = MeshQualities.BuildExport(map, q, 64);
-            var bytes = MeshQualities.EstimateMapBytes(meshes);
-            return new ExportEstimateDto(q, meshes.Count, meshes.Sum(m => m.Triangles.Count), bytes,
-                (long)(bytes * MeshQualities.EstimateLow), (long)(bytes * MeshQualities.EstimateHigh));
+            var road = MeshQualities.EstimateMapBytes(meshes);
+            return new ExportEstimateDto(q, meshes.Count + land.Count, meshes.Sum(m => m.Triangles.Count) + land.Sum(m => m.Triangles.Count), road + terrainBytes,
+                (long)(road * MeshQualities.EstimateLow) + terrainBytes, (long)(road * MeshQualities.EstimateHigh) + terrainBytes, terrainBytes);
         }).ToList();
     }
 

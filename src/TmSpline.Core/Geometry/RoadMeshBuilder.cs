@@ -291,11 +291,13 @@ public static class RoadMeshBuilder
         var (e, t, n) = CurbFrame(ring, arc, edge);
         var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
         (double X, double Y) contact = (e.X + t.X * side * bt + n.X * bh, e.Y + t.Y * side * bt + n.Y * bh);
-        if (segment.Borders && n.Y < 0)
+        // The curb's up in the world: a banked road's high side passes upright before its bend alone would.
+        var worldUp = ring.Right.Y * n.X + ring.Up.Y * n.Y;
+        if (segment.Borders && worldUp < 0)
         {
             // Along the outer face, so the line has no step where the curb passes upright.
             var (_, other) = CurbBottom(ring, arc, edge, side, bt, s.Thickness);
-            var k = Math.Clamp(-n.Y / CurbTurnOver, 0, 1);
+            var k = Math.Clamp(-worldUp / CurbTurnOver, 0, 1);
             contact = (contact.X + (other.X - contact.X) * k, contact.Y + (other.Y - contact.Y) * k);
         }
         return ring.Position + ring.Right * contact.X + ring.Up * contact.Y;

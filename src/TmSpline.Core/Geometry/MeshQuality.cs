@@ -55,11 +55,11 @@ public static class MeshQualities
     /// </summary>
     public static long EstimateMapBytes(IEnumerable<MeshChunk> meshes)
     {
-        const double template = 12_500, perItem = 1_480, road = 17.6, custom = 4.75, other = 12.4;
+        const double template = 12_500, road = 17.6, custom = 4.75, other = 12.4;
         var bytes = template;
         foreach (var m in meshes)
         {
-            bytes += perItem;
+            bytes += EstimatePerItem;
             foreach (var t in m.Triangles)
             {
                 var link = m.Materials[t.Material].Link;
@@ -71,6 +71,14 @@ public static class MeshQualities
     }
 
     public const double EstimateLow = 0.78, EstimateHigh = 1.32;
+    private const double EstimatePerItem = 1_480;
+
+    /// <summary>
+    /// What the own terrain adds to a map, in bytes, fitted to maps exported with and without it (23.5 to 24.8 bytes per
+    /// triangle). The terrain is built the same at every quality, so this is the same for all of them.
+    /// </summary>
+    public static long EstimateTerrainBytes(IEnumerable<MeshChunk> land) =>
+        (long)land.Sum(m => EstimatePerItem + 24.3 * m.Triangles.Count);
 
     /// <summary>
     /// The exported meshes (road chunks, gates, pillars) of all tracks of a map at a quality, as <c>TrackExporter</c>

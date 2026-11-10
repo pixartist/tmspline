@@ -207,7 +207,7 @@ static class MapMode
                             top[k] = Math.Max(top.GetValueOrDefault(k, float.NegativeInfinity), p.Y);
                         }
                 }
-            bool Holds(Ring r) => r.Up.Y >= 0.5 && Math.Abs(r.Tangent.Normalized().Y) <= 0.55;
+            bool Holds(Ring r) => r.Up.Y >= 0.1 && Math.Abs(r.Tangent.Normalized().Y) <= 0.55;
             for (var i = 0; i + 1 < rings.Count; i++)
             {
                 if (!Holds(rings[i]) || !Holds(rings[i + 1])) continue;

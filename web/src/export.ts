@@ -3,10 +3,10 @@ import type { TrackMap } from "./track";
 const AUTHOR_KEY = "tmspline.author";
 const QUALITY_KEY = "tmspline.exportQuality";
 /**
- * Per track name: measured map size divided by the estimate, and the quality of that export (see
- * MeshQualities.EstimateMapBytes).
+ * Per track name: the road's measured share of the map size (the size less the estimated terrain) divided by its estimate,
+ * and the quality of that export (see MeshQualities.EstimateMapBytes).
  */
-const CALIBRATION_KEY = "tmspline.sizeCalibration";
+const CALIBRATION_KEY = "tmspline.sizeCalibration2";
 /** The game's limit for custom items embedded in a map. */
 const MAP_LIMIT_BYTES = 5_000_000;
 
@@ -44,6 +44,8 @@ interface Estimate {
   bytes: number;
   minBytes: number;
   maxBytes: number;
+  /** The own terrain's part of the sizes: the same at every quality. */
+  terrainBytes: number;
 }
 
 /** Shows the export dialog, sends the track to the server and downloads the resulting map. */
@@ -107,18 +109,20 @@ export function showExportDialog(track: TrackMap): void {
     const factor = measured?.factor;
     for (const e of estimates) {
       const el = dialog.querySelector<HTMLElement>(`.size[data-quality="${e.quality}"]`)!;
-      // After a real export of this track the estimates are scaled by how far off that one was. That is close for the
-      // same quality; for others less so, since finer meshes compress a little better.
+      // After a real export of this track the road's part is scaled by how far off that one was; the terrain stays, it is the
+      // same at every quality. That is close for the same quality; for others less so, since finer meshes compress a little better.
       const spread = measured?.quality === e.quality ? 0.05 : 0.2;
-      const [low, high] = factor ? [e.bytes * factor * (1 - spread), e.bytes * factor * (1 + spread)] : [e.minBytes, e.maxBytes];
-      const mid = factor ? e.bytes * factor : e.bytes;
+      const road = (e.bytes - e.terrainBytes) * (factor ?? 1);
+      const [low, high] = factor ? [road * (1 - spread) + e.terrainBytes, road * (1 + spread) + e.terrainBytes] : [e.minBytes, e.maxBytes];
+      const mid = road + e.terrainBytes;
       el.textContent = `≈ ${mb(mid)} (${mb(low)}–${mb(high)}) · ${(e.triangles / 1000).toFixed(0)}k triangles`;
       el.classList.toggle("over", low > MAP_LIMIT_BYTES);
       el.classList.toggle("near", low <= MAP_LIMIT_BYTES && high > MAP_LIMIT_BYTES);
     }
-    note.textContent = factor
-      ? "Sizes are scaled by your last export of this track."
-      : "Sizes are estimates: how well the items compress depends on the track. The game allows 5 MB of custom items per map.";
+    const terrain = estimates[0]?.terrainBytes ?? 0;
+    note.textContent = (factor ? "Road sizes are scaled by your last export of this track. " : "Sizes are estimates: how well the items compress depends on the track. ")
+      + (terrain > 0 ? `Each includes about ${mb(terrain)} of terrain, which is the same at every quality. ` : "")
+      + "The game allows 5 MB of custom items per map.";
   };
   void estimate(track).then((list) => {
     estimates = list;
@@ -151,7 +155,8 @@ export function showExportDialog(track: TrackMap): void {
     try {
       const { name, bytes } = await (toGame ? exportToGame : exportMap)(track, author, q);
       const estimated = estimates.find((x) => x.quality === q);
-      if (estimated) setCalibration(track.name, { factor: bytes / estimated.bytes, quality: q });
+      // Kept within reason: with much terrain and little road the road's part is a small difference of large numbers.
+      if (estimated) setCalibration(track.name, { factor: Math.min(2, Math.max(0.5, (bytes - estimated.terrainBytes) / (estimated.bytes - estimated.terrainBytes))), quality: q });
       showEstimates();
       result.textContent = `${toGame ? "Wrote" : "Downloaded"} ${name}: ${mb(bytes)} at ${q} quality`
         + (bytes > MAP_LIMIT_BYTES ? " — over the game's 5 MB limit, try a lower quality." : ` (limit 5 MB).`);
@@ -226,14 +231,11 @@ interface Calibration {
 }
 
 function calibration(name: string): Calibration | undefined {
-  const all = JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}") as Record<string, Calibration | number>;
-  const c = all[name];
-  // Saved by an earlier version of this dialog: a bare factor (of an unknown quality).
-  return typeof c === "number" ? { factor: c, quality: "Normal" } : c;
+  return (JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}") as Record<string, Calibration>)[name];
 }
 
 function setCalibration(name: string, calibration: Calibration): void {
-  const all = JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}") as Record<string, Calibration | number>;
+  const all = JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}") as Record<string, Calibration>;
   all[name] = calibration;
   localStorage.setItem(CALIBRATION_KEY, JSON.stringify(all));
 }
