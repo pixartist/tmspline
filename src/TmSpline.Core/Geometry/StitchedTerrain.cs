@@ -356,7 +356,10 @@ public static class StitchedTerrain
 
         private void Sky()
         {
-            const float SkyHeight = 40, SkyEarth = 2.5f, SkyClear = ArchHeight + SkyEarth, FacesUp = 0.25f;
+            // FacesUp is low: straight up from a steep deck runs nearly along it, so the room the column adds over the
+            // deck (its height times the normal's Y) fades out by itself towards a wall; fading the height as well left
+            // land 15-25 m over 60-75 degree banks.
+            const float SkyHeight = 40, SkyEarth = 2.5f, SkyClear = ArchHeight + SkyEarth, FacesUp = 0.02f, FadeIn = 0.13f;
             // The height of the nearest deck over p (straight up), infinity if none.
             float Over(Vector3 p)
             {
@@ -379,7 +382,7 @@ public static class StitchedTerrain
                     {
                         // Faded in with how much the surface faces up (no step where it turns past FacesUp).
                         var ny = st.DeckNormal[k].Y;
-                        var face = Math.Clamp((ny - FacesUp) / 0.2f, 0, 1);
+                        var face = Math.Clamp((ny - FacesUp) / FadeIn, 0, 1);
                         if (face <= 0) continue;
                         var over = Over(st.W[1 + k]);
                         if (over < SkyClear) continue;
