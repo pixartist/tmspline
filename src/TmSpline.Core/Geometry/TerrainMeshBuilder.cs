@@ -78,9 +78,41 @@ public static class TerrainMeshBuilder
     internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
         List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null)
     {
+        // The lining's floors (the room over them, no steeper than the rock angle) are land like that beside them: their
+        // points on the land's edge are the land's own (one point, one normal: no crease along the join), the others new.
+        var floorOf = new Dictionary<int, int>();
+        var floors = new List<(int A, int B, int C)>();
+        var floorAt = new HashSet<int>();
+        if (stitched is { } sf && sf.LiningIndices.Count > 0)
+        {
+            static (long, long, long) Key(double x, double y, double z) => ((long)Math.Round(x * 500), (long)Math.Round(y * 500), (long)Math.Round(z * 500));
+            var landAt = new Dictionary<(long, long, long), int>();
+            for (var i = 0; i < xs.Count; i++) landAt[Key(xs[i], ys[i], zs[i])] = i;
+            var floorBelow = grid.RockAngle < 90 ? (float)Math.Cos(grid.RockAngle * Math.PI / 180) : 0.5f;
+            for (var t = 0; t + 2 < sf.LiningIndices.Count; t += 3)
+            {
+                Vector3 pa = sf.LiningVertices[sf.LiningIndices[t]].Position, pb = sf.LiningVertices[sf.LiningIndices[t + 1]].Position, pc = sf.LiningVertices[sf.LiningIndices[t + 2]].Position;
+                var facing = Vector3.Cross(pb - pa, pc - pa);
+                if (facing.LengthSquared() < 1e-12f || Vector3.Normalize(facing).Y < floorBelow) continue;
+                int Fv(int i)
+                {
+                    if (floorOf.TryGetValue(i, out var id)) return id;
+                    var p = sf.LiningVertices[i].Position;
+                    if (!landAt.TryGetValue(Key(p.X, p.Y, p.Z), out id))
+                    {
+                        xs.Add(p.X); ys.Add(p.Y); zs.Add(p.Z);
+                        onEdge.Add(false);
+                        id = xs.Count - 1;
+                    }
+                    return floorOf[i] = id;
+                }
+                floors.Add((Fv(sf.LiningIndices[t]), Fv(sf.LiningIndices[t + 1]), Fv(sf.LiningIndices[t + 2])));
+                floorAt.Add(t);
+            }
+        }
         // Normals: the triangles' round each point, by area.
         var normals = new Vector3[xs.Count];
-        foreach (var (a, b, c) in triangles)
+        foreach (var (a, b, c) in triangles.Concat(floors))
         {
             var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
                 new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
@@ -199,7 +231,6 @@ public static class TerrainMeshBuilder
         }
         // The lining (tunnel ceilings under land): rock, facing into the road's room; per chunk its own vertices.
         var liningOf = new Dictionary<(MeshChunk, int), int>();
-        var floorOf = new Dictionary<int, int>();
         if (stitched is { } st && st.LiningIndices.Count > 0)
             for (var t = 0; t + 2 < st.LiningIndices.Count; t += 3)
             {
@@ -220,23 +251,10 @@ public static class TerrainMeshBuilder
                     return chunk.Positions.Count - 1;
                 }
                 var facing = Vector3.Cross(B.Position - A.Position, C.Position - A.Position);
-                // A floor (the room over it, no steeper than the rock angle) is land like that beside it: grass, on the
-                // land's maps.
-                if (facing.LengthSquared() > 1e-12f && Vector3.Normalize(facing).Y >= (rocky ? rockBelow : 0.5f))
+                // A floor is land like that beside it: grass, on the land's maps and points (see above).
+                if (floorAt.Contains(t))
                 {
-                    int Fv(int i)
-                    {
-                        if (!floorOf.TryGetValue(i, out var id))
-                        {
-                            var lv = st.LiningVertices[i];
-                            xs.Add(lv.Position.X); ys.Add(lv.Position.Y); zs.Add(lv.Position.Z);
-                            onEdge.Add(false);
-                            normalOf.Add(lv.Normal.Y > 0 ? lv.Normal : Vector3.UnitY);
-                            floorOf[i] = id = xs.Count - 1;
-                        }
-                        return Vertex(chunk, id, false);
-                    }
-                    MeshChunk.AddFacing(chunk, new Triangle(Fv(a), Fv(b), Fv(c), 0), facing);
+                    MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, floorOf[a], false), Vertex(chunk, floorOf[b], false), Vertex(chunk, floorOf[c], false), 0), facing);
                     continue;
                 }
                 MeshChunk.AddFacing(chunk, new Triangle(Lv(a), Lv(b), Lv(c), chunk.MaterialIndex(rock)), facing);
