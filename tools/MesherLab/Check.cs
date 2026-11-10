@@ -114,6 +114,7 @@ static class Check
                 }
             }
         Held(map, ringsOf, land);
+        Exposed(land, road);
         var open = Topology(grid, land, road);
         Pictures(map, land, road, Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(mapFile)}_{builder}.png"), builder != "old" ? TerrainMeshBuilder.LastStitched : null, pokes, ringsOf, open);
     }
@@ -132,6 +133,45 @@ static class Check
                 }
         }
         return b;
+    }
+
+    /// <summary>Terrain triangles whose back faces the sky with nothing over them (seen from above, their underside shows:
+    /// a lining with open air behind it, or folded land).</summary>
+    static void Exposed(List<Tri> land, List<Tri> road)
+    {
+        var all = land.Concat(road).ToList();
+        var buckets = Buckets(all, t => (t.A, t.B, t.C), 8);
+        bool Covered(Vector3 o)
+        {
+            if (!buckets.TryGetValue(((int)Math.Floor(o.X / 8), (int)Math.Floor(o.Z / 8)), out var list)) return false;
+            foreach (var i in list)
+            {
+                var t = all[i];
+                var det = (t.B.Z - t.C.Z) * (t.A.X - t.C.X) + (t.C.X - t.B.X) * (t.A.Z - t.C.Z);
+                if (Math.Abs(det) < 1e-9f) continue;
+                var l1 = ((t.B.Z - t.C.Z) * (o.X - t.C.X) + (t.C.X - t.B.X) * (o.Z - t.C.Z)) / det;
+                var l2 = ((t.C.Z - t.A.Z) * (o.X - t.C.X) + (t.A.X - t.C.X) * (o.Z - t.C.Z)) / det;
+                if (l1 < -1e-4f || l2 < -1e-4f || l1 + l2 > 1 + 1e-4f) continue;
+                if (l1 * t.A.Y + l2 * t.B.Y + (1 - l1 - l2) * t.C.Y > o.Y + 0.05f) return true;
+            }
+            return false;
+        }
+        int[] count = [0, 0];
+        float[] area = [0, 0];
+        var where = new Dictionary<(int, int), float>();
+        foreach (var t in land)
+        {
+            var n = Vector3.Cross(t.B - t.A, t.C - t.A);
+            var l = n.Length();
+            if (l < 1e-8f || n.Y / l > -0.3f) continue;
+            var c = (t.A + t.B + t.C) / 3;
+            if (Covered(c)) continue;
+            count[t.Kind]++;
+            area[t.Kind] += l / 2;
+            var k = ((int)Math.Round(c.X / 20) * 20, (int)Math.Round(c.Z / 20) * 20);
+            where[k] = where.GetValueOrDefault(k) + l / 2;
+        }
+        Console.WriteLine($"  exposed undersides: land {count[0]} ({area[0]:F0} m²), rock {count[1]} ({area[1]:F0} m²); worst at {string.Join(" ", where.OrderByDescending(kv => kv.Value).Take(8).Select(kv => $"({kv.Key.Item1},{kv.Key.Item2}):{kv.Value:F0}"))}");
     }
 
     static IEnumerable<Vector3> Samples(Tri t, float step)

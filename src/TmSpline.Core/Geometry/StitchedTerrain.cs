@@ -140,6 +140,15 @@ public static class StitchedTerrain
         private double x0, z0;
         private int cols, rows;
         private float[] nat = [], g = [], fid = [];
+
+        /// <summary>Each cell's distance to the nearest road, metres.</summary>
+        private float[] roadDistance = [];
+
+        /// <summary>The budget coarsens the land up to NearScale within BudgetNear of a road, and fully from BudgetFar on.</summary>
+        private const float BudgetNear = 16, BudgetFar = 48;
+
+        /// <summary>Within BudgetNear of a road the budget coarsens at most this much (none within 2 m).</summary>
+        private const double NearScale = 4;
         private bool[] cut = [];
         private List<int>[] railBuckets = [];
         private int bCols, bRows;
@@ -183,17 +192,29 @@ public static class StitchedTerrain
                     return !float.IsNaN(gy) && InRoom(new Vector3(p.X, gy - 0.02f, p.Z));
                 },
             };
-            // The budget: coarser (tolerance and shortest edge scaled up) until the land fits, at most five more tries.
+            // The budget: the land away from the roads gets coarser (its fidelity divided by the scale) until it fits, at
+            // most five more tries. The land along the roads keeps its detail: that is where it has to meet them, and
+            // coarser there it cuts through the roads and leaves the lining in the open.
             var scale = 1.0;
+            var baseFid = (float[])fid.Clone();
             AdaptiveMesh land;
             var tries = 0;
+            var last = int.MaxValue;
             while (true)
             {
-                land = AdaptiveTerrainMesher.Build(field, pins, new MesherSettings(Tolerance: 0.08 * scale, MinEdge: 1.5 * Math.Sqrt(scale), MaxEdge: 48, PinSpacing: PinPiece + 0.05, MaxRounds: 100, OutlineSpacing: 8));
+                if (scale > 1)
+                    for (var k = 0; k < fid.Length; k++)
+                    {
+                        static double Ramp(double v, double a, double b) { var t = Math.Clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+                        var near = Math.Min(scale, NearScale);
+                        fid[k] = (float)(baseFid[k] / Math.Pow(near, Ramp(roadDistance[k], 2, BudgetNear)) / Math.Pow(scale / near, Ramp(roadDistance[k], BudgetNear, BudgetFar)));
+                    }
+                land = AdaptiveTerrainMesher.Build(field, pins, new MesherSettings(Tolerance: 0.08, MinEdge: 1.5, MaxEdge: 48, PinSpacing: PinPiece + 0.05, MaxRounds: 100, OutlineSpacing: 8));
                 var count = land.Indices.Count / 3;
-                if (maxTriangles <= 0 || count <= maxTriangles || ++tries > 5) break;
-                // Triangles grow about with 1 / tolerance (error-driven insertion on smooth land).
-                scale *= Math.Clamp(1.15 * count / maxTriangles, 1.2, 4);
+                // Stop when it fits, or when coarsening no longer helps (the roads' own edges need the rest).
+                if (maxTriangles <= 0 || count <= maxTriangles || ++tries > 5 || count > 0.95 * last) break;
+                last = count;
+                scale *= Math.Clamp(1.15 * count / maxTriangles, 1.5, 4);
             }
             times["budget scale x100"] = (long)Math.Round(scale * 100);
             Lap("mesh");
@@ -613,7 +634,7 @@ public static class StitchedTerrain
                 if (s.A > 0.5f) seedHeld[k] = true;
             }
             var nearHeld = Chamfer(seedHeld);
-            var nearAny = Chamfer(seedAny);
+            var nearAny = roadDistance = Chamfer(seedAny);
 
             // Beside road that faces sideways, the land on the side it faces stays below the space it faces.
             var bound = new float[n];
@@ -1097,6 +1118,9 @@ public static class StitchedTerrain
         /// <summary>Lining pieces smaller than this (square metres) are left out.</summary>
         private const float MinLiningArea = 6;
 
+        /// <summary>Debug: TMSPLINE_LINING_RAY=off keeps lining the ground field covers even with open air behind it.</summary>
+        private static readonly bool RayTest = Environment.GetEnvironmentVariable("TMSPLINE_LINING_RAY") != "off";
+
         /// <summary>Longest piece of a fixed edge, metres.</summary>
         private const float PinPiece = 3;
 
@@ -1213,6 +1237,44 @@ public static class StitchedTerrain
                 if (float.IsNaN(best) || y > best) best = y;
             }
             return best;
+        }
+
+        /// <summary>Whether a ray from o along d (unit) meets the land mesh within max metres.</summary>
+        private bool LandHit(Vector3 o, Vector3 d, float max)
+        {
+            if (landMesh is null) return false;
+            var p = landMesh.Positions;
+            var ix = landMesh.Indices;
+            var seen = new HashSet<(int, int)>();
+            var flat = MathF.Sqrt(d.X * d.X + d.Z * d.Z);
+            var steps = flat < 1e-4f ? 0 : (int)Math.Ceiling(max * flat / 2);
+            for (var s = 0; s <= steps; s++)
+            {
+                var q = o + d * (steps == 0 ? 0 : max * s / steps);
+                for (var ox = -1; ox <= 1; ox++)
+                    for (var oz = -1; oz <= 1; oz++)
+                    {
+                        var key = ((int)Math.Floor(q.X / Bucket) + ox, (int)Math.Floor(q.Z / Bucket) + oz);
+                        if (!seen.Add(key) || !landBuckets.TryGetValue(key, out var list)) continue;
+                        foreach (var t in list)
+                        {
+                            Vector3 a = p[ix[t]], b = p[ix[t + 1]], c = p[ix[t + 2]];
+                            Vector3 e1 = b - a, e2 = c - a, h = Vector3.Cross(d, e2);
+                            var det = Vector3.Dot(e1, h);
+                            if (MathF.Abs(det) < 1e-9f) continue;
+                            var f = 1 / det;
+                            var sv = o - a;
+                            var u = f * Vector3.Dot(sv, h);
+                            if (u < -1e-4f || u > 1 + 1e-4f) continue;
+                            var qv = Vector3.Cross(sv, e1);
+                            var v = f * Vector3.Dot(d, qv);
+                            if (v < -1e-4f || u + v > 1 + 1e-4f) continue;
+                            var dist = f * Vector3.Dot(e2, qv);
+                            if (dist > -0.05f && dist < max) return true;
+                        }
+                    }
+            }
+            return false;
         }
 
         private void Lining(List<(Road Road, List<CVertex> Chain)> chains, StitchedTerrainResult result)
@@ -1367,6 +1429,12 @@ public static class StitchedTerrain
                 // Facing into the room: towards the section's middle.
                 var into = st[station].Centre - (pa + pb + pc) / 3;
                 if (Vector3.Dot(nrm, into) < 0) { (ib, ic) = (ic, ib); nrm = -nrm; }
+                // Earth behind it: the land mesh as built lies outward of it or above it (a ceiling or wall with open
+                // air behind is the ground field's guess where the coarser land mesh runs lower). Pieces facing up into
+                // the room (the floor side) are never seen from outside.
+                var outward = -Vector3.Normalize(nrm);
+                var mid = (pa + pb + pc) / 3;
+                if (RayTest && outward.Y > -0.5f && !LandHit(mid, outward, 60) && !LandHit(mid, Vector3.UnitY, 200)) continue;
                 foreach (var v in new[] { ia, ib, ic }) normals[v] = normals.GetValueOrDefault(v) + nrm;
                 tris.Add((ia, ib, ic));
             }

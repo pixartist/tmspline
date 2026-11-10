@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using TmSpline.Core.Model;
 
 namespace TmSpline.Core.Geometry;
@@ -171,7 +171,7 @@ public static class AdaptiveTerrainMesher
                 var mid = field.CellAt(mx, mz);
                 if (field.IsCut(mx, mz)) continue;
                 if (double.IsNaN(ay) || double.IsNaN(by) || double.IsNaN(cy) || mid < 0 || float.IsNaN(field.Heights[mid])) continue;
-                var fid = mid >= 0 ? Math.Max(0.02, field.Fidelity[mid]) : 0.02;
+                var fid = mid >= 0 ? Math.Max(0.002, field.Fidelity[mid]) : 0.02;
                 // Size.
                 var longest = Math.Sqrt(Math.Max((ax - bx) * (ax - bx) + (az - bz) * (az - bz),
                     Math.Max((bx - cx) * (bx - cx) + (bz - cz) * (bz - cz), (cx - ax) * (cx - ax) + (cz - az) * (cz - az))));
@@ -199,7 +199,7 @@ public static class AdaptiveTerrainMesher
                             var l2 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / det;
                             var l3 = 1 - l1 - l2;
                             if (l1 < 0 || l2 < 0 || l3 < 0) continue;
-                            var err = Math.Abs(l1 * ay + l2 * by + l3 * cy - h) / (s.Tolerance / Math.Max(0.02, field.Fidelity[k]));
+                            var err = Math.Abs(l1 * ay + l2 * by + l3 * cy - h) / (s.Tolerance / Math.Max(0.002, field.Fidelity[k]));
                             if (err > worst) worst = err;
                             if (err > best.Score) best = (err, px, pz, h);
                         }
