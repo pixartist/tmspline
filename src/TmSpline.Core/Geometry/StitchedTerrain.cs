@@ -20,6 +20,8 @@ public sealed class StitchedTerrainResult
     /// <summary>For the checker: how the ground at (x, z) came about.</summary>
     public required Func<float, float, string> Explain { get; init; }
     public Dictionary<string, long> Milliseconds { get; } = [];
+    /// <summary>For the checker: things worth knowing about this build.</summary>
+    public List<string> Notes { get; } = [];
     /// <summary>Per track and side the share of its stations whose edge the land holds (0..1).</summary>
     public List<(int Track, float Left, float Right)> Attached { get; } = [];
     /// <summary>For the checker: per station its track, distance, room section (world), ground minus section per point, held (left, right).</summary>
@@ -94,7 +96,8 @@ public static class StitchedTerrain
     {
         /// <summary>The rail, outward (plan), along (plan), the surface's normal at the rim, the other rail of its station.</summary>
         public Vector3 C, O, T, N, Opp;
-        public float A, Reach, Inward, Along;
+        /// <summary>0 at an open track's end, 1 from 4 m along it: across the road the ground meets the end's line there.</summary>
+        public float A, Reach, Inward, Along, EndFade;
         public int Road, Station, Side;
     }
 
@@ -362,13 +365,15 @@ public static class StitchedTerrain
         }
 
         /// <summary>Inside any road's room (not counting the stations of `exceptRoad` from `from` to `to` metres along it).</summary>
-        public bool InRoom(Vector3 p, int exceptRoad = -1, float from = 0, float to = 0)
+        public bool InRoom(Vector3 p, int exceptRoad = -1, float from = 0, float to = 0, bool only = false)
         {
             if (!prismBuckets.TryGetValue(((int)Math.Floor(p.X / Bucket), (int)Math.Floor(p.Z / Bucket)), out var list)) return false;
             foreach (var id in list)
             {
                 var iv = prisms[id];
-                if (iv.Road == exceptRoad && iv.A.R.Distance >= from && iv.A.R.Distance <= to) continue;
+                var inRange = iv.Road == exceptRoad && iv.A.R.Distance >= from && iv.A.R.Distance <= to;
+                // Not those stations, or (only) just those.
+                if (inRange != only) continue;
                 var t0 = Vector3.Dot(p - iv.A.P, iv.A.T);
                 var t1 = Vector3.Dot(p - iv.B.P, iv.B.T);
                 var f = t0 - t1;
@@ -549,7 +554,7 @@ public static class StitchedTerrain
                         rails.Add(new Rail
                         {
                             C = st[i].W[sd == 0 ? 0 : RailRight], Opp = st[i].W[sd == 0 ? RailRight : 0], O = outward[sd, i], T = tangent[i], N = rimNormal[sd, i], A = a[i],
-                            Reach = reach[sd, i], Inward = inward[sd, i], Along = road.Dist[i], Road = road.Index, Station = i, Side = sd,
+                            Reach = reach[sd, i], Inward = inward[sd, i], Along = road.Dist[i], EndFade = road.Track.Closed ? 1 : SS(0, 4, MathF.Min(road.Dist[i] - road.Dist[0], road.Dist[^1] - road.Dist[i])), Road = road.Index, Station = i, Side = sd,
                         });
                 }
             }
@@ -815,7 +820,7 @@ public static class StitchedTerrain
                     // There the ground in its footprint stands at its top (inside the room), rising from the rail within 1.5 m.
                     var high = MathF.Max(s.C.Y, s.Opp.Y);
                     var steep = SS(1.5f, 4f, MathF.Abs(s.Opp.Y - s.C.Y) / MathF.Max(0.5f, s.Inward)) * SS(0.2f, 1.5f, -h);
-                    y = chord + (high - chord) * steep + InteriorLift * MathF.Min(SS(0.3f, 2.5f, -h), SS(0.3f, 2.5f, s.Inward + h));
+                    y = chord + ((high - chord) * steep + InteriorLift * MathF.Min(SS(0.3f, 2.5f, -h), SS(0.3f, 2.5f, s.Inward + h))) * s.EndFade;
                 }
                 // Across its own road the height only has to stay inside the room: it takes no part in the level preference.
                 if (h < 0) kn = 0;
@@ -1057,6 +1062,21 @@ public static class StitchedTerrain
                     }
                     Flush();
                 }
+                // An open track's end where land holds both rails: the land meets the end's cross-section (rail, the
+                // driving surface's edge, rail), flush with the surface for a car leaving it.
+                if (!road.Track.Closed)
+                    foreach (var i in new[] { 0, n - 1 })
+                    {
+                        if (!road.Exact[0][i] || !road.Exact[1][i]) continue;
+                        var line = new List<Vec3d>();
+                        for (var u = 0; u <= RailRight; u++)
+                        {
+                            var p = st[i].W[u];
+                            if (u > 0 && u < RailRight && u % 2 == 0 && u != DeckN + 1) continue;
+                            line.Add(new Vec3d(p.X, p.Y, p.Z));
+                        }
+                        pins.Add(new TerrainPin(line));
+                    }
             }
             return pins;
         }
@@ -1153,8 +1173,45 @@ public static class StitchedTerrain
 
         // ---------------------------------------------------------------- 5. Lining
 
+        /// <summary>The finished land mesh's triangles in 8 m plan buckets (the lining stays under it).</summary>
+        private Dictionary<(int, int), List<int>> landBuckets = [];
+        private AdaptiveMesh? landMesh;
+
+        /// <summary>The land mesh's height at (x, z) (the highest triangle there), NaN where it has none.</summary>
+        private float LandAt(float x, float z)
+        {
+            if (landMesh is null || !landBuckets.TryGetValue(((int)Math.Floor(x / Bucket), (int)Math.Floor(z / Bucket)), out var list)) return float.NaN;
+            var best = float.NaN;
+            var p = landMesh.Positions;
+            var ix = landMesh.Indices;
+            foreach (var t in list)
+            {
+                Vector3 a = p[ix[t]], b = p[ix[t + 1]], c = p[ix[t + 2]];
+                var det = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
+                if (MathF.Abs(det) < 1e-9f) continue;
+                var l1 = ((b.Z - c.Z) * (x - c.X) + (c.X - b.X) * (z - c.Z)) / det;
+                var l2 = ((c.Z - a.Z) * (x - c.X) + (a.X - c.X) * (z - c.Z)) / det;
+                var l3 = 1 - l1 - l2;
+                if (l1 < -1e-4f || l2 < -1e-4f || l3 < -1e-4f) continue;
+                var y = l1 * a.Y + l2 * b.Y + l3 * c.Y;
+                if (float.IsNaN(best) || y > best) best = y;
+            }
+            return best;
+        }
+
         private void Lining(List<(Road Road, List<CVertex> Chain)> chains, StitchedTerrainResult result)
         {
+            landMesh = result.Land;
+            for (var t = 0; t + 2 < landMesh.Indices.Count; t += 3)
+            {
+                Vector3 a = landMesh.Positions[landMesh.Indices[t]], b = landMesh.Positions[landMesh.Indices[t + 1]], c = landMesh.Positions[landMesh.Indices[t + 2]];
+                for (var bx = (int)Math.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X)) / Bucket); bx <= (int)Math.Floor(MathF.Max(a.X, MathF.Max(b.X, c.X)) / Bucket); bx++)
+                    for (var bz = (int)Math.Floor(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) / Bucket); bz <= (int)Math.Floor(MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) / Bucket); bz++)
+                    {
+                        if (!landBuckets.TryGetValue((bx, bz), out var l)) landBuckets[(bx, bz)] = l = [];
+                        l.Add(t);
+                    }
+            }
             foreach (var road in roads)
             {
                 var mine = chains.Where(c => c.Road == road).Select(c => c.Chain).ToList();
@@ -1258,7 +1315,19 @@ public static class StitchedTerrain
                 if (index.TryGetValue(v, out var id)) return id;
                 var x = (float)cdt.X(v);
                 var y = (float)cdt.Z(v);
-                var w = exact.TryGetValue(v, out var e) ? e : ChartWorld(road, x, y, step, out _);
+                Vector3 w;
+                if (exact.TryGetValue(v, out var e)) w = e;
+                else
+                {
+                    // Inside the lining: under the land mesh as built (its triangles are coarser than the ground).
+                    w = ChartWorld(road, x, y, step, out _);
+                    var top = LandAt(w.X, w.Z);
+                    if (!float.IsNaN(top) && w.Y > top - 0.15f)
+                    {
+                        if (w.Y - (top - 0.15f) > 1) result.Notes.Add($"lining clamp {w.Y - (top - 0.15f):F1} m at track {road.Index} {x:F0} m, round {y:F1}: ({w.X:F1}, {w.Y:F1}, {w.Z:F1})");
+                        w.Y = top - 0.15f;
+                    }
+                }
                 result.LiningVertices.Add(new LiningVertex(w, Vector3.Zero, road.Index, new Vector2(x, y)));
                 index[v] = result.LiningVertices.Count - 1;
                 return index[v];
@@ -1270,8 +1339,9 @@ public static class StitchedTerrain
                 var my = (float)(cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3;
                 if (my <= 0 || my >= ylen || mx < xa || mx > xb) continue;
                 var w = ChartWorld(road, mx, my, step, out var station);
-                // Under land that is there (not land cut out by this or another room).
-                if (F(w) <= 0 || InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z))) continue;
+                // Under land, unless that land is cut out by this road's own room here (a section curled over itself);
+                // land cut out by another road over it still covers (earth between the two).
+                if (F(w) <= 0 || InRoom(new Vector3(w.X, GAt(w.X, w.Z) - 0.02f, w.Z), road.Index, mx - 12, mx + 12, only: true)) continue;
                 int ia = Vert(a), ib = Vert(b), ic = Vert(c);
                 var pa = result.LiningVertices[ia].Position;
                 var pb = result.LiningVertices[ib].Position;

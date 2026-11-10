@@ -50,6 +50,9 @@ static class Check
             var s = dbg.Stations.Where(x => x.Track == int.Parse(parts[0])).MinBy(x => Math.Abs(x.Along - float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture)));
             Console.WriteLine($"  station t{s.Track} at {s.Along:F1}: held {s.HeldLeft:F2}/{s.HeldRight:F2}");
             for (var i = 0; i < s.Section.Length; i++) Console.WriteLine($"    {i}: ({s.Section[i].X:F2}, {s.Section[i].Y:F2}, {s.Section[i].Z:F2}) f {s.F[i]:F2}");
+            var deckMid = s.Section[13];
+            foreach (var up in new[] { 0.1f, 0.5f, 1f, 2f, 3f })
+                Console.WriteLine($"  in room {up} m over the deck's middle: {dbg.InRoom(deckMid + Vector3.UnitY * up)}");
             foreach (var u in new[] { 0, 26 })
                 Console.WriteLine($"  explain rail {u} at ({s.Section[u].X:F2}, {s.Section[u].Y:F2}, {s.Section[u].Z:F2}):\n{dbg.Explain(s.Section[u].X, s.Section[u].Z)}");
         }
@@ -60,6 +63,7 @@ static class Check
         }
         if (builder != "old" && TerrainMeshBuilder.LastStitched is { } st)
             Console.WriteLine($"  stages: {string.Join(", ", st.Milliseconds.Select(kv => $"{kv.Key} {kv.Value} ms"))}; pins {st.Pins.Count} ({st.Pins.Sum(p => p.Points.Count)} points), land {st.Land.Indices.Count / 3} triangles in {st.Land.Rounds} rounds, lining {st.LiningIndices.Count / 3}, refused {st.Land.RefusedSegments}");
+        if (builder != "old" && TerrainMeshBuilder.LastStitched is { } stn) Console.WriteLine($"  notes: {stn.Notes.Count}; {string.Join(" | ", stn.Notes.Take(8))}");
 
         // The road as exported at Normal quality, world space.
         var road = new List<Tri>();
@@ -109,8 +113,8 @@ static class Check
                 }
             }
         Held(map, ringsOf, land);
-        Topology(grid, land, road);
-        Pictures(map, land, road, Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(mapFile)}_{builder}.png"), builder != "old" ? TerrainMeshBuilder.LastStitched : null, pokes, ringsOf);
+        var open = Topology(grid, land, road);
+        Pictures(map, land, road, Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(mapFile)}_{builder}.png"), builder != "old" ? TerrainMeshBuilder.LastStitched : null, pokes, ringsOf, open);
     }
 
     static Dictionary<(int, int), List<int>> Buckets<T>(IReadOnlyList<T> items, Func<T, (Vector3, Vector3, Vector3)> tri, float size)
@@ -226,7 +230,7 @@ static class Check
         Console.WriteLine($"  held edges (left/right): {string.Join(", ", parts)}");
     }
 
-    static void Topology(TerrainGrid grid, List<Tri> land, List<Tri> road)
+    static List<Vector3> Topology(TerrainGrid grid, List<Tri> land, List<Tri> road)
     {
         var ids = new Dictionary<(long, long, long), int>();
         var pos = new List<Vector3>();
@@ -274,6 +278,7 @@ static class Check
         int nonManifold = use.Values.Count(v => v > 2), boundary = 0, open = 0;
         var openLength = 0f;
         var examples = new List<string>();
+        var openAt = new List<Vector3>();
         foreach (var ((a, b), count) in use)
         {
             if (count != 1) continue;
@@ -282,14 +287,16 @@ static class Check
             if (AtRoad(m) || AtOutline(m)) continue;
             open++;
             openLength += (pos[a] - pos[b]).Length();
+            openAt.Add(m);
             if (examples.Count < 6) examples.Add($"({m.X:F0}, {m.Y:F0}, {m.Z:F0})");
         }
         Console.WriteLine($"  mesh: {nonManifold} non-manifold edges; {boundary} boundary edges, {open} open (not at a road or the outline, {openLength:F0} m) e.g. {string.Join(" ", examples)}");
+        return openAt.GroupBy(p => ((int)Math.Floor(p.X / 30), (int)Math.Floor(p.Z / 30))).OrderByDescending(g => g.Count()).Take(6).Select(g => g.First()).ToList();
     }
 
     // ------------------------------------------------------------------ pictures
 
-    static void Pictures(TrackMap map, List<Tri> land, List<Tri> road, string file, StitchedTerrainResult? st, List<(Vector3 P, int Track, float Along)> pokes, List<List<Ring>> ringsOf)
+    static void Pictures(TrackMap map, List<Tri> land, List<Tri> road, string file, StitchedTerrainResult? st, List<(Vector3 P, int Track, float Along)> pokes, List<List<Ring>> ringsOf, List<Vector3> open)
     {
         var all = land.Concat(road).ToList();
         var buckets = Buckets(all, t => (t.A, t.B, t.C), 16);
@@ -298,6 +305,13 @@ static class Check
         for (var ti = 0; ti < map.Tracks.Count; ti++)
         {
             var pts = map.Tracks[ti].Points;
+            if (pts.Count == 54 && ti == 0)
+            {
+                var p0 = pts[0].Position;
+                var p1 = pts[1].Position;
+                var d0 = new Vector3((float)(p1.X - p0.X), 0, (float)(p1.Z - p0.Z));
+                cells.Add(($"t{ti} start", new Vector3((float)p0.X, (float)p0.Y, (float)p0.Z) + Vector3.Normalize(d0) * 4, Vector3.Normalize(d0), 18));
+            }
             if (pts.Count == 54)
                 for (var c = 0; c < 9; c++)
                 {
@@ -320,6 +334,7 @@ static class Check
             var dir = new Vector3((float)r.Tangent.X, 0, (float)r.Tangent.Z);
             cells.Add(($"poke t{track} {along:F0}", p, dir.LengthSquared() > 1e-6f ? Vector3.Normalize(dir) : Vector3.UnitX, 14));
         }
+        foreach (var p in open) cells.Add(($"open ({p.X:F0}, {p.Y:F0}, {p.Z:F0})", p, Vector3.UnitX, 14));
         const int TW = 320, VH = 220, SH = 120, Per = 9;
         var rowsOut = (cells.Count + Per - 1) / Per;
         using var sheet = new SKBitmap(TW * Math.Min(Per, cells.Count), rowsOut * (VH + SH));
