@@ -44,6 +44,21 @@ static class Check
         }
         var bytes = MeshQualities.EstimateTerrainBytes(chunks);
         Console.WriteLine($"[{builder}] {Path.GetFileName(mapFile)}: build {buildMs} ms, {chunks.Count} chunks, {land.Count} triangles ({land.Count(t => t.Kind == 1)} rock), estimated {bytes / 1e6:F2} MB");
+        if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_FIND") is { } findAt && TerrainMeshBuilder.LastStitched is { } dbf)
+        {
+            // The stations nearest a point, then every 4 m along that track round it: held scores and the rails' gap.
+            var v = findAt.Split(',').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            var p = new Vector3(v[0], v[1], v[2]);
+            var best = dbf.Stations.MinBy(x => Vector3.Distance(x.Section[13], p));
+            Console.WriteLine($"  nearest station: t{best.Track} at {best.Along:F1}");
+            var last = float.MinValue;
+            foreach (var s in dbf.Stations.Where(x => x.Track == best.Track && Math.Abs(x.Along - best.Along) < 120).OrderBy(x => x.Along))
+            {
+                if (s.Along - last < 4) continue;
+                last = s.Along;
+                Console.WriteLine($"    {s.Along:F1}: held {s.HeldLeft:F2}/{s.HeldRight:F2} gap {Vector3.Distance(s.Section[0], s.Section[26]):F2} rails y {s.Section[0].Y:F1}/{s.Section[26].Y:F1} deck y {s.Section[13].Y:F1}");
+            }
+        }
         if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_STATION") is { } at && TerrainMeshBuilder.LastStitched is { } dbg)
         {
             var parts = at.Split(':');

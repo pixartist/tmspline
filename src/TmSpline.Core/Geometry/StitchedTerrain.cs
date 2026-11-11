@@ -481,6 +481,13 @@ public static class StitchedTerrain
             var railL = TuckIn(Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, -1))));
             var railR = TuckIn(Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, 1))));
             st.Chord = (railR - railL).Length();
+            // A pipe's opening faces from its middle to its slot: the mean of its normals is no direction once the slot is
+            // narrow (they cancel out, and it pointed down as often as up).
+            if (Math.Abs(r.Curve) > Math.PI)
+            {
+                var open = (railL + railR) / 2 - mid;
+                if (open.LengthSquared() > 0.25f) nb = Vector2.Normalize(open);
+            }
 
             // The arch: the hull of the deck's offset, the rails and the rails lifted, from the right rail round the opening to the left.
             List<Vector2> chain;
@@ -489,7 +496,7 @@ public static class StitchedTerrain
             var foot = Vector2.Zero;
             var footEnd = 0;
             var footW = 0f;
-            if (st.Chord < 3f) chain = [railR, railL];
+            if (st.Chord < SlotMin) chain = [railR, railL];
             else
             {
                 var pts = new List<Vector2>(offset) { railL, railR, railL + nb * RimLift, railR + nb * RimLift };
@@ -694,6 +701,15 @@ public static class StitchedTerrain
                 var outward = new Vector3[2, n];
                 var tangent = new Vector3[n];
                 var rimNormal = new Vector3[2, n];
+                // The widest slot within SlotAhead along a curled road: its land holds on until the pipe closes, and lets
+                // go over the closed pipe behind that (not along the open stretch, baring the pipe's back there).
+                var slot = new float[n];
+                for (int i = 0, lo = 0, hi = 0; i < n; i++)
+                {
+                    while (road.Dist[i] - road.Dist[lo] > SlotAhead) lo++;
+                    while (hi + 1 < n && road.Dist[hi + 1] - road.Dist[i] <= SlotAhead) hi++;
+                    for (var j = lo; j <= hi; j++) slot[i] = MathF.Max(slot[i], st[j].Chord);
+                }
                 var lastU = Vector3.UnitX;
                 var lastT = Vector3.UnitX;
                 for (var i = 0; i < n; i++)
@@ -730,7 +746,7 @@ public static class StitchedTerrain
                         var mFace = (nb.Y + 0.3f) / 0.3f;
                         var mFall = (12 - fall) / 4;
                         var mSlope = (1.0f - slope) / 0.3f;
-                        var mSlot = Math.Abs(s.R.Curve) > Math.PI ? (s.Chord - 4.5f) / 1.5f : 1;
+                        var mSlot = Math.Abs(s.R.Curve) > Math.PI ? (slot[i] - SlotMin) / 0.5f : 1;
                         var mOver = (Vector3.Dot(c - opp, o) + 2.5f) / 2f;
                         score[sd, i] = Math.Clamp(MathF.Min(mFace, MathF.Min(mFall, MathF.Min(mSlope, MathF.Min(mSlot, mOver)))), -1, 1);
                         var rise = MathF.Abs(c.Y - no);
@@ -944,8 +960,11 @@ public static class StitchedTerrain
                         if (!curled) continue;
                         // The back's own surface, BackClear behind the driving surface (clear of the road's slab, on
                         // the flanks sideways too).
-                        Vector3 a0 = a[u] - na[u - 1] * BackClear, a1 = a[u + 1] - na[u] * BackClear;
-                        Vector3 b0 = b[u] - nb[u - 1] * BackClear, b1 = b[u + 1] - nb[u] * BackClear;
+                        // Less of it towards the rails (RailClear at them, just over the slab): the land meets them there, and
+                        // BackClear over them it stood as a wall along the slot.
+                        float Clear(Vector3[] w, int k) => RailClear + (BackClear - RailClear) * SS(0.5f, 3.5f, MathF.Min(Vector3.Distance(w[k], w[0]), Vector3.Distance(w[k], w[RailRight])));
+                        Vector3 a0 = a[u] - na[u - 1] * Clear(a, u), a1 = a[u + 1] - na[u] * Clear(a, u + 1);
+                        Vector3 b0 = b[u] - nb[u - 1] * Clear(b, u), b1 = b[u + 1] - nb[u] * Clear(b, u + 1);
                         Lift(a0, a1, b1, hold, side, road.Index, i, true);
                         Lift(a0, b1, b0, hold, side, road.Index, i, true);
                     }
@@ -1392,7 +1411,11 @@ public static class StitchedTerrain
 
         /// <summary>Debug: TMSPLINE_CURL=off leaves the land under a curled section's back (no lift over it).</summary>
         /// <summary>How far behind a curled section's driving surface the land over its back lies (the slab is 0.5 m).</summary>
-        private const float BackClear = 1.8f;
+        private const float BackClear = 1.8f, RailClear = 0.6f;
+        /// <summary>How far past a pipe's closing its land still holds on (metres along the road).</summary>
+        private const float SlotAhead = 20f;
+        /// <summary>A pipe's slot narrower than this is closed: no room over it, and its land lets go.</summary>
+        private const float SlotMin = 0.3f;
         private static readonly bool CurlLift = Environment.GetEnvironmentVariable("TMSPLINE_CURL") != "off";
 
         /// <summary>Longest piece of a fixed edge, metres.</summary>
