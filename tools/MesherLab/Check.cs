@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using SkiaSharp;
 using TmSpline.Core.Geometry;
@@ -57,6 +57,32 @@ static class Check
                 if (s.Along - last < 4) continue;
                 last = s.Along;
                 Console.WriteLine($"    {s.Along:F1}: held {s.HeldLeft:F2}/{s.HeldRight:F2} gap {Vector3.Distance(s.Section[0], s.Section[26]):F2} rails y {s.Section[0].Y:F1}/{s.Section[26].Y:F1} deck y {s.Section[13].Y:F1}");
+            }
+        }
+        if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_BOX") is { } boxAt && TerrainMeshBuilder.LastStitched is { } dbb)
+        {
+            // The pins, land and lining inside a plan box x0,x1,z0,z1 (pins in order, with their index along the pin).
+            var v = boxAt.Split(',').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            bool In(double x, double z) => x >= v[0] && x <= v[1] && z >= v[2] && z <= v[3];
+            var pn = 0;
+            foreach (var pin in dbb.Pins)
+            {
+                var inside = pin.Points.Select((q, i) => (q, i)).Where(t => In(t.q.X, t.q.Z)).ToList();
+                if (inside.Count > 0) Console.WriteLine($"  box pin {pn} ({pin.Points.Count} points): {string.Join(" ", inside.Select(t => $"{t.i}:({t.q.X:F1},{t.q.Y:F1},{t.q.Z:F1})"))}");
+                pn++;
+            }
+            var bl = dbb.Land;
+            for (var i = 0; i < bl.Indices.Count; i += 3)
+            {
+                Vector3 a = bl.Positions[bl.Indices[i]], b = bl.Positions[bl.Indices[i + 1]], c = bl.Positions[bl.Indices[i + 2]];
+                var mid = (a + b + c) / 3;
+                if (In(mid.X, mid.Z)) Console.WriteLine($"  box land ({a.X:F1},{a.Y:F1},{a.Z:F1}) ({b.X:F1},{b.Y:F1},{b.Z:F1}) ({c.X:F1},{c.Y:F1},{c.Z:F1})");
+            }
+            for (var i = 0; i < dbb.LiningIndices.Count; i += 3)
+            {
+                Vector3 a = dbb.LiningVertices[dbb.LiningIndices[i]].Position, b = dbb.LiningVertices[dbb.LiningIndices[i + 1]].Position, c = dbb.LiningVertices[dbb.LiningIndices[i + 2]].Position;
+                var mid = (a + b + c) / 3;
+                if (In(mid.X, mid.Z)) Console.WriteLine($"  box lining ({a.X:F1},{a.Y:F1},{a.Z:F1}) ({b.X:F1},{b.Y:F1},{b.Z:F1}) ({c.X:F1},{c.Y:F1},{c.Z:F1})");
             }
         }
         if (builder != "old" && Environment.GetEnvironmentVariable("CHECK_STATION") is { } at && TerrainMeshBuilder.LastStitched is { } dbg)

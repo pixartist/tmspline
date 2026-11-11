@@ -1142,7 +1142,7 @@ public static class StitchedTerrain
                 Rail ra = rails[a.I], rb = rails[b.I];
                 return ra.Road != rb.Road ? ra.Road.CompareTo(rb.Road) : ra.Along.CompareTo(rb.Along);
             });
-            Span<(int From, int To, double W, double H, double Wk, double Hk, double A)> layers = stackalloc (int, int, double, double, double, double, double)[Math.Min(hits.Count, 64)];
+            Span<(int From, int To, double W, double H, double Wk, double Hk, double A, double Dk)> layers = stackalloc (int, int, double, double, double, double, double, double)[Math.Min(hits.Count, 64)];
             var count = 0;
             for (var j = 0; j < hits.Count; j++)
             {
@@ -1151,7 +1151,7 @@ public static class StitchedTerrain
                 if (count == 0 || (j > 0 && (rails[hits[j - 1].I].Road != s.Road || s.Along - rails[hits[j - 1].I].Along > LayerGap)))
                 {
                     if (count == layers.Length) break;
-                    layers[count++] = (j, j, 0, 0, 0, 0, 0);
+                    layers[count++] = (j, j, 0, 0, 0, 0, 0, double.MaxValue);
                 }
                 ref var l = ref layers[count - 1];
                 var w = s.A * h.Side * h.K / (h.D2 + 0.02f);
@@ -1159,10 +1159,16 @@ public static class StitchedTerrain
                 l.W += w;
                 l.H += w * h.Y;
                 l.A = Math.Max(l.A, s.A * h.Side * h.K);
-                if (h.Kn > 0) { var wk = h.Kn / (h.D2 + 1); l.Wk += wk; l.Hk += wk * h.Y; }
+                if (h.Kn > 0) { var wk = h.Kn / (h.D2 + 1); l.Wk += wk; l.Hk += wk * h.Y; l.Dk = Math.Min(l.Dk, h.D2); }
             }
-            double top = double.MinValue, sum = 0;
-            for (var j = 0; j < count; j++) if (layers[j].Wk > 0) top = Math.Max(top, layers[j].Hk / layers[j].Wk);
+            double top = double.MinValue, sum = 0, topNear = double.MaxValue;
+            for (var j = 0; j < count; j++)
+                if (layers[j].Wk > 0 && layers[j].Hk / layers[j].Wk > top) { top = layers[j].Hk / layers[j].Wk; topNear = Math.Sqrt(layers[j].Dk); }
+            // Over a road far below it (deeper than a tunnel's cover would be) the upper road wins round itself only (its
+            // mound's shoulder): the lower road beside it, further out than that, keeps its own land, and the two blend
+            // between them. (Winning as far as it reaches at all, the upper road's land stood as a wall on the lower
+            // road's rail, leaning over its deck.)
+            var beside = SS(ShoulderFrom, ShoulderTo, (float)Math.Min(topNear, 1e6));
             double yt = double.MinValue;
             if (top > double.MinValue)
             {
@@ -1178,7 +1184,7 @@ public static class StitchedTerrain
                 if (l.W <= 0) continue;
                 var level = l.Wk > 0 ? l.Hk / l.Wk : l.H / l.W;
                 var pen = yt > double.MinValue ? Math.Max(0, (yt - level) / Tau) : 0;
-                var f = Math.Exp(-pen * pen);
+                var f = Math.Max(Math.Exp(-pen * pen), beside * SS(DeepFrom, DeepTo, (float)Math.Min(top - level, 1e6)));
                 W += f * l.W;
                 H += f * l.H;
                 A = Math.Max(A, f * l.A);
@@ -1214,6 +1220,10 @@ public static class StitchedTerrain
 
         /// <summary>Samples of one road further apart along it than this belong to different layers, metres.</summary>
         private const float LayerGap = 40;
+        /// <summary>How far from its rail the upper of two roads wins the land outright, and from where the lower holds its own, metres.</summary>
+        private const float ShoulderFrom = 6, ShoulderTo = 10;
+        /// <summary>How far below the upper road the lower one lies for that, metres (fading in between the two).</summary>
+        private const float DeepFrom = 30, DeepTo = 40;
 
         // ---------------------------------------------------------------- 4. Contours: where the ground meets the rooms
 
