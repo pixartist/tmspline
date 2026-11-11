@@ -939,8 +939,15 @@ public static class StitchedTerrain
                     {
                         // The driving side: the surface's own normal at the quad's corners.
                         var side = na[u - 1] + na[u] + nb[u - 1] + nb[u];
-                        Lift(a[u], a[u + 1], b[u + 1], hold, side, road.Index, i, curled);
-                        Lift(a[u], b[u + 1], b[u], hold, side, road.Index, i, curled);
+                        Lift(a[u], a[u + 1], b[u + 1], hold, side, road.Index, i, false);
+                        Lift(a[u], b[u + 1], b[u], hold, side, road.Index, i, false);
+                        if (!curled) continue;
+                        // The back's own surface, BackClear behind the driving surface (clear of the road's slab, on
+                        // the flanks sideways too).
+                        Vector3 a0 = a[u] - na[u - 1] * BackClear, a1 = a[u + 1] - na[u] * BackClear;
+                        Vector3 b0 = b[u] - nb[u - 1] * BackClear, b1 = b[u + 1] - nb[u] * BackClear;
+                        Lift(a0, a1, b1, hold, side, road.Index, i, true);
+                        Lift(a0, b1, b0, hold, side, road.Index, i, true);
                     }
                 }
 
@@ -971,7 +978,7 @@ public static class StitchedTerrain
         }
 
         /// <summary>Raises the ground at the cells whose middle lies under the triangle (plan) to DeckClear over it, by `hold`.</summary>
-        private void Lift(Vector3 a, Vector3 b, Vector3 c, float hold, Vector3 side, int road, int station, bool curled)
+        private void Lift(Vector3 a, Vector3 b, Vector3 c, float hold, Vector3 side, int road, int station, bool back)
         {
             // Not where it would bury the same stretch of road under it (a deck curled under itself, as a hump's lip).
             const int Stretch = (int)(12 / StationStep);
@@ -981,8 +988,7 @@ public static class StitchedTerrain
             if (nrm.LengthSquared() < 1e-10f) return;
             if (Vector3.Dot(nrm, side) < 0) nrm = -nrm;
             var ny = nrm.Y / nrm.Length();
-            var back = curled && ny < -0.2f;
-            if (ny < 0.2f && !back) return;
+            if (back ? ny > -0.05f : ny < 0.2f) return;
             var det = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
             if (MathF.Abs(det) < 1e-6f) return;
             if (!back)
@@ -1003,7 +1009,7 @@ public static class StitchedTerrain
                     if (l1 < 0 || l2 < 0 || l3 < 0) continue;
                     var k = r * cols + col;
                     if (float.IsNaN(g[k])) continue;
-                    var want = l1 * a.Y + l2 * b.Y + l3 * c.Y + DeckClear;
+                    var want = l1 * a.Y + l2 * b.Y + l3 * c.Y + (back ? 0 : DeckClear);
                     if (want <= g[k]) continue;
                     var buried = false;
                     if (!back)
@@ -1385,6 +1391,8 @@ public static class StitchedTerrain
         private static readonly bool RayTest = Environment.GetEnvironmentVariable("TMSPLINE_LINING_RAY") != "off";
 
         /// <summary>Debug: TMSPLINE_CURL=off leaves the land under a curled section's back (no lift over it).</summary>
+        /// <summary>How far behind a curled section's driving surface the land over its back lies (the slab is 0.5 m).</summary>
+        private const float BackClear = 1.8f;
         private static readonly bool CurlLift = Environment.GetEnvironmentVariable("TMSPLINE_CURL") != "off";
 
         /// <summary>Longest piece of a fixed edge, metres.</summary>
