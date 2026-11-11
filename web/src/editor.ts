@@ -881,7 +881,9 @@ export class Editor {
 
   /** The brush while painting the terrain (left drags paint), or null. */
   terrainPaint: TerrainPaint | null = null;
-  private stroke: { pointerId: number; last: THREE.Vector3 | null; flat: number; x0: number; z0: number; x1: number; z1: number } | null = null;
+  private stroke: { pointerId: number; last: THREE.Vector3 | null; lastTime: number; timer: number; flat: number; x0: number; z0: number; x1: number; z1: number } | null = null;
+  /** A brush held still dabs again this often, milliseconds. */
+  private static readonly HOLD_DAB_MS = 120;
   private brushRing: THREE.LineLoop | null = null;
   /** While painting: the land's grid as a plain mesh, updated with every dab (the real mesh follows after a stroke). */
   private quickTerrain: THREE.Mesh | null = null;
@@ -943,7 +945,12 @@ export class Editor {
     if (!at || !this.map.terrain) return;
     this.onBeforeEdit(structuredClone(this.map));
     this.lastMerge = { time: 0 };
-    this.stroke = { pointerId: e.pointerId, last: null, flat: at.y, x0: at.x, z0: at.z, x1: at.x, z1: at.z };
+    // Held still, the brush keeps painting where it is (moving it dabs by the distance covered, as before).
+    const timer = window.setInterval(() => {
+      const s = this.stroke;
+      if (s?.last && performance.now() - s.lastTime >= Editor.HOLD_DAB_MS) { this.dab(s.last); this.showBrush(s.last); }
+    }, Editor.HOLD_DAB_MS / 2);
+    this.stroke = { pointerId: e.pointerId, last: null, lastTime: 0, timer, flat: at.y, x0: at.x, z0: at.z, x1: at.x, z1: at.z };
     this.orbit.enabled = false;
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     this.setQuickTerrain(true);
@@ -963,6 +970,7 @@ export class Editor {
     const stroke = this.stroke, grid = this.map.terrain;
     if (!stroke) return;
     try { this.renderer.domElement.releasePointerCapture(stroke.pointerId); } catch { /* not captured */ }
+    window.clearInterval(stroke.timer);
     this.stroke = null;
     this.orbit.enabled = true;
     // The trees in the painted area stand on the new land.
@@ -984,6 +992,7 @@ export class Editor {
     const paint = this.terrainPaint, grid = this.map.terrain, stroke = this.stroke;
     if (!paint || !grid || !stroke) return;
     stroke.last = at.clone();
+    stroke.lastTime = performance.now();
     stroke.x0 = Math.min(stroke.x0, at.x); stroke.x1 = Math.max(stroke.x1, at.x);
     stroke.z0 = Math.min(stroke.z0, at.z); stroke.z1 = Math.max(stroke.z1, at.z);
     const { cell, x0, z0, columns, rows } = grid;
