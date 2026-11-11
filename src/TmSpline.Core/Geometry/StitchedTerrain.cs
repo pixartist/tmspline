@@ -1221,7 +1221,7 @@ public static class StitchedTerrain
         /// <summary>Samples of one road further apart along it than this belong to different layers, metres.</summary>
         private const float LayerGap = 40;
         /// <summary>How far from its rail the upper of two roads wins the land outright, and from where the lower holds its own, metres.</summary>
-        private const float ShoulderFrom = 6, ShoulderTo = 10;
+        private const float ShoulderFrom = 2, ShoulderTo = 6;
         /// <summary>How far below the upper road the lower one lies for that, metres (fading in between the two).</summary>
         private const float DeepFrom = 30, DeepTo = 40;
 
