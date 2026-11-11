@@ -1514,6 +1514,14 @@ public static class StitchedTerrain
         }
 
         /// <summary>Whether a ray from o along d (unit) meets the land mesh within max metres.</summary>
+        /// <summary>Whether a deck lies straight over p: another road's, or this road's own far along (another lap).</summary>
+        private bool RoadOver(Vector3 p, int road, int station)
+        {
+            foreach (var (y, rd, s) in DecksAt(p.X, p.Z))
+                if (y > p.Y + 0.3f && (rd != road || MathF.Abs(roads[rd].Dist[s] - roads[rd].Dist[station]) > 40)) return true;
+            return false;
+        }
+
         private bool LandHit(Vector3 o, Vector3 d, float max)
         {
             if (landMesh is null) return false;
@@ -1729,7 +1737,13 @@ public static class StitchedTerrain
                 var outward = -Vector3.Normalize(nrm);
                 var mid = (pa + pb + pc) / 3;
                 // (Up from a little way into the earth: on a vertical wall a ray up its face could pass the land's edge.)
-                if (RayTest && outward.Y > -0.5f && !LandHit(mid, outward, 60) && !LandHit(mid + outward * 0.3f, Vector3.UnitY, 200)) continue;
+                // A road straight over it covers as land does (the land there is cut out by that road's room: a bridge's
+                // or the next lap's deck is the tunnel's cover).
+                if (RayTest && outward.Y > -0.5f && !LandHit(mid, outward, 60) && !LandHit(mid + outward * 0.3f, Vector3.UnitY, 200)
+                    && !RoadOver(mid + outward * 0.3f, road.Index, station)) continue;
+                // Not inside another room (another road's, or this road's far along): where two rooms run into each other
+                // the lining between them is open air.
+                if (RayTest && !onFloor && InRoom(mid, road.Index, mx - 40, mx + 40)) continue;
                 foreach (var v in new[] { ia, ib, ic }) normals[v] = normals.GetValueOrDefault(v) + nrm;
                 tris.Add((ia, ib, ic));
             }
