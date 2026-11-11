@@ -4,11 +4,13 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The own terrain as a solid (prototype, TMSPLINE_TERRAIN=voxel): the editor's land is everything under its height
-/// map, and each road cuts its room (StitchedTerrain's: the space a car needs, the driving surface and an arch over
-/// it) out of it. The surface of what is left is the mesh: open ground, cuttings, tunnels and their mouths all come
-/// from the same subtraction.
+/// The own terrain as a solid (prototype, TMSPLINE_TERRAIN=voxel): a landscape of its own, made as if there were no
+/// road (hills from noise round one level; the editor's height map gives only where there is land, not its heights),
+/// and each road cuts its room (StitchedTerrain's: the space a car needs, the driving surface and an arch over it) out
+/// of it. The surface of what is left is the mesh: open ground, cuttings, tunnels and their mouths all come from the
+/// same subtraction; a road over the land stands free.
 /// <list type="bullet">
+/// <item>Land: Level (the mean height of the tracks' points) plus NoiseHeight times noise of NoiseSize metres per hill.</item>
 /// <item>Field: f(p) = max(p.y - land(x, z), -room(p)), negative in the solid; sampled on a lattice of Voxel metres, per
 /// column only from under the lowest room near it to just over the land.</item>
 /// <item>Mesh: surface nets (one point per lattice cell the surface passes through, at the mean of its edge crossings;
@@ -22,6 +24,35 @@ public static class VoxelTerrain
     public static float Voxel { get; set; } =
         float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VOXEL"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : 1f;
 
+    /// <summary>The hills' height (each way from the level) and size, metres (TMSPLINE_VOXEL_NOISE, TMSPLINE_VOXEL_NOISESIZE).</summary>
+    public static float NoiseHeight { get; set; } = Setting("TMSPLINE_VOXEL_NOISE", 48);
+    public static float NoiseSize { get; set; } = Setting("TMSPLINE_VOXEL_NOISESIZE", 160);
+
+    private static float Setting(string name, float fallback) =>
+        float.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
+
+    /// <summary>Value noise in -1..1, about `size` metres per bump.</summary>
+    private static float Noise(float x, float z, float size)
+    {
+        float fx = x / size, fz = z / size;
+        int ix = (int)MathF.Floor(fx), iz = (int)MathF.Floor(fz);
+        float u = fx - ix, w = fz - iz;
+        u = u * u * u * (u * (6 * u - 15) + 10);
+        w = w * w * w * (w * (6 * w - 15) + 10);
+        static float Hash(int a, int b)
+        {
+            var h = unchecked((uint)(a * 374761393 + b * 668265263));
+            h = (h ^ (h >> 13)) * 1274126177u;
+            return ((h ^ (h >> 16)) & 0xFFFFFF) / (float)0x7FFFFF - 1;
+        }
+        float a = Hash(ix, iz), b = Hash(ix + 1, iz), c = Hash(ix, iz + 1), d = Hash(ix + 1, iz + 1);
+        return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
+    }
+
+    /// <summary>The land's height at a plan point: hills on hills, round `level`.</summary>
+    private static float Land(float x, float z, float level) =>
+        level + NoiseHeight * (0.6f * Noise(x, z, NoiseSize) + 0.28f * Noise(x + 517, z - 211, NoiseSize / 2.3f) + 0.12f * Noise(x - 89, z + 733, NoiseSize / 5.1f));
+
     private sealed class Column
     {
         /// <summary>Lattice index of Values[0]; under it the solid, over the last value air.</summary>
@@ -34,14 +65,17 @@ public static class VoxelTerrain
         var v = Voxel;
         var (room, roomFloor) = StitchedTerrain.Rooms(grid, map);
         int nx = (int)Math.Floor((grid.Columns - 1) * grid.Cell / v) + 1, nz = (int)Math.Floor((grid.Rows - 1) * grid.Cell / v) + 1;
+        var points = map.Tracks.SelectMany(t => t.Points).ToList();
+        var level = points.Count > 0 ? (float)points.Average(p => p.Position.Y) : 0;
         var columns = new Column?[nx * nz];
         Parallel.For(0, nz, iz =>
         {
             for (var ix = 0; ix < nx; ix++)
             {
                 float x = (float)(grid.X0 + ix * v), z = (float)(grid.Z0 + iz * v);
-                var land = (float)AdaptiveTerrainBuilder.SampleGrid(grid, x, z);
-                if (float.IsNaN(land)) continue;
+                // Where the editor has land; its heights (shaped round the roads) are not used.
+                if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, x, z))) continue;
+                var land = Land(x, z, level);
                 var floor = roomFloor(x, z);
                 // Rooms wholly over the land cut nothing out of it.
                 var rooms = floor < land + v;
