@@ -150,7 +150,11 @@ const DRAG_THRESHOLD_PX = 3;
 /** Raise and lower move the land this many metres per dab at strength 1 (at the brush's middle). */
 export const RAISE_PER_STRENGTH = 6;
 
-/** Terrain brushes: raise and lower the land, smooth it, or flatten it to the height where the stroke started. */
+/**
+ * Terrain brushes. Raise and lower work on the land as a solid, where the cursor meets its mesh: on the ground, on a
+ * cutting's side, on a tunnel's wall or roof (the roads still cut through whatever is added). Smooth and flatten (to the
+ * height where the stroke started) work on the land's height map, on open ground.
+ */
 export type TerrainBrush = "raise" | "lower" | "smooth" | "flatten";
 export interface TerrainPaint {
   brush: TerrainBrush;
@@ -158,8 +162,8 @@ export interface TerrainPaint {
   radius: number;
   /** Raise/lower: metres per dab at the middle; smooth/flatten: how far towards the target per dab (0..1). */
   strength: number;
-  /** Raise/lower: along the land's normal under the brush (a slope moves out or in sideways), not straight up and down. */
-  alongNormal?: boolean;
+  /** Raise/lower: the roads do not cut through what is painted (land worked into the road's own space). */
+  uncut?: boolean;
 }
 /** Land lower than the stadium's ground lies this deep (ownTerrain's SUNK). */
 const SUNK_LAND = -2;
@@ -876,9 +880,10 @@ export class Editor {
       for (const m of [this.terrainMesh.material].flat()) m.dispose();
     }
     this.terrainMesh = mesh;
+    this.clearDabMarks();
     if (mesh) this.scene.add(mesh);
     // Built from the painted land: the quick mesh is done, unless a stroke is on (then this one is already behind).
-    if (mesh && this.stroke) mesh.visible = false;
+    if (mesh && this.stroke && !this.sculpting) mesh.visible = false;
     else this.setQuickTerrain(false);
   }
 
@@ -926,6 +931,28 @@ export class Editor {
     return null;
   }
 
+  /** Whether the brush works on the solid (raise, lower) and not on the height map. */
+  private get sculpting(): boolean {
+    return this.terrainPaint?.brush === "raise" || this.terrainPaint?.brush === "lower";
+  }
+
+  /** Where the brush is: on the land's mesh for the solid's brushes (walls and roofs too), else on the height map. */
+  private brushHit(e: PointerEvent): THREE.Vector3 | null {
+    if (!this.sculpting || !this.terrainMesh?.visible) return this.terrainHit(e);
+    const hit = this.rayFrom(e).intersectObject(this.terrainMesh, false)[0];
+    return hit ? hit.point.clone() : null;
+  }
+
+  /** The dabs of the stroke so far, shown until the land's new mesh is there. */
+  private dabMarks: THREE.Group | null = null;
+
+  private clearDabMarks(): void {
+    if (!this.dabMarks) return;
+    this.scene.remove(this.dabMarks);
+    for (const m of this.dabMarks.children as THREE.Mesh[]) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
+    this.dabMarks = null;
+  }
+
   private showBrush(at: THREE.Vector3 | null): void {
     const paint = this.terrainPaint, grid = this.map.terrain;
     if (!this.brushRing) {
@@ -938,7 +965,7 @@ export class Editor {
     for (let k = 0; k < 64; k++) {
       const a = (k / 64) * Math.PI * 2;
       const x = at.x + Math.cos(a) * paint.radius, z = at.z + Math.sin(a) * paint.radius;
-      points.push(x, (terrainHeight(grid, x, z) ?? at.y) + 0.3, z);
+      points.push(x, this.sculpting ? at.y : (terrainHeight(grid, x, z) ?? at.y) + 0.3, z);
     }
     this.brushRing.geometry.dispose();
     this.brushRing.geometry = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
@@ -946,7 +973,7 @@ export class Editor {
   }
 
   private startStroke(e: PointerEvent): void {
-    const at = this.terrainHit(e);
+    const at = this.brushHit(e);
     if (!at || !this.map.terrain) return;
     this.onBeforeEdit(structuredClone(this.map));
     this.lastMerge = { time: 0 };
@@ -958,12 +985,12 @@ export class Editor {
     this.stroke = { pointerId: e.pointerId, last: null, lastTime: 0, timer, flat: at.y, x0: at.x, z0: at.z, x1: at.x, z1: at.z };
     this.orbit.enabled = false;
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
-    this.setQuickTerrain(true);
+    if (!this.sculpting) this.setQuickTerrain(true);
     this.dab(at);
   }
 
   private continueStroke(e: PointerEvent): void {
-    const at = this.terrainHit(e);
+    const at = this.brushHit(e);
     this.showBrush(at);
     const stroke = this.stroke, paint = this.terrainPaint;
     if (!at || !stroke || !paint) return;
@@ -980,7 +1007,7 @@ export class Editor {
     this.orbit.enabled = true;
     // The trees in the painted area stand on the new land.
     const r = (this.terrainPaint?.radius ?? 0) + 1;
-    if (grid)
+    if (grid && !this.sculpting)
       for (const item of this.map.items ?? []) {
         const [x, , z] = item.position;
         if (!item.scenery || x < stroke.x0 - r || x > stroke.x1 + r || z < stroke.z0 - r || z > stroke.z1 + r) continue;
@@ -1000,30 +1027,30 @@ export class Editor {
     stroke.lastTime = performance.now();
     stroke.x0 = Math.min(stroke.x0, at.x); stroke.x1 = Math.max(stroke.x1, at.x);
     stroke.z0 = Math.min(stroke.z0, at.z); stroke.z1 = Math.max(stroke.z1, at.z);
+    if (paint.brush === "raise" || paint.brush === "lower") {
+      // The solid's brushes: a dab is kept with the land (the mesh follows when the stroke ends). One on the spot of
+      // the last (the brush held still) adds to it.
+      const amount = (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH;
+      const edits = paint.uncut ? (grid.editsOver ??= []) : (grid.edits ??= []);
+      const n = edits.length;
+      if (n >= 5 && edits[n - 2] === paint.radius && Math.hypot(edits[n - 5] - at.x, edits[n - 4] - at.y, edits[n - 3] - at.z) < 0.01) edits[n - 1] += amount;
+      else {
+        edits.push(at.x, at.y, at.z, paint.radius, amount);
+        if (!this.dabMarks) { this.dabMarks = new THREE.Group(); this.scene.add(this.dabMarks); }
+        const mark = new THREE.Mesh(new THREE.SphereGeometry(Math.max(1, paint.radius / 6), 12, 8),
+          new THREE.MeshBasicMaterial({ color: paint.brush === "raise" ? 0xffe066 : 0x66b3ff, transparent: true, opacity: 0.5, depthTest: false }));
+        mark.position.copy(at);
+        mark.renderOrder = 10;
+        this.dabMarks.add(mark);
+      }
+      return;
+    }
     const { cell, x0, z0, columns, rows } = grid;
     const c0 = Math.max(0, Math.floor((at.x - paint.radius - x0) / cell)), c1 = Math.min(columns - 1, Math.ceil((at.x + paint.radius - x0) / cell));
     const r0 = Math.max(0, Math.floor((at.z - paint.radius - z0) / cell)), r1 = Math.min(rows - 1, Math.ceil((at.z + paint.radius - z0) / cell));
     const before = grid.heights.slice();
     const land = (h: number | null) => (h === null ? null : h <= SUNK_LAND + 0.01 ? 0 : h);
     const rate = Math.min(1, Math.max(0, paint.strength));
-    // Along the normal: the land under the brush moved as a whole by the dab's length along its normal at the brush's
-    // middle. On a height map that is the old land read a step back across the slope, plus the step's rise.
-    let normal: THREE.Vector3 | null = null;
-    if (paint.alongNormal && (paint.brush === "raise" || paint.brush === "lower")) {
-      const hx0 = terrainHeight(grid, at.x - cell, at.z), hx1 = terrainHeight(grid, at.x + cell, at.z);
-      const hz0 = terrainHeight(grid, at.x, at.z - cell), hz1 = terrainHeight(grid, at.x, at.z + cell);
-      if (hx0 !== null && hx1 !== null && hz0 !== null && hz1 !== null)
-        normal = new THREE.Vector3(-(hx1 - hx0) / (2 * cell), 1, -(hz1 - hz0) / (2 * cell)).normalize();
-    }
-    const old = (x: number, z: number): number | null => {
-      const fx = (x - x0) / cell, fz = (z - z0) / cell;
-      const c = Math.floor(fx), r = Math.floor(fz);
-      if (c < 0 || r < 0 || c + 1 >= columns || r + 1 >= rows) return null;
-      const h00 = land(before[r * columns + c]), h10 = land(before[r * columns + c + 1]), h01 = land(before[(r + 1) * columns + c]), h11 = land(before[(r + 1) * columns + c + 1]);
-      if (h00 === null || h10 === null || h01 === null || h11 === null) return null;
-      const u = fx - c, v = fz - r;
-      return h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
-    };
     for (let r = r0; r <= r1; r++)
       for (let c = c0; c <= c1; c++) {
         const k = r * columns + c;
@@ -1034,12 +1061,7 @@ export class Editor {
         if (d > paint.radius) continue;
         const w = 0.5 * (1 + Math.cos(Math.PI * d / paint.radius));
         let next = h;
-        if (paint.brush === "raise" || paint.brush === "lower") {
-          const step = (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH * w;
-          if (normal) next = (old(x - step * normal.x, z - step * normal.z) ?? h) + step * normal.y;
-          else next = h + step;
-        }
-        else if (paint.brush === "flatten") next = h + (stroke.flat - h) * w * rate;
+        if (paint.brush === "flatten") next = h + (stroke.flat - h) * w * rate;
         else {
           let sum = 0, n = 0;
           for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
@@ -1989,7 +2011,7 @@ export class Editor {
       if (this.stroke) this.continueStroke(e);
       else if (!this.hoverQueued && !e.buttons) {
         this.hoverQueued = true;
-        requestAnimationFrame(() => { this.hoverQueued = false; if (this.lastPointer) this.showBrush(this.terrainHit(this.lastPointer)); });
+        requestAnimationFrame(() => { this.hoverQueued = false; if (this.lastPointer) this.showBrush(this.brushHit(this.lastPointer)); });
       }
       return;
     }

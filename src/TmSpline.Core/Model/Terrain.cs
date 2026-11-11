@@ -24,6 +24,14 @@ public sealed class TerrainGrid
     /// <summary>The scenery panel's noise height and size, metres (null: not given). VoxelTerrain's hills.</summary>
     public double? NoiseHeight { get; set; }
     public double? NoiseSize { get; set; }
+    /// <summary>
+    /// The 3D brush's dabs, five numbers each: a centre (x, y, z), a radius and an amount (metres): the land's surface
+    /// moves out by the amount at the centre (in, when negative), fading to nothing at the radius. They add up, in any
+    /// order, and work on walls and ceilings as on the ground (VoxelTerrain); the roads still cut through the result.
+    /// </summary>
+    public double[] Edits { get; set; } = [];
+    /// <summary>Dabs like <see cref="Edits"/> that come after the roads' cut: land worked into the road's own space (a bump on it, a rock in a tunnel).</summary>
+    public double[] EditsOver { get; set; } = [];
 
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 

@@ -8,7 +8,7 @@ import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
 /** The terrain brush (Off: the mouse edits as usual). */
-const paint = { brush: "off" as "off" | TerrainBrush, radius: 24, strength: 1, alongNormal: false };
+const paint = { brush: "off" as "off" | TerrainBrush, radius: 24, strength: 1, uncut: false };
 const scenery = { mode: "terrain" as "fill" | "nestle" | "terrain", look: "alone" as "smooth" | "hill" | "alone", far: "fit" as "fit" | "lower" | "steps", showHeightMap: true, ownTerrain: { ...OWN_TERRAIN_DEFAULTS }, band: 4, theme: SCENERY_THEMES[0].id, gap: 1, hills: true, hillStep: 3, hillRise: 6, farRise: 0.5, cliffs: 10, forest: "spring", density: 0.5, clearance: 5, note: "" };
 
 /** What a map keeps of the panel when it generates (not the note or the height map view). */
@@ -644,17 +644,18 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     ]);
     if (editor.map.terrain) {
       section("Paint terrain");
-      const apply = () => editor.setTerrainPaint(paint.brush === "off" ? null : { brush: paint.brush, radius: paint.radius, strength: paint.strength, alongNormal: paint.alongNormal });
+      const apply = () => editor.setTerrainPaint(paint.brush === "off" ? null : { brush: paint.brush, radius: paint.radius, strength: paint.strength, uncut: paint.uncut });
       selectField(root, "Brush", ["off", "raise", "lower", "smooth", "flatten"], () => paint.brush, (v) => { paint.brush = v as typeof paint.brush; apply(); relayout(); }, false,
         { off: "Off", raise: "Raise", lower: "Lower", smooth: "Smooth", flatten: "Flatten (to where the stroke starts)" });
       numberField(root, "Radius (m)", () => paint.radius, (v) => { paint.radius = Math.max(4, Math.min(256, v)); apply(); }, 4);
       numberField(root, paint.brush === "raise" || paint.brush === "lower" ? `Strength (x ${RAISE_PER_STRENGTH} m per dab)` : "Strength (0 to 1)", () => paint.strength,
         (v) => { paint.strength = Math.max(0.05, Math.min(paint.brush === "raise" || paint.brush === "lower" ? 16 : 1, v)); apply(); }, 0.25);
       if (paint.brush === "raise" || paint.brush === "lower")
-        checkbox(root, "Along the land's normal", () => paint.alongNormal, (v) => { paint.alongNormal = v; apply(); });
-      hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). The land follows at once; "
-        + "where it meets the roads it is fitted again after each stroke. Each stroke is one undo step; generating again "
-        + "replaces the painted land.");
+        checkbox(root, "Into the roads (not cut by them)", () => paint.uncut, (v) => { paint.uncut = v; apply(); });
+      hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). Raise and lower work where the "
+        + "cursor meets the land, also on a cutting's side or a tunnel's wall and roof; the land is built again after "
+        + "each stroke, and the roads cut through what was added unless \"Into the roads\" is ticked. Smooth and flatten "
+        + "work on open ground. Each stroke is one undo step; generating again replaces the painted land.");
     }
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
       ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "

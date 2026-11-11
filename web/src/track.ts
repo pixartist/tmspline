@@ -243,6 +243,13 @@ export interface TerrainGrid {
   skirt: number;
   /** Land steeper than this (degrees) is rock, as are the skirts; missing or 90: none. */
   rockAngle?: number;
+  /**
+   * The 3D brush's dabs, five numbers each: centre x, y, z, radius, amount (metres the land's surface moves out at the
+   * centre, in when negative, fading to nothing at the radius). They work on walls and ceilings as on the ground.
+   */
+  edits?: number[];
+  /** Dabs like `edits` that the roads do not cut through: land worked into the road's own space. */
+  editsOver?: number[];
 }
 
 /**

@@ -71,6 +71,12 @@ public static class TrackJson
         public double Skirt { get; set; } = 16;
         /// <summary>Missing: no rock (90°).</summary>
         public double? RockAngle { get; set; }
+        /// <summary>The 3D brush's dabs: x, y, z, radius, amount (metres of land added, negative: removed) each.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double[]? Edits { get; set; }
+        /// <summary>The same, for dabs the roads do not cut through.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double[]? EditsOver { get; set; }
     }
 
     public sealed class ItemDto
@@ -216,6 +222,8 @@ public static class TrackJson
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
+                Edits = t.Edits is { } edits && edits.Length % 5 == 0 && edits.All(double.IsFinite) ? edits : [],
+                EditsOver = t.EditsOver is { } over && over.Length % 5 == 0 && over.All(double.IsFinite) ? over : [],
                 NoiseHeight = dto.SceneryOptions?.OwnTerrain?.Noise is { } nh && double.IsFinite(nh) ? Math.Clamp(nh, 0, 256) : null,
                 NoiseSize = dto.SceneryOptions?.OwnTerrain?.NoiseSize is { } ns && double.IsFinite(ns) ? Math.Clamp(ns, 16, 512) : null,
             };

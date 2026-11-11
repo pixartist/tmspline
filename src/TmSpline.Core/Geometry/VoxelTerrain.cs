@@ -147,9 +147,62 @@ public static class VoxelTerrain
         Vector3 World(int x, int y, int z) => new((float)(grid.X0 + x * v), bottom + y * v, (float)(grid.Z0 + z * v));
 
         var values = new Dictionary<long, float>();
+        // The brush's dabs, by plan square (Coarse metres): each moves the land's surface out by its amount at its
+        // centre (in, when negative), fading to nothing at its radius.
+        // (First those the roads cut through, then from firstOver on those that come after the cut.)
+        var dabs = grid.Edits.Concat(grid.EditsOver).ToArray();
+        var firstOver = grid.Edits.Length;
+        var dabsAt = new Dictionary<(int, int), List<int>>();
+        for (var i = 0; i + 4 < dabs.Length; i += 5)
+        {
+            double x = dabs[i], z = dabs[i + 2], r = dabs[i + 3];
+            for (var bx = (int)Math.Floor((x - r) / Coarse); bx <= (int)Math.Floor((x + r) / Coarse); bx++)
+                for (var bz = (int)Math.Floor((z - r) / Coarse); bz <= (int)Math.Floor((z + r) / Coarse); bz++)
+                {
+                    if (!dabsAt.TryGetValue((bx, bz), out var list)) dabsAt[(bx, bz)] = list = [];
+                    list.Add(i);
+                }
+        }
+        float Painted(Vector3 p, bool over)
+        {
+            if (!dabsAt.TryGetValue(((int)MathF.Floor(p.X / Coarse), (int)MathF.Floor(p.Z / Coarse)), out var list)) return 0;
+            var sum = 0f;
+            foreach (var i in list)
+            {
+                if (i >= firstOver != over) continue;
+                float dx = p.X - (float)dabs[i], dy = p.Y - (float)dabs[i + 1], dz = p.Z - (float)dabs[i + 2], r = (float)dabs[i + 3];
+                var t = (dx * dx + dy * dy + dz * dz) / (r * r);
+                if (t < 1) sum += (float)dabs[i + 4] * (1 - t) * (1 - t);
+            }
+            return sum;
+        }
+        // In a box: how far the dabs there can move the surface at most, and the smallest of their radii (0: none there).
+        (float Reach, float Radius, float Over) PaintedIn(Vector3 c, float half)
+        {
+            if (dabsAt.Count == 0) return (0, 0, 0);
+            // A large cell: taken as painted (its children are looked at properly).
+            if (half > 4 * Coarse) return (1e6f, 0, firstOver < dabs.Length ? 1e6f : 0);
+            float reach = 0, radius = float.MaxValue, reachOver = 0;
+            var seen = new HashSet<int>();
+            for (var bx = (int)MathF.Floor((c.X - half) / Coarse); bx <= (int)MathF.Floor((c.X + half) / Coarse); bx++)
+                for (var bz = (int)MathF.Floor((c.Z - half) / Coarse); bz <= (int)MathF.Floor((c.Z + half) / Coarse); bz++)
+                {
+                    if (!dabsAt.TryGetValue((bx, bz), out var list)) continue;
+                    foreach (var i in list)
+                    {
+                        var r = (float)dabs[i + 3];
+                        if (MathF.Abs(c.X - (float)dabs[i]) > half + r || MathF.Abs(c.Y - (float)dabs[i + 1]) > half + r || MathF.Abs(c.Z - (float)dabs[i + 2]) > half + r || !seen.Add(i)) continue;
+                        reach += MathF.Abs((float)dabs[i + 4]);
+                        if (i >= firstOver) reachOver += MathF.Abs((float)dabs[i + 4]);
+                        radius = MathF.Min(radius, r);
+                    }
+                }
+            return reach > 0 ? (reach, radius, reachOver) : (0, 0, 0);
+        }
+
         float Field(Vector3 p)
         {
-            var f = p.Y - LandAt(p.X, p.Z);
+            var f = p.Y - LandAt(p.X, p.Z) - Painted(p, false);
             if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
             {
                 var cut = -room(p);
@@ -168,6 +221,8 @@ public static class VoxelTerrain
                 }
                 else f = MathF.Max(f, cut);
             }
+            // Land worked into the roads' space comes after their cut.
+            if (firstOver < dabs.Length) f -= Painted(p, true);
             return f;
         }
         float At(int x, int y, int z)
@@ -204,20 +259,26 @@ public static class VoxelTerrain
             // Split only where the surface may pass: the land's, outside the rooms, or a room's wall under the land.
             var over = c.Y - LandAt(c.X, c.Z);
             var span = n.Size * v * (0.5f + 0.71f * slope);
-            var landNear = MathF.Abs(over) <= span;
+            // Where the brush painted, the surface may lie further from the height map's, and the cells are small enough
+            // for the dabs (a quarter of the smallest radius).
+            var (painted, dabRadius, paintedOver) = PaintedIn(c, n.Size * v / 2);
+            var landNear = MathF.Abs(over) <= span + painted;
             var wall = false;
             var inRoom = false;
-            if (Away(c.X, c.Z) - reach < 2 * Coarse && over < span)
+            if (Away(c.X, c.Z) - reach < 2 * Coarse && over < span + painted)
             {
                 var d = room(c);
-                wall = MathF.Abs(d) <= reach;
-                inRoom = d < -reach;
+                // (Dabs that come after the cut can stand in the room, up to their amounts from its wall.)
+                wall = MathF.Abs(d) <= reach + paintedOver;
+                inRoom = d < -reach - paintedOver;
             }
             // A rim (the land's surface and a room's wall in one cell, over the road: a tunnel's mouth, a cutting's top,
             // a thin roof) gets the smallest cells wherever it is: one point per cell cannot stand for two surfaces,
             // and larger cells stood there in teeth.
             var rim = landNear && wall && !inRoom && above + reach > 1;
-            if (!rim && n.Size <= Wanted(from)) return;
+            var wanted = Wanted(from);
+            if (painted > 0 && landNear && dabRadius > 0) while (wanted > 1 && wanted * v > dabRadius / 4) wanted /= 2;
+            if (!rim && n.Size <= wanted) return;
             if (!(landNear && !inRoom) && !wall) return;
             n.Kids = new Node[8];
             for (var k = 0; k < 8; k++)
@@ -353,6 +414,8 @@ public static class VoxelTerrain
             var (d, deck) = nearest(p);
             // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
             // back onto the floor.
+            // (Not where land was worked into the road's space: that stays where it was put, and its floor shows.)
+            if (Painted(p, true) != 0) return;
             if (deck != default && d < 0 && d > -2 * v)
             {
                 p += deck * d;
