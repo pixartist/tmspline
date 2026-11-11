@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using TmSpline.Core.Model;
 
 namespace TmSpline.Core.Geometry;
@@ -17,6 +17,9 @@ public static class TerrainMeshBuilder
     /// The builder: StitchedTerrain (one land surface, rooms cut out, lining under covered road), or with the environment
     /// variable TMSPLINE_TERRAIN=old the earlier AdaptiveTerrainBuilder.
     /// </summary>
+    /// <summary>TMSPLINE_TERRAIN=voxel: the prototype VoxelTerrain (the land as a solid the roads cut their rooms out of).</summary>
+    public static bool Voxel { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") == "voxel";
+
     public static bool Stitched { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") != "old";
 
     /// <summary>
@@ -52,7 +55,12 @@ public static class TerrainMeshBuilder
         if (grid.Columns < 2 || grid.Rows < 2) return [];
         AdaptiveMesh mesh;
         StitchedTerrainResult? stitched = null;
-        if (Stitched)
+        if (Voxel)
+        {
+            LastStitched = null;
+            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap());
+        }
+        else if (Stitched)
         {
             stitched = StitchedTerrain.Build(grid, map ?? new TrackMap(), TriangleBudget(grid, map));
             LastStitched = stitched;
