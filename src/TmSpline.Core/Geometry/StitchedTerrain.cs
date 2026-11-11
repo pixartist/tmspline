@@ -165,13 +165,13 @@ public static class StitchedTerrain
     /// <param name="maxTriangles">The land's triangle budget (0: none): the mesh gets coarser until it fits.</param>
     public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
-    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point near a plan point.</summary>
-    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor) Rooms(TerrainGrid grid, TrackMap map)
+    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with whether the nearest of a room's outline is its driving surface.</summary>
+    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, bool Deck)> Nearest) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
-        return (p => b.RoomDistance(p), b.RoomFloor);
+        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck));
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -691,12 +691,12 @@ public static class StitchedTerrain
         public void BuildRooms() => Sections(sky: false);
 
         /// <summary>The lowest point of the rooms near a plan point (those in its bucket and the ones round it), or +infinity.</summary>
-        public float RoomFloor(float x, float z)
+        public float RoomFloor(float x, float z, int around = 1)
         {
             var low = float.PositiveInfinity;
             int bx = (int)Math.Floor(x / Bucket), bz = (int)Math.Floor(z / Bucket);
-            for (var dx = -1; dx <= 1; dx++)
-                for (var dz = -1; dz <= 1; dz++)
+            for (var dx = -around; dx <= around; dx++)
+                for (var dz = -around; dz <= around; dz++)
                     if (prismBuckets.TryGetValue((bx + dx, bz + dz), out var list))
                         foreach (var id in list)
                         {
@@ -717,9 +717,10 @@ public static class StitchedTerrain
         /// Signed distance to the rooms (negative inside), metres; `far` where none is within about a bucket. Across a
         /// room's section the distance to its outline, beyond a road's end the distance to its end section.
         /// </summary>
-        public float RoomDistance(Vector3 p, float far = 1e3f)
+        public float RoomDistance(Vector3 p, out bool deck, float far = 1e3f)
         {
             var best = far;
+            deck = false;
             int bx = (int)Math.Floor(p.X / Bucket), bz = (int)Math.Floor(p.Z / Bucket);
             for (var ox = -1; ox <= 1; ox++)
                 for (var oz = -1; oz <= 1; oz++)
@@ -746,6 +747,7 @@ public static class StitchedTerrain
                         var q = new Vector2(Vector3.Dot(d, R) / R.LengthSquared(), Vector3.Dot(d, U) / U.LengthSquared());
                         var inside = false;
                         var near = float.MaxValue;
+                        var nearDeck = false;
                         var pa = iv.A.Poly;
                         var pb = iv.B.Poly;
                         var a = Vector2.Lerp(pa[^1], pb[^1], s);
@@ -757,14 +759,16 @@ public static class StitchedTerrain
                             var w = q - a;
                             var l2 = e.LengthSquared();
                             var h = l2 > 1e-12f ? Math.Clamp(Vector2.Dot(w, e) / l2, 0, 1) : 0;
-                            near = MathF.Min(near, (w - e * h).LengthSquared());
+                            var e2 = (w - e * h).LengthSquared();
+                            // (The section runs rail, driving surface, rail, then the vault back to the first rail.)
+                            if (e2 < near) { near = e2; nearDeck = i >= 1 && i <= RailRight; }
                             a = b;
                         }
                         var d2 = MathF.Sqrt(near);
                         float dist;
                         if (along > 0) dist = inside ? along : MathF.Sqrt(d2 * d2 + along * along);
                         else dist = inside ? -d2 : d2;
-                        if (dist < best) best = dist;
+                        if (dist < best) { best = dist; deck = nearDeck && along <= 0; }
                     }
                 }
             return best;
