@@ -158,6 +158,8 @@ export interface TerrainPaint {
   radius: number;
   /** Raise/lower: metres per dab at the middle; smooth/flatten: how far towards the target per dab (0..1). */
   strength: number;
+  /** Raise/lower: along the land's normal under the brush (a slope moves out or in sideways), not straight up and down. */
+  alongNormal?: boolean;
 }
 /** Land lower than the stadium's ground lies this deep (ownTerrain's SUNK). */
 const SUNK_LAND = -2;
@@ -1004,6 +1006,24 @@ export class Editor {
     const before = grid.heights.slice();
     const land = (h: number | null) => (h === null ? null : h <= SUNK_LAND + 0.01 ? 0 : h);
     const rate = Math.min(1, Math.max(0, paint.strength));
+    // Along the normal: the land under the brush moved as a whole by the dab's length along its normal at the brush's
+    // middle. On a height map that is the old land read a step back across the slope, plus the step's rise.
+    let normal: THREE.Vector3 | null = null;
+    if (paint.alongNormal && (paint.brush === "raise" || paint.brush === "lower")) {
+      const hx0 = terrainHeight(grid, at.x - cell, at.z), hx1 = terrainHeight(grid, at.x + cell, at.z);
+      const hz0 = terrainHeight(grid, at.x, at.z - cell), hz1 = terrainHeight(grid, at.x, at.z + cell);
+      if (hx0 !== null && hx1 !== null && hz0 !== null && hz1 !== null)
+        normal = new THREE.Vector3(-(hx1 - hx0) / (2 * cell), 1, -(hz1 - hz0) / (2 * cell)).normalize();
+    }
+    const old = (x: number, z: number): number | null => {
+      const fx = (x - x0) / cell, fz = (z - z0) / cell;
+      const c = Math.floor(fx), r = Math.floor(fz);
+      if (c < 0 || r < 0 || c + 1 >= columns || r + 1 >= rows) return null;
+      const h00 = land(before[r * columns + c]), h10 = land(before[r * columns + c + 1]), h01 = land(before[(r + 1) * columns + c]), h11 = land(before[(r + 1) * columns + c + 1]);
+      if (h00 === null || h10 === null || h01 === null || h11 === null) return null;
+      const u = fx - c, v = fz - r;
+      return h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
+    };
     for (let r = r0; r <= r1; r++)
       for (let c = c0; c <= c1; c++) {
         const k = r * columns + c;
@@ -1014,8 +1034,11 @@ export class Editor {
         if (d > paint.radius) continue;
         const w = 0.5 * (1 + Math.cos(Math.PI * d / paint.radius));
         let next = h;
-        if (paint.brush === "raise") next = h + paint.strength * RAISE_PER_STRENGTH * w;
-        else if (paint.brush === "lower") next = h - paint.strength * RAISE_PER_STRENGTH * w;
+        if (paint.brush === "raise" || paint.brush === "lower") {
+          const step = (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH * w;
+          if (normal) next = (old(x - step * normal.x, z - step * normal.z) ?? h) + step * normal.y;
+          else next = h + step;
+        }
         else if (paint.brush === "flatten") next = h + (stroke.flat - h) * w * rate;
         else {
           let sum = 0, n = 0;
