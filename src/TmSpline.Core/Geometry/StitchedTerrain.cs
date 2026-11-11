@@ -118,6 +118,8 @@ public static class StitchedTerrain
         public float[][] A = [[], []];
         public bool[][] Exact = [[], []];
         public float[,] F = new float[0, 0];
+        /// <summary>Stretches (distance along it, from and to) where the road is open: gaps and holes.</summary>
+        public List<(float From, float To)> Open = [];
     }
 
     private struct Rail
@@ -146,6 +148,8 @@ public static class StitchedTerrain
         /// <summary>Its sections' lowest and highest point (0, 0: not found yet); whether it is its road's last.</summary>
         public float Low, High;
         public bool Last;
+        /// <summary>Whether the road is open here (a gap, or a hole in it): what lies under it shows.</summary>
+        public bool Open;
     }
 
     private static float SS(float a, float b, float x)
@@ -318,6 +322,14 @@ public static class StitchedTerrain
                     road.S.Add(st);
                 }
                 road.Dist = road.S.Select(s => (float)s.R.Distance).ToArray();
+                // Where the road is open (gaps and holes, with a few metres round them), by distance along it.
+                var starts = TrackSampler.SegmentStarts(track);
+                foreach (var o in track.Objects)
+                    if (o.Kind is TrackObjectKind.Gap or TrackObjectKind.Hole && o.Segment >= 0 && o.Segment < starts.Length - 1)
+                    {
+                        var at = TrackObjects.CenterDistance(o, starts);
+                        road.Open.Add(((float)(at - o.Length / 2 - 4), (float)(at + o.Length / 2 + 4)));
+                    }
                 roads.Add(road);
             }
             Decks();
@@ -327,6 +339,7 @@ public static class StitchedTerrain
                 for (var i = 0; i + 1 < road.S.Count; i++)
                 {
                     var p = new Prism { Road = road.Index, Station = i, A = road.S[i], B = road.S[i + 1], Last = i + 2 == road.S.Count };
+                    p.Open = road.Open.Any(o => road.Dist[i + 1] >= o.From && road.Dist[i] <= o.To);
                     var id = prisms.Count;
                     prisms.Add(p);
                     float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
@@ -821,7 +834,8 @@ public static class StitchedTerrain
                         {
                             best = dist;
                             deck = default;
-                            if (along <= 0 && nearDeck.LengthSquared() > 1e-12f)
+                            // (Not under a gap or a hole: there the floor shows, and counts as any other of the cut's walls.)
+                            if (along <= 0 && !iv.Open && nearDeck.LengthSquared() > 1e-12f)
                             {
                                 if (Vector2.Dot(nearDeck, middle / pa.Length - q) < 0) nearDeck = -nearDeck;
                                 deck = Vector3.Normalize(R * nearDeck.X + U * nearDeck.Y);

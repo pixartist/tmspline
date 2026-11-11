@@ -4,14 +4,12 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The own terrain as a solid (prototype, TMSPLINE_TERRAIN=voxel): a landscape of its own, made as if there were no
-/// road (hills from noise round one level; the editor's height map gives only where there is land, not its heights),
-/// and each road cuts its room (StitchedTerrain's: the space a car needs, the driving surface and an arch over it) out
-/// of it. The surface of what is left is the mesh: open ground, cuttings, tunnels and their mouths all come from the
-/// same subtraction; a road over the land stands free.
+/// The own terrain as a solid (prototype, TMSPLINE_TERRAIN=voxel): the editor's land (its height map: a landscape made
+/// as if there were no road, then painted by hand) is everything under its surface, and each road cuts its room
+/// (StitchedTerrain's: the space a car needs, the driving surface and a vault over it) out of it. The surface of what is
+/// left is the mesh: open ground, cuttings, tunnels and their mouths all come from the same subtraction; a road over the
+/// land stands free.
 /// <list type="bullet">
-/// <item>Land: Level (the mean height of the tracks' points) plus the noise height times noise of the noise size per hill
-/// (the scenery panel's two settings).</item>
 /// <item>Field: f(p) = max(p.y - land(x, z), -room(p)), negative in the solid.</item>
 /// <item>Octree: cells of Voxel metres within Near of a road's edge, twice the size for each doubling of the distance beyond
 /// (up to Coarsest); only cells the surface may pass through are split.</item>
@@ -26,10 +24,6 @@ public static class VoxelTerrain
     /// <summary>The smallest cells' size, metres (TMSPLINE_VOXEL).</summary>
     public static float Voxel { get; set; } =
         float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VOXEL"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : 1f;
-
-    /// <summary>The hills' height (each way from the level) and size, metres, for maps without the panel's settings (TMSPLINE_VOXEL_NOISE, TMSPLINE_VOXEL_NOISESIZE).</summary>
-    public static float NoiseHeight { get; set; } = Setting("TMSPLINE_VOXEL_NOISE", 48);
-    public static float NoiseSize { get; set; } = Setting("TMSPLINE_VOXEL_NOISESIZE", 160);
 
     /// <summary>Within this of a road the cells are the smallest, and no cell is larger than Coarsest; metres (TMSPLINE_VOXEL_NEAR, TMSPLINE_VOXEL_COARSEST).</summary>
     public static float Near { get; set; } = Setting("TMSPLINE_VOXEL_NEAR", 3);
@@ -54,28 +48,6 @@ public static class VoxelTerrain
     private static float Setting(string name, float fallback) =>
         float.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
-    /// <summary>Value noise in -1..1, about `size` metres per bump.</summary>
-    private static float Noise(float x, float z, float size)
-    {
-        float fx = x / size, fz = z / size;
-        int ix = (int)MathF.Floor(fx), iz = (int)MathF.Floor(fz);
-        float u = fx - ix, w = fz - iz;
-        u = u * u * u * (u * (6 * u - 15) + 10);
-        w = w * w * w * (w * (6 * w - 15) + 10);
-        static float Hash(int a, int b)
-        {
-            var h = unchecked((uint)(a * 374761393 + b * 668265263));
-            h = (h ^ (h >> 13)) * 1274126177u;
-            return ((h ^ (h >> 16)) & 0xFFFFFF) / (float)0x7FFFFF - 1;
-        }
-        float a = Hash(ix, iz), b = Hash(ix + 1, iz), c = Hash(ix, iz + 1), d = Hash(ix + 1, iz + 1);
-        return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
-    }
-
-    /// <summary>The land's height at a plan point: hills on hills, round `level`.</summary>
-    private static float Land(float x, float z, float level, float height, float size) =>
-        level + height * (0.6f * Noise(x, z, size) + 0.28f * Noise(x + 517, z - 211, size / 2.3f) + 0.12f * Noise(x - 89, z + 733, size / 5.1f));
-
     private sealed class Node
     {
         /// <summary>Its lowest corner and size, in smallest cells.</summary>
@@ -88,12 +60,52 @@ public static class VoxelTerrain
     {
         var v = Voxel;
         var (room, roomFloor, nearest, road) = StitchedTerrain.Rooms(grid, map);
+        // The land's heights, also beyond its outline (each place without land takes its nearest land's: the octree
+        // needs a height everywhere; what lies outside the outline is left out of the mesh at the end).
+        var heights = (double[])grid.Heights.Clone();
+        {
+            var queue = new Queue<int>();
+            for (var i = 0; i < heights.Length; i++) if (!double.IsNaN(heights[i])) queue.Enqueue(i);
+            while (queue.Count > 0)
+            {
+                var i = queue.Dequeue();
+                int c = i % grid.Columns, r = i / grid.Columns;
+                foreach (var (dc0, dr0) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                {
+                    int cc = c + dc0, rr = r + dr0;
+                    if (cc < 0 || rr < 0 || cc >= grid.Columns || rr >= grid.Rows) continue;
+                    var j = rr * grid.Columns + cc;
+                    if (!double.IsNaN(heights[j])) continue;
+                    heights[j] = heights[i];
+                    queue.Enqueue(j);
+                }
+            }
+        }
+        float LandAt(float x, float z)
+        {
+            double fx = Math.Clamp((x - grid.X0) / grid.Cell, 0, grid.Columns - 1.001), fz = Math.Clamp((z - grid.Z0) / grid.Cell, 0, grid.Rows - 1.001);
+            int c = (int)fx, r = (int)fz;
+            double u = fx - c, w = fz - r;
+            var i = r * grid.Columns + c;
+            return (float)(heights[i] * (1 - u) * (1 - w) + heights[i + 1] * u * (1 - w) + heights[i + grid.Columns] * (1 - u) * w + heights[i + grid.Columns + 1] * u * w);
+        }
+        // The steepest the land gets (metres per metre; painted steps count up to 4), for whether a cell can hold its
+        // surface; its lowest and highest.
+        var slope = 0.3f;
+        float lowest = float.MaxValue, highest = float.MinValue;
+        for (var r = 0; r < grid.Rows; r++)
+            for (var c = 0; c < grid.Columns; c++)
+            {
+                var h = heights[r * grid.Columns + c];
+                if (double.IsNaN(h)) continue;
+                lowest = MathF.Min(lowest, (float)h);
+                highest = MathF.Max(highest, (float)h);
+                if (c + 1 < grid.Columns && r + 1 < grid.Rows)
+                    slope = MathF.Max(slope, (float)(Math.Sqrt(Math.Pow(heights[r * grid.Columns + c + 1] - h, 2) + Math.Pow(heights[(r + 1) * grid.Columns + c] - h, 2)) / grid.Cell));
+            }
+        if (lowest > highest) return new AdaptiveMesh();
+        slope = MathF.Min(slope * 1.2f, 4);
         var points = map.Tracks.SelectMany(t => t.Points).ToList();
-        var level = points.Count > 0 ? (float)points.Average(p => p.Position.Y) : 0;
-        // The hills: the scenery panel's noise height and size where the map carries them.
-        float hills = (float)(grid.NoiseHeight ?? NoiseHeight), hillSize = (float)(grid.NoiseSize ?? NoiseSize);
-        // The steepest they get (metres per metre), for whether a cell can hold the land's surface.
-        var slope = MathF.Max(0.3f, 1.2f * hills * 1.9f * (0.6f + 0.28f * 2.3f + 0.12f * 5.1f) / hillSize);
         double width = (grid.Columns - 1) * grid.Cell, depth = (grid.Rows - 1) * grid.Cell;
 
         // How far each place is from the roads (plan, metres; on squares of Coarse metres, the rooms' own: 0).
@@ -128,8 +140,8 @@ public static class VoxelTerrain
         }
 
         // The lattice: its origin, and the root cell round the land and the roads.
-        var bottom = MathF.Min(level - hills, points.Count > 0 ? (float)points.Min(p => p.Position.Y) : level) - 24;
-        var top = level + hills + 8;
+        var bottom = MathF.Min(lowest, points.Count > 0 ? (float)points.Min(p => p.Position.Y) : lowest) - 24;
+        var top = highest + 8;
         var rootSize = 1;
         while (rootSize * v < Math.Max(Math.Max(width, depth), top - bottom)) rootSize *= 2;
         Vector3 World(int x, int y, int z) => new((float)(grid.X0 + x * v), bottom + y * v, (float)(grid.Z0 + z * v));
@@ -137,7 +149,7 @@ public static class VoxelTerrain
         var values = new Dictionary<long, float>();
         float Field(Vector3 p)
         {
-            var f = p.Y - Land(p.X, p.Z, level, hills, hillSize);
+            var f = p.Y - LandAt(p.X, p.Z);
             if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
             {
                 var cut = -room(p);
@@ -190,7 +202,7 @@ public static class VoxelTerrain
                 above = up;
             }
             // Split only where the surface may pass: the land's, outside the rooms, or a room's wall under the land.
-            var over = c.Y - Land(c.X, c.Z, level, hills, hillSize);
+            var over = c.Y - LandAt(c.X, c.Z);
             var span = n.Size * v * (0.5f + 0.71f * slope);
             var landNear = MathF.Abs(over) <= span;
             var wall = false;
@@ -325,7 +337,7 @@ public static class VoxelTerrain
                 if (n.Vertex < 0) return;
                 var c = World(n.X + n.Size / 2, n.Y + n.Size / 2, n.Z + n.Size / 2);
                 var e = bySize.GetValueOrDefault(n.Size);
-                bySize[n.Size] = (e.Cells + 1, e.Inside + (c.Y < Land(c.X, c.Z, level, hills, hillSize) - 2 * v ? 1 : 0), e.Away0 + (Away(c.X, c.Z) <= 0 ? 1 : 0));
+                bySize[n.Size] = (e.Cells + 1, e.Inside + (c.Y < LandAt(c.X, c.Z) - 2 * v ? 1 : 0), e.Away0 + (Away(c.X, c.Z) <= 0 ? 1 : 0));
             }
             Count(root);
             foreach (var (size, e) in bySize) Console.WriteLine($"  voxel cells of {size * v} m: {e.Cells} with a point, {e.Inside} of them well under the land, {e.Away0} in a road's square");
@@ -348,7 +360,7 @@ public static class VoxelTerrain
             }
             // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
             // shows through the slot between the land's edge and the driving surface.
-            if (MathF.Abs(d) < v && Land(p.X, p.Z, level, hills, hillSize) - p.Y > FloorCover + v) under[i] = deck;
+            if (MathF.Abs(d) < v && LandAt(p.X, p.Z) - p.Y > FloorCover + v) under[i] = deck;
         });
         var kept = new AdaptiveMesh();
         var index = new Dictionary<int, int>();

@@ -17,8 +17,8 @@ public static class TerrainMeshBuilder
     /// The builder: StitchedTerrain (one land surface, rooms cut out, lining under covered road), or with the environment
     /// variable TMSPLINE_TERRAIN=old the earlier AdaptiveTerrainBuilder.
     /// </summary>
-    /// <summary>TMSPLINE_TERRAIN=voxel: the prototype VoxelTerrain (the land as a solid the roads cut their rooms out of).</summary>
-    public static bool Voxel { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") == "voxel";
+    /// <summary>VoxelTerrain (the land as a solid the roads cut their rooms out of): this branch's builder; TMSPLINE_TERRAIN=stitched or old for the earlier ones.</summary>
+    public static bool Voxel { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") is null or "voxel";
 
     public static bool Stitched { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") != "old";
 
