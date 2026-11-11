@@ -143,10 +143,13 @@ public static class AdaptiveTerrainMesher
         for (var r = 0; r < field.Rows; r++)
             for (var c = 0; c < field.Columns; c++)
             {
-                if ((r + c) % step != 0 || double.IsNaN(field.Height(c, r))) continue;
-                if (double.IsNaN(field.Height(c - 1, r)) || double.IsNaN(field.Height(c + 1, r)) || double.IsNaN(field.Height(c, r - 1)) || double.IsNaN(field.Height(c, r + 1))
-                    || c == 0 || r == 0 || c == field.Columns - 1 || r == field.Rows - 1)
-                    Seed(c, r);
+                if (double.IsNaN(field.Height(c, r))) continue;
+                // Counted along the outline's own direction (every step-th column where it runs along a row, every
+                // step-th row along a column): by r + c a diagonal outline got all its cells or none for long stretches,
+                // and the triangles spanning those lost their middles outside the land (notches).
+                var alongRow = double.IsNaN(field.Height(c, r - 1)) || double.IsNaN(field.Height(c, r + 1)) || r == 0 || r == field.Rows - 1;
+                var alongColumn = double.IsNaN(field.Height(c - 1, r)) || double.IsNaN(field.Height(c + 1, r)) || c == 0 || c == field.Columns - 1;
+                if ((alongRow && c % step == 0) || (alongColumn && r % step == 0)) Seed(c, r);
             }
         void Seed(int c, int r)
         {
@@ -232,7 +235,18 @@ public static class AdaptiveTerrainMesher
             if (double.IsNaN(heights[a]) || double.IsNaN(heights[b]) || double.IsNaN(heights[c])) continue;
             double ox = (cdt.X(a) + cdt.X(b) + cdt.X(c)) / 3, oz = (cdt.Z(a) + cdt.Z(b) + cdt.Z(c)) / 3;
             var mid = field.CellAt(ox, oz);
-            if (mid < 0 || float.IsNaN(field.Heights[mid])) continue;
+            // Its middle on the land, or (a thin triangle along the outline, between outline points on a stepped edge)
+            // within three metres of it: left out, those were notches in the land's edge.
+            if (mid < 0 || float.IsNaN(field.Heights[mid]))
+            {
+                const int Reach = 6;
+                var near = false;
+                int mc = (int)Math.Floor((ox - field.X0) / field.Cell), mr = (int)Math.Floor((oz - field.Z0) / field.Cell);
+                for (var dr = -Reach; dr <= Reach && !near; dr++)
+                    for (var dc = -Reach; dc <= Reach && !near; dc++)
+                        near = !double.IsNaN(field.Height(mc + dc, mr + dr));
+                if (!near) continue;
+            }
             if (field.CutAtHeight is { } cutAt ? cutAt(ox, (heights[a] + heights[b] + heights[c]) / 3, oz) : field.IsCut(ox, oz)) continue;
             foreach (var v in new[] { a, b, c })
             {
