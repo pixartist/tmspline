@@ -37,8 +37,19 @@ public static class VoxelTerrain
 
     /// <summary>A triangle at a driving surface is the cut's floor under it (left out) when it faces within about 35 degrees of it.</summary>
     private const float FloorAlike = 0.82f;
+    /// <summary>Debug: TMSPLINE_VOXEL_FLOOR=keep leaves the cuts' floors under the roads in.</summary>
+    private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
     private const float FloorCover = 2f;
+
+    /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
+    public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
+
+    private static float Ramp(float a, float b, float x)
+    {
+        x = Math.Clamp((x - a) / (b - a), 0, 1);
+        return x * x * (3 - 2 * x);
+    }
 
     private static float Setting(string name, float fallback) =>
         float.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
@@ -127,7 +138,24 @@ public static class VoxelTerrain
         float Field(Vector3 p)
         {
             var f = p.Y - Land(p.X, p.Z, level, hills, hillSize);
-            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse) f = MathF.Max(f, -room(p));
+            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
+            {
+                var cut = -room(p);
+                // A soft cut over the road: where the land's surface and a room's wall come together (a tunnel's
+                // mouth, a cutting's rim, a thin roof over a shallow tunnel) the edge between them is rounded off, and
+                // land thinner than half of Soften goes altogether; as a hard cut it stood there in teeth and shards.
+                // Beside the road, at the height of its edges and under it, the cut stays hard: the land meets them
+                // exactly. Straight over the road it is soft from the edges' height on: a road coming out of the land
+                // comes out where its cover gets thin, not through a wedge of land thinning to nothing along it.
+                var (edge, over, across) = road(p);
+                var k = Soften * (edge < 100 ? MathF.Max(Ramp(0.5f, 3, over), (1 - Ramp(0.8f, 1, across)) * Ramp(0, 0.75f, over)) : 1);
+                if (k > 0.01f)
+                {
+                    var h = MathF.Max(k - MathF.Abs(f - cut), 0) / k;
+                    f = MathF.Max(f, cut) + h * h * k / 4;
+                }
+                else f = MathF.Max(f, cut);
+            }
             return f;
         }
         float At(int x, int y, int z)
@@ -154,8 +182,13 @@ public static class VoxelTerrain
             // How far the cell is from the roads' edges at least (that is where the land has to meet the road; a vault's
             // top and the floor under the road's middle are further): exactly within a square of them, else by the squares.
             var from = MathF.Max(0, Away(c.X, c.Z) - reach - Coarse);
-            if (from <= 0) from = MathF.Max(0, MathF.Min(road(c), 2 * Coarse) - reach);
-            if (n.Size <= Wanted(from)) return;
+            var above = 0f;
+            if (from <= 0)
+            {
+                var (edge, up, _) = road(c);
+                from = MathF.Max(0, MathF.Min(edge, 2 * Coarse) - reach);
+                above = up;
+            }
             // Split only where the surface may pass: the land's, outside the rooms, or a room's wall under the land.
             var over = c.Y - Land(c.X, c.Z, level, hills, hillSize);
             var span = n.Size * v * (0.5f + 0.71f * slope);
@@ -168,6 +201,11 @@ public static class VoxelTerrain
                 wall = MathF.Abs(d) <= reach;
                 inRoom = d < -reach;
             }
+            // A rim (the land's surface and a room's wall in one cell, over the road: a tunnel's mouth, a cutting's top,
+            // a thin roof) gets the smallest cells wherever it is: one point per cell cannot stand for two surfaces,
+            // and larger cells stood there in teeth.
+            var rim = landNear && wall && !inRoom && above + reach > 1;
+            if (!rim && n.Size <= Wanted(from)) return;
             if (!(landNear && !inRoom) && !wall) return;
             n.Kids = new Node[8];
             for (var k = 0; k < 8; k++)
@@ -320,7 +358,7 @@ public static class VoxelTerrain
             var mid = (a + b + c) / 3;
             if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
-            if (ua != default && ub != default && uc != default)
+            if (!KeepFloor && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;

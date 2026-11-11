@@ -132,6 +132,24 @@ public static class TerrainMeshBuilder
         }
         for (var i = 0; i < normals.Length; i++) normals[i] = normals[i].LengthSquared() > 0 ? Vector3.Normalize(normals[i]) : Vector3.UnitY;
         var normalOf = normals.ToList();
+        // How steep the land is at each point, for rock or grass: a height map's smoothed normal; a solid's flattest
+        // face there (at a rim, where land meets a cut's wall, the smoothed normal is neither's, and rock ran out
+        // from it over the land in teeth).
+        var flat = normalOf.Select(n => n.Y).ToList();
+        if (solid)
+        {
+            for (var i = 0; i < flat.Count; i++) flat[i] = -1;
+            foreach (var (a, b, c) in triangles)
+            {
+                var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
+                    new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
+                if (n.LengthSquared() < 1e-12f) continue;
+                var y = Vector3.Normalize(n).Y;
+                flat[a] = MathF.Max(flat[a], y);
+                flat[b] = MathF.Max(flat[b], y);
+                flat[c] = MathF.Max(flat[c], y);
+            }
+        }
 
         // Outer edges (one triangle only) get a skirt, except along the roads (there the land ends at their edge).
         var edgeUse = new Dictionary<(int, int), int>();
@@ -180,12 +198,13 @@ public static class TerrainMeshBuilder
         {
             var key = u < v ? (u, v) : (v, u);
             if (cuts.TryGetValue(key, out var i)) return i;
-            var t = Math.Clamp((rockBelow - normalOf[u].Y) / (normalOf[v].Y - normalOf[u].Y), 0, 1);
+            var t = Math.Clamp((rockBelow - flat[u]) / (flat[v] - flat[u]), 0, 1);
             xs.Add(xs[u] + (xs[v] - xs[u]) * t);
             ys.Add(ys[u] + (ys[v] - ys[u]) * t);
             zs.Add(zs[u] + (zs[v] - zs[u]) * t);
             onEdge.Add(false);
             normalOf.Add(Vector3.Normalize(Vector3.Lerp(normalOf[u], normalOf[v], (float)t)));
+            flat.Add(rockBelow);
             cuts[key] = xs.Count - 1;
             return xs.Count - 1;
         }
@@ -201,7 +220,7 @@ public static class TerrainMeshBuilder
             }
             void Emit(int p, int q, int r, bool stone) =>
                 MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p, stone), Vertex(chunk, q, stone), Vertex(chunk, r, stone), stone ? chunk.MaterialIndex(rock) : 0), facing);
-            bool Steep(int i) => normalOf[i].Y < rockBelow;
+            bool Steep(int i) => flat[i] < rockBelow;
             var steep = new[] { a, b, c }.Count(Steep);
             if (!rocky || steep == 0 || steep == 3) Emit(a, b, c, rocky && steep == 3);
             else

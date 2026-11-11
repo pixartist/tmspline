@@ -165,13 +165,13 @@ public static class StitchedTerrain
     /// <param name="maxTriangles">The land's triangle budget (0: none): the mesh gets coarser until it fits.</param>
     public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
-    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero); the distance to the nearest road edge.</summary>
-    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, float> Road) Rooms(TerrainGrid grid, TrackMap map)
+    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero); the distance to the nearest road edge with the height over that road's edge line.</summary>
+    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across)> Road) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
-        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => b.RoadDistance(p));
+        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across), over, across));
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -713,10 +713,12 @@ public static class StitchedTerrain
             return low;
         }
 
-        /// <summary>Distance to the nearest road edge (a rail), metres; `far` where none is within about a bucket.</summary>
-        public float RoadDistance(Vector3 p, float far = 1e3f)
+        /// <summary>Distance to the nearest road edge (a rail), metres (`far` where none is within about a bucket), and how far over that road's edge line the point lies (towards its vault's top).</summary>
+        public float RoadDistance(Vector3 p, out float over, out float across, float far = 1e3f)
         {
             var best = far;
+            over = 0;
+            across = 0;
             int bx = (int)Math.Floor(p.X / Bucket), bz = (int)Math.Floor(p.Z / Bucket);
             for (var ox = -1; ox <= 1; ox++)
                 for (var oz = -1; oz <= 1; oz++)
@@ -740,9 +742,18 @@ public static class StitchedTerrain
                         var U = Vector3.Lerp(iv.A.Up, iv.B.Up, s);
                         var d = p - P;
                         var q = new Vector2(Vector3.Dot(d, R) / R.LengthSquared(), Vector3.Dot(d, U) / U.LengthSquared());
-                        var near = MathF.Min((q - Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s)).LengthSquared(), (q - Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s)).LengthSquared());
+                        Vector2 railL = Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s), railR = Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s);
+                        var near = MathF.Min((q - railL).LengthSquared(), (q - railR).LengthSquared());
                         var dist = MathF.Sqrt(near + along * along);
-                        if (dist < best) best = dist;
+                        if (dist >= best) continue;
+                        best = dist;
+                        // How far the point lies over the line between the two edges, towards the vault's top.
+                        var mid = (railL + railR) / 2;
+                        var up = Vector2.Lerp(iv.A.Poly[RailRight + ArchN / 2], iv.B.Poly[RailRight + ArchN / 2], s) - mid;
+                        over = up.LengthSquared() > 1e-8f ? Vector2.Dot(q - mid, Vector2.Normalize(up)) : 0;
+                        // And where across the road: 0 at its middle, 1 at an edge.
+                        var half = (railR - railL) / 2;
+                        across = half.LengthSquared() > 1e-8f ? MathF.Abs(Vector2.Dot(q - mid, half)) / half.LengthSquared() : 0;
                     }
                 }
             return best;
