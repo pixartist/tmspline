@@ -13,7 +13,7 @@ namespace TmSpline.Core.Geometry;
 /// <item>Land: Level (the mean height of the tracks' points) plus the noise height times noise of the noise size per hill
 /// (the scenery panel's two settings).</item>
 /// <item>Field: f(p) = max(p.y - land(x, z), -room(p)), negative in the solid.</item>
-/// <item>Octree: cells of Voxel metres within Near of a road, twice the size for each doubling of the distance beyond
+/// <item>Octree: cells of Voxel metres within Near of a road's edge, twice the size for each doubling of the distance beyond
 /// (up to Coarsest); only cells the surface may pass through are split.</item>
 /// <item>Mesh: dual contouring (one point per leaf the surface passes through, at the mean of its edge crossings; one
 /// quad, or a triangle where cells of different sizes meet, per smallest cell edge that changes sign): no cracks
@@ -32,7 +32,7 @@ public static class VoxelTerrain
     public static float NoiseSize { get; set; } = Setting("TMSPLINE_VOXEL_NOISESIZE", 160);
 
     /// <summary>Within this of a road the cells are the smallest, and no cell is larger than Coarsest; metres (TMSPLINE_VOXEL_NEAR, TMSPLINE_VOXEL_COARSEST).</summary>
-    public static float Near { get; set; } = Setting("TMSPLINE_VOXEL_NEAR", 10);
+    public static float Near { get; set; } = Setting("TMSPLINE_VOXEL_NEAR", 3);
     public static float Coarsest { get; set; } = Setting("TMSPLINE_VOXEL_COARSEST", 32);
 
     /// <summary>A triangle at a driving surface is the cut's floor under it (left out) when it faces within about 35 degrees of it.</summary>
@@ -76,7 +76,7 @@ public static class VoxelTerrain
     public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map)
     {
         var v = Voxel;
-        var (room, roomFloor, nearest) = StitchedTerrain.Rooms(grid, map);
+        var (room, roomFloor, nearest, road) = StitchedTerrain.Rooms(grid, map);
         var points = map.Tracks.SelectMany(t => t.Points).ToList();
         var level = points.Count > 0 ? (float)points.Average(p => p.Position.Y) : 0;
         // The hills: the scenery panel's noise height and size where the map carries them.
@@ -151,7 +151,10 @@ public static class VoxelTerrain
             var half = n.Size / 2;
             var c = World(n.X + half, n.Y + half, n.Z + half);
             var reach = n.Size * v * 0.866f;
+            // How far the cell is from the roads' edges at least (that is where the land has to meet the road; a vault's
+            // top and the floor under the road's middle are further): exactly within a square of them, else by the squares.
             var from = MathF.Max(0, Away(c.X, c.Z) - reach - Coarse);
+            if (from <= 0) from = MathF.Max(0, MathF.Min(road(c), 2 * Coarse) - reach);
             if (n.Size <= Wanted(from)) return;
             // Split only where the surface may pass: the land's, outside the rooms, or a room's wall under the land.
             var over = c.Y - Land(c.X, c.Z, level, hills, hillSize);
@@ -159,7 +162,7 @@ public static class VoxelTerrain
             var landNear = MathF.Abs(over) <= span;
             var wall = false;
             var inRoom = false;
-            if (from < 2 * Coarse && over < span)
+            if (Away(c.X, c.Z) - reach < 2 * Coarse && over < span)
             {
                 var d = room(c);
                 wall = MathF.Abs(d) <= reach;
@@ -298,6 +301,13 @@ public static class VoxelTerrain
             var p = mesh.Positions[i];
             if (Away(p.X, p.Z) > 0) return;
             var (d, deck) = nearest(p);
+            // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
+            // back onto the floor.
+            if (deck != default && d < 0 && d > -2 * v)
+            {
+                p += deck * d;
+                mesh.Positions[i] = p;
+            }
             // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
             // shows through the slot between the land's edge and the driving surface.
             if (MathF.Abs(d) < v && Land(p.X, p.Z, level, hills, hillSize) - p.Y > FloorCover + v) under[i] = deck;

@@ -165,13 +165,13 @@ public static class StitchedTerrain
     /// <param name="maxTriangles">The land's triangle budget (0: none): the mesh gets coarser until it fits.</param>
     public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
-    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero).</summary>
-    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest) Rooms(TerrainGrid grid, TrackMap map)
+    /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero); the distance to the nearest road edge.</summary>
+    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, float> Road) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
-        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck));
+        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => b.RoadDistance(p));
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -711,6 +711,41 @@ public static class StitchedTerrain
                             low = MathF.Min(low, iv.Low);
                         }
             return low;
+        }
+
+        /// <summary>Distance to the nearest road edge (a rail), metres; `far` where none is within about a bucket.</summary>
+        public float RoadDistance(Vector3 p, float far = 1e3f)
+        {
+            var best = far;
+            int bx = (int)Math.Floor(p.X / Bucket), bz = (int)Math.Floor(p.Z / Bucket);
+            for (var ox = -1; ox <= 1; ox++)
+                for (var oz = -1; oz <= 1; oz++)
+                {
+                    if (!prismBuckets.TryGetValue((bx + ox, bz + oz), out var list)) continue;
+                    foreach (var id in list)
+                    {
+                        var iv = prisms[id];
+                        var t0 = Vector3.Dot(p - iv.A.P, iv.A.T);
+                        var t1 = Vector3.Dot(p - iv.B.P, iv.B.T);
+                        var f = t0 - t1;
+                        if (MathF.Abs(f) < 1e-5f) continue;
+                        var s = t0 / f;
+                        var along = 0f;
+                        if (s < 0) { if (iv.Station > 0 && s < -0.05f) continue; along = -t0; }
+                        else if (s > 1) { if (!iv.Last && s > 1.05f) continue; along = t1; }
+                        if (along > best) continue;
+                        s = Math.Clamp(s, 0, 1);
+                        var P = Vector3.Lerp(iv.A.P, iv.B.P, s);
+                        var R = Vector3.Lerp(iv.A.Right, iv.B.Right, s);
+                        var U = Vector3.Lerp(iv.A.Up, iv.B.Up, s);
+                        var d = p - P;
+                        var q = new Vector2(Vector3.Dot(d, R) / R.LengthSquared(), Vector3.Dot(d, U) / U.LengthSquared());
+                        var near = MathF.Min((q - Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s)).LengthSquared(), (q - Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s)).LengthSquared());
+                        var dist = MathF.Sqrt(near + along * along);
+                        if (dist < best) best = dist;
+                    }
+                }
+            return best;
         }
 
         /// <summary>
