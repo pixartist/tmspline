@@ -1,4 +1,4 @@
-namespace TmSpline.Core.Model;
+﻿namespace TmSpline.Core.Model;
 
 /// <summary>The terrain's look and surface: the game's hill materials (as on the DecoHill blocks).</summary>
 public enum TerrainSurface { Grass, Dirt, Ice }
@@ -21,6 +21,9 @@ public sealed class TerrainGrid
     public double Skirt { get; set; } = 16;
     /// <summary>Land steeper than this (degrees) is rock (Surfaces.TerrainRock), as are the skirts; 90: never.</summary>
     public double RockAngle { get; set; } = 90;
+    /// <summary>The scenery panel's noise height and size, metres (null: not given). VoxelTerrain's hills.</summary>
+    public double? NoiseHeight { get; set; }
+    public double? NoiseSize { get; set; }
 
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 

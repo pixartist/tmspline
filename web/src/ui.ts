@@ -41,7 +41,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   const t = scenery.ownTerrain;
   t.width = whole(own.width, 32, 1024, t.width);
   t.smoothing = whole(own.smoothing, 0, 256, t.smoothing);
-  t.noise = number(own.noise, 0, 64, t.noise);
+  t.noise = number(own.noise, 0, 256, t.noise);
   t.noiseSize = whole(own.noiseSize, 16, 512, t.noiseSize);
   t.rockAngle = whole(own.rockAngle, 0, 90, t.rockAngle);
   // Maps saved before this option had no rise.
@@ -597,7 +597,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       const t = scenery.ownTerrain;
       numberField(root, "Width (m)", () => t.width, (v) => (t.width = int(v, 32, 1024)), 16);
       numberField(root, "Smoothing (m)", () => t.smoothing, (v) => (t.smoothing = int(v, 0, 256)), 8);
-      numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(64, v))), 1);
+      numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(256, v))), 1);
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
       numberField(root, "Rise away from the track (%, 0 = off)", () => t.rise, (v) => { t.rise = Math.max(0, Math.min(100, v)); }, 5);

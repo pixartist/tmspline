@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using TmSpline.Core.Geometry;
 
@@ -42,9 +42,23 @@ public static class TrackJson
         /// <summary>Own terrain round the tracks (version 2 maps only; see TerrainGrid).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public TerrainDto? Terrain { get; set; }
+        /// <summary>The editor's scenery settings; read for the own terrain's noise only.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SceneryDto? SceneryOptions { get; set; }
     }
 
     /// <summary>See TerrainGrid; Heights null where there is no terrain.</summary>
+    public sealed class SceneryDto
+    {
+        public OwnTerrainDto? OwnTerrain { get; set; }
+    }
+
+    public sealed class OwnTerrainDto
+    {
+        public double? Noise { get; set; }
+        public double? NoiseSize { get; set; }
+    }
+
     public sealed class TerrainDto
     {
         public TerrainSurface Surface { get; set; }
@@ -202,6 +216,8 @@ public static class TrackJson
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
+                NoiseHeight = dto.SceneryOptions?.OwnTerrain?.Noise is { } nh && double.IsFinite(nh) ? Math.Clamp(nh, 0, 256) : null,
+                NoiseSize = dto.SceneryOptions?.OwnTerrain?.NoiseSize is { } ns && double.IsFinite(ns) ? Math.Clamp(ns, 16, 512) : null,
             };
         return map;
     }
