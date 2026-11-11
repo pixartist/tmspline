@@ -623,6 +623,22 @@ public static class StitchedTerrain
                 st.FootEnd = footEnd;
                 st.FootW = footEnd != 0 ? footW : 0;
             }
+            // VoxelTerrain's rooms: a round vault over the road, from rail to rail (half a circle, on a narrow road at
+            // least ArchHeight high), not the hull's flat-topped shape.
+            if (deckTuck > 0 && st.Chord >= SlotMin)
+            {
+                var half = (railR - railL) / 2;
+                var vaultMid = (railL + railR) / 2;
+                var o = Vector2.Normalize(new Vector2(-half.Y, half.X));
+                var toDeck = Vector2.Dot(o, mid - vaultMid);
+                if (MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
+                var height = MathF.Max(ArchHeight, half.Length());
+                for (var k = 1; k < ArchN; k++)
+                {
+                    var a = MathF.PI * k / ArchN;
+                    arch[k] = vaultMid + half * MathF.Cos(a) + o * (height * MathF.Sin(a));
+                }
+            }
             var poly = new Vector2[SectionPoints];
             poly[0] = railL;
             for (var k = 0; k <= DeckN; k++) poly[1 + k] = deck[k];
