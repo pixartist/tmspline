@@ -1,4 +1,4 @@
-import { MAX_BLOCK_LEVEL, type Editor, type TerrainBrush } from "./editor";
+import { MAX_BLOCK_LEVEL, RAISE_PER_STRENGTH, type Editor, type TerrainBrush } from "./editor";
 import { showExportDialog } from "./export";
 import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
@@ -648,7 +648,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       selectField(root, "Brush", ["off", "raise", "lower", "smooth", "flatten"], () => paint.brush, (v) => { paint.brush = v as typeof paint.brush; apply(); }, false,
         { off: "Off", raise: "Raise", lower: "Lower", smooth: "Smooth", flatten: "Flatten (to where the stroke starts)" });
       numberField(root, "Radius (m)", () => paint.radius, (v) => { paint.radius = Math.max(4, Math.min(256, v)); apply(); }, 4);
-      numberField(root, paint.brush === "raise" || paint.brush === "lower" ? "Strength (m per dab)" : "Strength (0 to 1)", () => paint.strength,
+      numberField(root, paint.brush === "raise" || paint.brush === "lower" ? `Strength (x ${RAISE_PER_STRENGTH} m per dab)` : "Strength (0 to 1)", () => paint.strength,
         (v) => { paint.strength = Math.max(0.05, Math.min(paint.brush === "raise" || paint.brush === "lower" ? 16 : 1, v)); apply(); }, 0.25);
       hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). The land follows at once; "
         + "where it meets the roads it is fitted again after each stroke. Each stroke is one undo step; generating again "

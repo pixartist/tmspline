@@ -147,6 +147,9 @@ const SCREEN_SIZE = 0.011;
 const OBJECT_MARKER = new THREE.OctahedronGeometry(1.1);
 const DRAG_THRESHOLD_PX = 3;
 
+/** Raise and lower move the land this many metres per dab at strength 1 (at the brush's middle). */
+export const RAISE_PER_STRENGTH = 6;
+
 /** Terrain brushes: raise and lower the land, smooth it, or flatten it to the height where the stroke started. */
 export type TerrainBrush = "raise" | "lower" | "smooth" | "flatten";
 export interface TerrainPaint {
@@ -1011,8 +1014,8 @@ export class Editor {
         if (d > paint.radius) continue;
         const w = 0.5 * (1 + Math.cos(Math.PI * d / paint.radius));
         let next = h;
-        if (paint.brush === "raise") next = h + paint.strength * w;
-        else if (paint.brush === "lower") next = h - paint.strength * w;
+        if (paint.brush === "raise") next = h + paint.strength * RAISE_PER_STRENGTH * w;
+        else if (paint.brush === "lower") next = h - paint.strength * RAISE_PER_STRENGTH * w;
         else if (paint.brush === "flatten") next = h + (stroke.flat - h) * w * rate;
         else {
           let sum = 0, n = 0;
