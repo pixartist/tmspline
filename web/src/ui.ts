@@ -652,9 +652,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         (v) => { paint.strength = Math.max(0.05, Math.min(paint.brush === "raise" || paint.brush === "lower" ? 16 : 1, v)); apply(); }, 0.25);
       if (paint.brush === "raise" || paint.brush === "lower")
         checkbox(root, "Into the roads (not cut by them)", () => paint.uncut, (v) => { paint.uncut = v; apply(); });
+      // What was painted into the roads cannot be painted away by the other brushes (the roads cut those): this does it.
+      buttonRow(root, [{ label: "Clear roads", onClick: () => { scenery.note = editor.clearRoads() ? "The roads cut through everything painted again." : "Nothing is painted into the roads."; editor.onChange(); } }]);
       hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). Raise and lower work where the "
         + "cursor meets the land, also on a cutting's side or a tunnel's wall and roof; the land is built again after "
-        + "each stroke, and the roads cut through what was added unless \"Into the roads\" is ticked. Smooth and flatten "
+        + "each stroke, and the roads cut through what was added unless \"Into the roads\" is ticked (Clear roads cuts those free again). Smooth and flatten "
         + "work on open ground. Each stroke is one undo step; generating again replaces the painted land.");
     }
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle

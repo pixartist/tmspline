@@ -931,6 +931,22 @@ export class Editor {
     return null;
   }
 
+  /**
+   * Clears the roads: what was painted into their space ("Into the roads") is cut by them again. The paint itself
+   * stays, beside and over the roads. One undo step. False when nothing was painted into the roads.
+   */
+  clearRoads(): boolean {
+    const grid = this.map.terrain;
+    if (!grid?.editsOver?.length) return false;
+    this.onBeforeEdit(structuredClone(this.map));
+    this.lastMerge = { time: 0 };
+    grid.edits = [...(grid.edits ?? []), ...grid.editsOver];
+    grid.editsOver = [];
+    this.onChange();
+    this.syncTerrain(true);
+    return true;
+  }
+
   /** Whether the brush works on the solid (raise, lower) and not on the height map. */
   private get sculpting(): boolean {
     return this.terrainPaint?.brush === "raise" || this.terrainPaint?.brush === "lower";
