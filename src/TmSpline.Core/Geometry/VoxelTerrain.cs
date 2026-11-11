@@ -35,6 +35,11 @@ public static class VoxelTerrain
     public static float Near { get; set; } = Setting("TMSPLINE_VOXEL_NEAR", 10);
     public static float Coarsest { get; set; } = Setting("TMSPLINE_VOXEL_COARSEST", 32);
 
+    /// <summary>A triangle at a driving surface is the cut's floor under it (left out) when it faces within about 35 degrees of it.</summary>
+    private const float FloorAlike = 0.82f;
+    /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
+    private const float FloorCover = 2f;
+
     private static float Setting(string name, float fallback) =>
         float.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
@@ -285,15 +290,17 @@ public static class VoxelTerrain
             foreach (var (size, e) in bySize) Console.WriteLine($"  voxel cells of {size * v} m: {e.Cells} with a point, {e.Inside} of them well under the land, {e.Away0} in a road's square");
         }
         // Only where the editor has land (its outline; the heights are not used): the rest is left out.
-        // Nor the cuts' floors under the driving surfaces (the road lies on them; a triangle with a corner beside the
-        // road stays, so the land ends under the road's edge).
-        var under = new bool[mesh.Positions.Count];
+        // Nor the cuts' floors under the driving surfaces (the road lies on them): triangles at a driving surface that
+        // face as it does. Land coming to the road from the side faces another way and stays, up to the road's edge.
+        var under = new Vector3[mesh.Positions.Count];
         Parallel.For(0, under.Length, i =>
         {
             var p = mesh.Positions[i];
             if (Away(p.X, p.Z) > 0) return;
             var (d, deck) = nearest(p);
-            under[i] = deck && MathF.Abs(d) < v;
+            // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
+            // shows through the slot between the land's edge and the driving surface.
+            if (MathF.Abs(d) < v && Land(p.X, p.Z, level, hills, hillSize) - p.Y > FloorCover + v) under[i] = deck;
         });
         var kept = new AdaptiveMesh();
         var index = new Dictionary<int, int>();
@@ -302,7 +309,12 @@ public static class VoxelTerrain
             Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
             var mid = (a + b + c) / 3;
             if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
-            if (under[mesh.Indices[t]] && under[mesh.Indices[t + 1]] && under[mesh.Indices[t + 2]]) continue;
+            Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
+            if (ua != default && ub != default && uc != default)
+            {
+                var facing = Vector3.Cross(b - a, c - a);
+                if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
+            }
             for (var k = 0; k < 3; k++)
             {
                 var i = mesh.Indices[t + k];
