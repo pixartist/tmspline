@@ -76,7 +76,7 @@ public static class TerrainMeshBuilder
         var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
         var triangles = new List<(int A, int B, int C)>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
-        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, stitched);
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, stitched, Voxel);
     }
 
     /// <summary>
@@ -84,7 +84,7 @@ public static class TerrainMeshBuilder
     /// grass and rock (cut along the rock angle), lightmap UVs, skirts under the outer edge, square chunks.
     /// </summary>
     internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
-        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null)
+        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null, bool solid = false)
     {
         // The lining's floors (the room over them, no steeper than the rock angle) are land like that beside them: their
         // points on the land's edge are the land's own (one point, one normal: no crease along the join), the others new.
@@ -124,7 +124,8 @@ public static class TerrainMeshBuilder
         {
             var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
                 new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
-            if (n.Y < 0) n = -n;
+            // (A height map's triangles all face up; a solid's keep their own side: ceilings and overhangs face down.)
+            if (!solid && n.Y < 0) n = -n;
             normals[a] += n;
             normals[b] += n;
             normals[c] += n;
@@ -192,8 +193,14 @@ public static class TerrainMeshBuilder
         foreach (var (a, b, c) in triangles)
         {
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
+            var facing = Vector3.UnitY;
+            if (solid)
+            {
+                facing = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])), new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
+                if (facing.LengthSquared() < 1e-12f) continue;
+            }
             void Emit(int p, int q, int r, bool stone) =>
-                MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p, stone), Vertex(chunk, q, stone), Vertex(chunk, r, stone), stone ? chunk.MaterialIndex(rock) : 0), Vector3.UnitY);
+                MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p, stone), Vertex(chunk, q, stone), Vertex(chunk, r, stone), stone ? chunk.MaterialIndex(rock) : 0), facing);
             bool Steep(int i) => normalOf[i].Y < rockBelow;
             var steep = new[] { a, b, c }.Count(Steep);
             if (!rocky || steep == 0 || steep == 3) Emit(a, b, c, rocky && steep == 3);
