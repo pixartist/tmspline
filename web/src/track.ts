@@ -77,8 +77,8 @@ export interface TrackPoint {
   waypoint: Waypoint;
   /** How high its gate stands over the road, meters (missing: DEFAULT_GATE_HEIGHT, as in the core). */
   gateHeight?: number;
-  /** A see-through plane in its gate (checkpoints, finish); missing: none. */
-  gatePlane?: true;
+  /** The see-through plane in its gate (checkpoints, finish): there unless false. (Files from 0.5.2 have true where it was ticked.) */
+  gatePlane?: boolean;
   /**
    * Linked checkpoint group (Checkpoint only): checkpoints with the same number, on any track of the map, count as one
    * in the game. Missing: not linked (TrackPoint.CheckpointGroup in the core).

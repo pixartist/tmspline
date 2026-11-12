@@ -163,7 +163,7 @@ public static class TrackJson
         /// <summary>Gate height in meters (see TrackPoint.GateHeight); missing = the default.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public double? GateHeight { get; set; }
-        /// <summary>The gate's see-through plane (see TrackPoint.GatePlane); missing = none.</summary>
+        /// <summary>The gate's see-through plane (see TrackPoint.GatePlane); missing = there, false = none.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public bool? GatePlane { get; set; }
         /// <summary>Linked checkpoint group (see TrackPoint.CheckpointGroup); missing = not linked.</summary>
@@ -280,7 +280,7 @@ public static class TrackJson
             track.Points.Add(new TrackPoint(V(p.Position), V(p.HandleOut), p.Bank, width) { HandleIn = V(p.HandleIn), Curve = p.Curve, Flat = Math.Clamp(p.Flat, 0, 0.9),
                 Sausage = Math.Clamp(p.Sausage, 0, 1), EdgeAnchor = Math.Clamp(p.EdgeAnchor ?? legacyAnchor, 0, 1),
                 BorderHeight = p.BorderHeight ?? TrackPoint.LegacyBorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
-                GateHeight = Math.Clamp(p.GateHeight ?? TrackPoint.DefaultGateHeight, 1, 100), GatePlane = p.GatePlane == true,
+                GateHeight = Math.Clamp(p.GateHeight ?? TrackPoint.DefaultGateHeight, 1, 100), GatePlane = p.GatePlane != false,
                 CheckpointGroup = Math.Clamp(p.CheckpointGroup ?? 0, 0, 9999) });
         }
         foreach (var s in dto.Segments)
@@ -312,7 +312,7 @@ public static class TrackJson
         {
             Position = A(p.Position), HandleIn = A(p.HandleIn), HandleOut = A(p.HandleOut), Bank = p.BankDegrees, Width = p.Width, Curve = p.Curve, Flat = p.Flat, Sausage = p.Sausage, EdgeAnchor = p.EdgeAnchor > 0 ? p.EdgeAnchor : null, BorderHeight = p.BorderHeight, Borders = p.Borders, Waypoint = p.Waypoint,
             GateHeight = p.GateHeight == TrackPoint.DefaultGateHeight ? null : p.GateHeight,
-            GatePlane = p.GatePlane ? true : null,
+            GatePlane = p.GatePlane ? null : false,
             CheckpointGroup = p.CheckpointGroup > 0 ? p.CheckpointGroup : null,
         }).ToList(),
         Segments = track.Segments.Select(s => new SegmentDto
