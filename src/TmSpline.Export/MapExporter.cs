@@ -44,17 +44,35 @@ public static class MapExporter
 
     /// <summary>
     /// Where the editor's height 0 lies in an environment's maps (world metres), and how many block rows lie below
-    /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. Blue Bay: its land, 5 rows
-    /// (seen in a map saved by the game: gates standing on land at 10 m, stored in row 6). The others: 5 rows
-    /// assumed, and a height a row over their water blocks, NOT YET CHECKED in game.
+    /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. The others (from maps saved by
+    /// the game, 2026-11-12): their water's blocks start at world height 0 (rows 5, 4, 14, 14), and the lowest land
+    /// on them (shores, with the game's vegetation) lies at 1.6 to 2 m; the editor's 0 is taken as the water's surface,
+    /// at 1 m (ASSUMED: under the shores; not measured in game).
     /// </summary>
     public static (double GroundY, int RowsBelow) Heights(MapEnvironment environment) => environment switch
     {
-        MapEnvironment.BlueBay => (10, 5),
-        MapEnvironment.GreenCoast => (8, 5),
-        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (80, 5),
+        MapEnvironment.BlueBay => (1, 5),
+        MapEnvironment.GreenCoast => (1, 4),
+        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (1, 14),
         _ => (GroundY, 8),
     };
+
+    /// <summary>
+    /// The environments' own vegetation (the game's items there, seen in maps saved by it): Stadium's trees are not
+    /// in them. By the tree's size in its name: small, medium, the rest.
+    /// </summary>
+    private static string Vegetation(MapEnvironment environment, string tree)
+    {
+        var size = tree.Contains("Small") ? 0 : tree.Contains("Medium") ? 1 : 2;
+        return environment switch
+        {
+            MapEnvironment.BlueBay => new[] { "PalmEcotone", "PalmGrove", "PalmForest" }[size],
+            MapEnvironment.GreenCoast => new[] { "Ecotone", "Grove", "Forest" }[size],
+            MapEnvironment.WhiteShore => new[] { "Bush", "Grove", "Forest" }[size],
+            MapEnvironment.RedIsland => "Cactus",
+            _ => tree,
+        };
+    }
 
     /// <summary>The template's decoration (stadium, day) and the same without the stadium (seen in maps saved by the game).</summary>
     public const string StadiumDecoration = "48x48Screen155Day", NoStadiumDecoration = "NoStadium48x48Day";
@@ -84,8 +102,6 @@ public static class MapExporter
         var stadium = options.Environment == MapEnvironment.Stadium;
         var (groundY, rowsBelow) = Heights(options.Environment);
         var groundBlockY = (int)Math.Floor(groundY / 8) + rowsBelow;
-        // (The map's collection: not used for items. Our own are Stadium's; the trees named with the map's collection
-        // were reported missing in a Blue Bay export, so they are tried as Stadium's too.)
         if (options.ClearTemplate)
         {
             // Start from an empty map with its own identity so it never collides with the template,
@@ -192,12 +208,15 @@ public static class MapExporter
             var at = origin + item.Position;
             if (OutsideWorld(map, at))
                 continue;
-            var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
+            // In another environment: its own vegetation in the tree's place, named with the map's collection and
+            // without a cell (as the game saves them).
+            var placed = map.PlaceAnchoredObject(stadium ? new Ident(item.Name, new Id(StadiumCollection), "Nadeo")
+                    : new Ident(Vegetation(options.Environment, item.Name), map.Decoration.Collection, "Nadeo"),
                 new Vec3((float)at.X, (float)at.Y, (float)at.Z),
                 new Vec3((float)(item.Yaw * Math.PI / 180), (float)(item.Pitch * Math.PI / 180), (float)(item.Roll * Math.PI / 180)), Vec3.Zero);
             if (item.Color != ItemColor.Default)
                 placed.Color = (DifficultyColor)(int)item.Color;
-            placed.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
+            placed.BlockUnitCoord = !stadium ? new Byte3(255, 255, 255) : new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
                 (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + rowsBelow, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }
         if (options.Items.Count > 0)

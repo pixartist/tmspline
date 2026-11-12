@@ -15,6 +15,20 @@ if (args[0] == "--pivot") { foreach (var f in args.Skip(1)) Pivot.Run(f); return
 if (args[0] == "--item") { ItemShape.Run(args[1]); return; }
 if (args[0] == "--chunks") { ChunkInfo.Run(args[1]); return; }
 if (args[0] == "--reflect") { Reflect.Run(args[1]); return; }
+if (args[0] == "--mapitems")
+{
+    // A map's items and blocks by name: how many, their collection, heights and cells (for the environments' vegetation).
+    foreach (var f in args.Skip(1))
+    {
+        var m = Gbx.ParseNode<CGameCtnChallenge>(f);
+        Console.WriteLine($"{Path.GetFileName(f)}: deco {m.Decoration} collection {m.Decoration.Collection.Number}");
+        foreach (var g in (m.AnchoredObjects ?? []).GroupBy(o => (o.ItemModel.Id, o.ItemModel.Collection.Number, o.ItemModel.Author)).OrderBy(g => g.Key.Id))
+            Console.WriteLine($"  item {g.Key.Id} | collection {g.Key.Number} | {g.Key.Author} | x{g.Count()} | y {g.Min(o => o.AbsolutePositionInMap.Y):0.##}..{g.Max(o => o.AbsolutePositionInMap.Y):0.##} | unit y {string.Join(",", g.Select(o => o.BlockUnitCoord.Y).Distinct().Take(6))} | e.g. {g.First().AbsolutePositionInMap}");
+        foreach (var g in (m.Blocks ?? []).GroupBy(b => b.Name).OrderBy(g => g.Key))
+            Console.WriteLine($"  block {g.Key} x{g.Count()} | rows {string.Join(",", g.Select(b => b.Coord.Y).Distinct().OrderBy(y => y).Take(8))} | free {g.Count(b => b.IsFree)} | e.g. {g.First().Coord} {g.First().AbsolutePositionInMap}");
+    }
+    return;
+}
 if (args[0] == "--mapprops")
 {
     // A map's plain properties (numbers, texts, idents, vectors), for comparing maps of different environments.
