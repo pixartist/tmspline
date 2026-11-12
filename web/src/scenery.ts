@@ -196,6 +196,14 @@ export function clearOfRoads(footprint: Set<string>, px: number, pz: number, cle
  * Forests: the game's tree items by kind, smallest first. The SpringTree names are confirmed from maps saved by the
  * game; the others follow the game's files (VegetTreeModel) and still need a check in game.
  */
+const BLUE_BAY = {
+  palms: ["PalmTreeBigA0", "PalmTreeBigA1", "PalmTreeBigA2", "PalmTreeBigA3", "PalmTreeBigA4", "PalmTreeBigB0", "PalmTreeBigB1", "PalmTreeBigB2", "PalmTreeBigB3",
+    "PalmTreeSmallA", "PalmTreeSmallB", "PalmTreeSmallC"],
+  sugar: ["PalmTreeSugarBigA", "PalmTreeSugarBigB", "PalmTreeSugarMediumA", "PalmTreeSugarMediumB", "PalmTreeSugarMediumC", "PalmTreeSugarSmallA", "PalmTreeSugarSmallB", "PalmTreeSugarSmallC"],
+  bushes: ["BushBigA", "BushBigB", "BushBigC", "BushBigD", "BushMediumA", "BushMediumB", "BushMediumC", "BushMediumD", "BushSmallA", "BushSmallB", "BushSmallC"],
+  plants: ["PlantSmallA", "PlantSmallB", "PlantSmallC", "PlantSmallD"],
+};
+
 export const FORESTS: { id: string; label: string; trees: string[]; environment?: string }[] = [
   { id: "spring", label: "Spring trees", trees: ["SpringTreeVerySmall", "SpringTreeSmall", "SpringTreeMedium", "SpringTreeBig", "SpringTreeTall"] },
   { id: "fall", label: "Fall trees", trees: ["FallTreeVerySmall", "FallTreeSmall", "FallTreeMedium", "FallTreeBig", "FallTreeTall"] },
@@ -208,12 +216,19 @@ export const FORESTS: { id: string; label: string; trees: string[]; environment?
   { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
   // The other environments' own vegetation (the game's item names there, from maps saved by it, 2026-11-12): Stadium's
   // trees are not in them.
-  { id: "bluebay", label: "Palms (all kinds)", trees: ["PalmEcotone", "PalmGrove", "PalmForest"], environment: "BlueBay" },
-  { id: "bluebay-forest", label: "Palm forest", trees: ["PalmForest"], environment: "BlueBay" },
-  { id: "bluebay-grove", label: "Palm grove", trees: ["PalmGrove"], environment: "BlueBay" },
-  { id: "bluebay-ecotone", label: "Palm ecotone", trees: ["PalmEcotone"], environment: "BlueBay" },
-  { id: "bluebay-sugar", label: "Sugar palms", trees: ["PalmTreeSugarBigA", "PalmTreeSugarBigB"], environment: "BlueBay" },
-  { id: "bluebay-bush", label: "Bushes", trees: ["BushSmallA"], environment: "BlueBay" },
+  // Blue Bay's single plants (every one of them, from a map saved by the game), and the names its editor's groups use.
+  { id: "bluebay-mix", label: "Tropical mix (palms, bushes, plants)", trees: [...BLUE_BAY.palms, ...BLUE_BAY.sugar, ...BLUE_BAY.bushes, ...BLUE_BAY.plants, "TreeMediumA"], environment: "BlueBay" },
+  { id: "bluebay-palms", label: "Palms", trees: BLUE_BAY.palms, environment: "BlueBay" },
+  { id: "bluebay-palms-big", label: "Big palms", trees: BLUE_BAY.palms.filter((n) => n.includes("Big")), environment: "BlueBay" },
+  { id: "bluebay-palms-small", label: "Small palms", trees: BLUE_BAY.palms.filter((n) => n.includes("Small")), environment: "BlueBay" },
+  { id: "bluebay-sugar", label: "Sugar palms", trees: BLUE_BAY.sugar, environment: "BlueBay" },
+  { id: "bluebay-bush", label: "Bushes", trees: BLUE_BAY.bushes, environment: "BlueBay" },
+  { id: "bluebay-plants", label: "Small plants", trees: BLUE_BAY.plants, environment: "BlueBay" },
+  { id: "bluebay-tree", label: "Trees", trees: ["TreeMediumA"], environment: "BlueBay" },
+  { id: "bluebay", label: "Palm groups (all kinds)", trees: ["PalmEcotone", "PalmGrove", "PalmForest"], environment: "BlueBay" },
+  { id: "bluebay-forest", label: "Palm groups: forest", trees: ["PalmForest"], environment: "BlueBay" },
+  { id: "bluebay-grove", label: "Palm groups: grove", trees: ["PalmGrove"], environment: "BlueBay" },
+  { id: "bluebay-ecotone", label: "Palm groups: ecotone", trees: ["PalmEcotone"], environment: "BlueBay" },
   { id: "greencoast", label: "Green Coast (all kinds)", trees: ["Ecotone", "Grove", "Forest"], environment: "GreenCoast" },
   { id: "greencoast-forest", label: "Forest", trees: ["Forest"], environment: "GreenCoast" },
   { id: "greencoast-grove", label: "Grove", trees: ["Grove"], environment: "GreenCoast" },

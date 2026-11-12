@@ -63,9 +63,10 @@ public static class MapExporter
     /// </summary>
     private static string Vegetation(MapEnvironment environment, string tree)
     {
-        // The editor places these by name already; a Stadium tree (an older map) becomes one by its size.
-        if (tree is "PalmEcotone" or "PalmGrove" or "PalmForest" or "Ecotone" or "Grove" or "Forest" or "Bush" or "Cactus"
-            or "BushSmallA" or "PalmTreeSugarBigA" or "PalmTreeSugarBigB") return tree;
+        // The editor places the environment's own by name already; a Stadium tree (an older map) becomes one by its size.
+        var stadiums = tree.StartsWith("SpringTree") || tree.StartsWith("FallTree") || tree.StartsWith("FrozenTree") || tree.StartsWith("Fir")
+            || tree is "PalmTreeSmall" or "PalmTreeMedium" or "CactusVerySmall" or "CactusMedium";
+        if (!stadiums) return tree;
         var size = tree.Contains("Small") ? 0 : tree.Contains("Medium") ? 1 : 2;
         return environment switch
         {
@@ -246,7 +247,8 @@ public static class MapExporter
                 var pick = (uint)(((long)Math.Round(at.X * 10) * 73856093) ^ ((long)Math.Round(at.Z * 10) * 19349663)) % (uint)variants.Length;
                 placed.Flags = (short)(variants[pick] << 8);
             }
-            placed.BlockUnitCoord = !stadium ? new Byte3(255, 255, 255) : new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
+            // (The game saves its groups' plants without a cell, single plants with theirs.)
+            placed.BlockUnitCoord = !stadium && Variants(options.Environment, placed.ItemModel.Id).Length > 1 ? new Byte3(255, 255, 255) : new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
                 (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + rowsBelow, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }
         if (options.Items.Count > 0)
