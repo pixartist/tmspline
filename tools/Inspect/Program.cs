@@ -24,8 +24,28 @@ if (args[0] == "--mapitems")
         Console.WriteLine($"{Path.GetFileName(f)}: deco {m.Decoration} collection {m.Decoration.Collection.Number}");
         foreach (var g in (m.AnchoredObjects ?? []).GroupBy(o => (o.ItemModel.Id, o.ItemModel.Collection.Number, o.ItemModel.Author)).OrderBy(g => g.Key.Id))
             Console.WriteLine($"  item {g.Key.Id} | collection {g.Key.Number} | {g.Key.Author} | x{g.Count()} | y {g.Min(o => o.AbsolutePositionInMap.Y):0.##}..{g.Max(o => o.AbsolutePositionInMap.Y):0.##} | unit y {string.Join(",", g.Select(o => o.BlockUnitCoord.Y).Distinct().Take(6))} | e.g. {g.First().AbsolutePositionInMap}");
+        foreach (var g in (m.AnchoredObjects ?? []).Where(o => o.ItemModel.Author == "Nadeo").GroupBy(o => o.ItemModel.Id).OrderBy(g => g.Key))
+            Console.WriteLine($"  flags of {g.Key}: {string.Join(" ", g.GroupBy(o => o.Flags).OrderBy(f => f.Key).Select(f => $"0x{f.Key:X}x{f.Count()}"))}");
         foreach (var g in (m.Blocks ?? []).GroupBy(b => b.Name).OrderBy(g => g.Key))
             Console.WriteLine($"  block {g.Key} x{g.Count()} | rows {string.Join(",", g.Select(b => b.Coord.Y).Distinct().OrderBy(y => y).Take(8))} | free {g.Count(b => b.IsFree)} | e.g. {g.First().Coord} {g.First().AbsolutePositionInMap}");
+    }
+    return;
+}
+if (args[0] == "--itemprops")
+{
+    // The plain properties of a map's items whose name contains the text: --itemprops <map> <text> [count].
+    var m = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
+    foreach (var o in (m.AnchoredObjects ?? []).Where(o => o.ItemModel.Id.Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(args.Length > 3 ? int.Parse(args[3]) : 3))
+    {
+        Console.WriteLine(o.ItemModel);
+        foreach (var p in o.GetType().GetProperties().OrderBy(p => p.Name))
+        {
+            if (p.GetIndexParameters().Length > 0) continue;
+            object? v;
+            try { v = p.GetValue(o); } catch { continue; }
+            if (v is null) continue;
+            Console.WriteLine($"  {p.Name} = {v}");
+        }
     }
     return;
 }

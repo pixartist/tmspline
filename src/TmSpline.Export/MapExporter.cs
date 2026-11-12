@@ -64,7 +64,8 @@ public static class MapExporter
     private static string Vegetation(MapEnvironment environment, string tree)
     {
         // The editor places these by name already; a Stadium tree (an older map) becomes one by its size.
-        if (tree is "PalmEcotone" or "PalmGrove" or "PalmForest" or "Ecotone" or "Grove" or "Forest" or "Bush" or "Cactus") return tree;
+        if (tree is "PalmEcotone" or "PalmGrove" or "PalmForest" or "Ecotone" or "Grove" or "Forest" or "Bush" or "Cactus"
+            or "BushSmallA" or "PalmTreeSugarBigA" or "PalmTreeSugarBigB") return tree;
         var size = tree.Contains("Small") ? 0 : tree.Contains("Medium") ? 1 : 2;
         return environment switch
         {
@@ -75,6 +76,26 @@ public static class MapExporter
             _ => tree,
         };
     }
+
+    /// <summary>
+    /// The environments' vegetation items are many plants under one name: which one an item is, is its variant, kept
+    /// in its flags (variant * 256). Without it every item is variant 0, a small bush. These are the variants the
+    /// game's editor gave each name in maps saved by it (2026-11-12); others may exist.
+    /// </summary>
+    private static int[] Variants(MapEnvironment environment, string name) => (environment, name) switch
+    {
+        (MapEnvironment.BlueBay, "PalmEcotone") => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 22, 31, 32, 33, 34],
+        (MapEnvironment.BlueBay, "PalmForest") => [11, 12, 13, 14, 15, 16, 17, 18, 19, 23, 24],
+        (MapEnvironment.BlueBay, "PalmGrove") => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 31, 32, 33, 34],
+        (MapEnvironment.GreenCoast, "Ecotone") => [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21, 36, 38, 39],
+        (MapEnvironment.GreenCoast, "Forest") => [30, 31, 32],
+        (MapEnvironment.GreenCoast, "Grove") => [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 21, 22, 23, 37, 38],
+        (MapEnvironment.RedIsland, "Cactus") => [0, 5, 7, 8, 9, 10, 12, 13],
+        (MapEnvironment.WhiteShore, "Bush") => [0, 1, 2],
+        (MapEnvironment.WhiteShore, "Forest") => [1, 2, 3, 4, 6, 7, 8, 11],
+        (MapEnvironment.WhiteShore, "Grove") => [0, 1, 2, 5, 6, 7, 9, 11, 14],
+        _ => [0],
+    };
 
     /// <summary>The template's decoration (stadium, day) and the same without the stadium (seen in maps saved by the game).</summary>
     public const string StadiumDecoration = "48x48Screen155Day", NoStadiumDecoration = "NoStadium48x48Day";
@@ -218,6 +239,13 @@ public static class MapExporter
                 new Vec3((float)(item.Yaw * Math.PI / 180), (float)(item.Pitch * Math.PI / 180), (float)(item.Roll * Math.PI / 180)), Vec3.Zero);
             if (item.Color != ItemColor.Default)
                 placed.Color = (DifficultyColor)(int)item.Color;
+            if (!stadium)
+            {
+                // Which of the name's plants: one of its variants, by the place (the same on every export).
+                var variants = Variants(options.Environment, placed.ItemModel.Id);
+                var pick = (uint)(((long)Math.Round(at.X * 10) * 73856093) ^ ((long)Math.Round(at.Z * 10) * 19349663)) % (uint)variants.Length;
+                placed.Flags = (short)(variants[pick] << 8);
+            }
             placed.BlockUnitCoord = !stadium ? new Byte3(255, 255, 255) : new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
                 (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + rowsBelow, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }

@@ -212,6 +212,8 @@ export const FORESTS: { id: string; label: string; trees: string[]; environment?
   { id: "bluebay-forest", label: "Palm forest", trees: ["PalmForest"], environment: "BlueBay" },
   { id: "bluebay-grove", label: "Palm grove", trees: ["PalmGrove"], environment: "BlueBay" },
   { id: "bluebay-ecotone", label: "Palm ecotone", trees: ["PalmEcotone"], environment: "BlueBay" },
+  { id: "bluebay-sugar", label: "Sugar palms", trees: ["PalmTreeSugarBigA", "PalmTreeSugarBigB"], environment: "BlueBay" },
+  { id: "bluebay-bush", label: "Bushes", trees: ["BushSmallA"], environment: "BlueBay" },
   { id: "greencoast", label: "Green Coast (all kinds)", trees: ["Ecotone", "Grove", "Forest"], environment: "GreenCoast" },
   { id: "greencoast-forest", label: "Forest", trees: ["Forest"], environment: "GreenCoast" },
   { id: "greencoast-grove", label: "Grove", trees: ["Grove"], environment: "GreenCoast" },
