@@ -48,7 +48,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.rise = number(own.rise, 0, 100, OWN_TERRAIN_DEFAULTS.rise);
 }
 import {
-  appendPoint, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, MAP_ENVIRONMENTS, type MapEnvironment, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
@@ -553,10 +553,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   textField(root, "Name", () => editor.map.name, (v) => editor.editMap((m) => (m.name = v)));
   if (map.tracks.some((tr) => tr.points.some((p) => p.waypoint === "StartFinish")))
     numberField(root, "Laps", () => editor.map.laps, (v) => editor.editMap((m) => (m.laps = Math.max(1, Math.min(99, Math.round(v))))), 1);
-  checkbox(root, "Stadium", () => !editor.map.noStadium, (v) => editor.editMap((m) => {
-    if (v) delete m.noStadium;
-    else m.noStadium = true;
-  }));
+  selectField(root, "Environment", ["Stadium", ...MAP_ENVIRONMENTS], () => editor.map.environment ?? "Stadium", (v) => { editor.editMap((m) => {
+    if (v === "Stadium") delete m.environment;
+    else { m.environment = v as MapEnvironment; delete m.noStadium; }
+  }); editor.onChange(); }, false, { Stadium: "Stadium", BlueBay: "Blue Bay", GreenCoast: "Green Coast", RedIsland: "Red Island", WhiteShore: "White Shore" });
+  if (!editor.map.environment)
+    checkbox(root, "Stadium", () => !editor.map.noStadium, (v) => editor.editMap((m) => {
+      if (v) delete m.noStadium;
+      else m.noStadium = true;
+    }));
 
   section(map.tracks.length > 1 ? `Track ${editor.active + 1} of ${map.tracks.length}` : "Track");
   checkbox(root, "Closed loop", () => editor.track.closed, (v) => editor.edit((tr) => (tr.closed = v), true), t.points.length < 3);

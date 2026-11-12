@@ -3,11 +3,13 @@ using GBX.NET.Engines.Game;
 // Turns a map into a neutral, empty template: no blocks/items/embedded data, placeholder author, no thumbnail.
 static class Template
 {
-    public static void Run(string input, string output)
+    /// <param name="keepBlocks">For the environments whose empty map is water blocks all over: they stay.</param>
+    public static void Run(string input, string output, bool keepBlocks = false)
     {
         var gbx = Gbx.Parse<CGameCtnChallenge>(input);
         var map = gbx.Node;
-        map.RemoveAll();
+        if (keepBlocks) map.RemoveAnchoredObjects(_ => true);
+        else map.RemoveAll();
         map.EmbeddedZipData = null;
         map.MapName = "TMSpline Template";
         map.Comments = "";

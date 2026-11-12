@@ -197,7 +197,11 @@ public sealed partial class ExportService
 
         try
         {
-            await using var template = File.OpenRead(_templatePath);
+            // Another environment: its own empty map beside the Stadium one (BlueBay.Map.Gbx ...).
+            var templatePath = map.Environment == MapEnvironment.Stadium ? _templatePath
+                : Path.Combine(Path.GetDirectoryName(_templatePath)!, $"{map.Environment}.Map.Gbx");
+            if (!File.Exists(templatePath)) throw new ExportRejectedException($"No template map for {map.Environment} on this server.");
+            await using var template = File.OpenRead(templatePath);
             using var output = new MemoryStream();
             var result = await TrackExporter.ExportAsync(new TrackExportRequest
             {

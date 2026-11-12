@@ -71,6 +71,9 @@ public enum ItemColor
 }
 
 /// <summary>Race waypoint placed at a spline point.</summary>
+/// <summary>The game's environments (collections): Stadium, and the four with water.</summary>
+public enum MapEnvironment { Stadium, BlueBay, GreenCoast, RedIsland, WhiteShore }
+
 public enum Waypoint
 {
     None,
@@ -293,6 +296,9 @@ public sealed class TrackMap
 
     /// <summary>Without the stadium around the map (the game's "Day (no stadium)" decoration).</summary>
     public bool NoStadium { get; set; }
+
+    /// <summary>The game's environment the map is made for (the others are water all over when empty, 64 x 64 cells).</summary>
+    public MapEnvironment Environment { get; set; }
 
     /// <summary>Vanilla game blocks placed on the map grid (written into the map by name, not as custom items).</summary>
     public List<VanillaBlock> Blocks { get; } = new();

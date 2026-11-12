@@ -47,6 +47,7 @@ public static class TrackExporter
             AuthorNickname = request.AuthorNickname,
             Laps = request.Map.Laps,
             NoStadium = request.Map.NoStadium,
+            Environment = request.Map.Environment,
             Blocks = request.Map.Blocks,
             // Vanilla items: the map's own (trees ...) and the placed pillars as the game's obstacle pillars.
             Items = [.. request.Map.Items, .. MeshQualities.GamePillars(request.Map, request.Quality)],

@@ -21,6 +21,8 @@ public sealed class MapExportOptions
     public int Laps { get; init; } = 3;
     /// <summary>Use the decoration without the stadium (the template's has it).</summary>
     public bool NoStadium { get; init; }
+    /// <summary>The environment the template is of: other than Stadium, its base blocks (the water) stay and heights are its own.</summary>
+    public MapEnvironment Environment { get; init; }
     /// <summary>Account login (the 22-character account id) to put in as map author. Null keeps the template's.</summary>
     public string? AuthorLogin { get; init; }
     public string? AuthorNickname { get; init; }
@@ -39,6 +41,20 @@ public static class MapExporter
     public const int GroundBlockY = 9;
     /// <summary>The game's collection number of Stadium (2020), as its maps store it for vanilla items.</summary>
     public const int StadiumCollection = 26;
+
+    /// <summary>
+    /// Where the editor's height 0 lies in an environment's maps (world metres), and how many block rows lie below
+    /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. Blue Bay: its land, 5 rows
+    /// (seen in a map saved by the game: gates standing on land at 10 m, stored in row 6). The others: 5 rows
+    /// assumed, and a height a row over their water blocks, NOT YET CHECKED in game.
+    /// </summary>
+    public static (double GroundY, int RowsBelow) Heights(MapEnvironment environment) => environment switch
+    {
+        MapEnvironment.BlueBay => (10, 5),
+        MapEnvironment.GreenCoast => (8, 5),
+        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (80, 5),
+        _ => (GroundY, 8),
+    };
 
     /// <summary>The template's decoration (stadium, day) and the same without the stadium (seen in maps saved by the game).</summary>
     public const string StadiumDecoration = "48x48Screen155Day", NoStadiumDecoration = "NoStadium48x48Day";
@@ -65,11 +81,17 @@ public static class MapExporter
         var map = gbx.Node;
         map.MapName = options.MapName;
 
+        var stadium = options.Environment == MapEnvironment.Stadium;
+        var (groundY, rowsBelow) = Heights(options.Environment);
+        var groundBlockY = (int)Math.Floor(groundY / 8) + rowsBelow;
+        // Vanilla items and our own are named with the map's collection (Stadium's as its number, as tested).
+        var collection = stadium ? new Id(StadiumCollection) : map.Decoration.Collection;
         if (options.ClearTemplate)
         {
             // Start from an empty map with its own identity so it never collides with the template,
-            // and without items the template embedded for itself.
-            map.RemoveAll();
+            // and without items the template embedded for itself. Another environment's template is empty but for
+            // its base (water blocks all over), which stays.
+            if (stadium) map.RemoveAll();
             map.EmbeddedZipData = null;
             map.MapUid = NewMapUid();
             log?.Invoke($"Cleared template, new map UID {map.MapUid}");
@@ -96,14 +118,14 @@ public static class MapExporter
                 zip.CreateEntryFromFile(item.ItemGbxPath, ("Items/" + item.RelativeItemPath).Replace('\\', '/'));
         });
 
-        if (options.NoStadium)
+        if (options.NoStadium && stadium)
             map.Decoration = new Ident(NoStadiumDecoration, map.Decoration.Collection, map.Decoration.Author);
 
-        var origin = options.Placement ?? new Vec3d(map.Size.X * 32 / 2.0, GroundY, map.Size.Z * 32 / 2.0);
+        var origin = options.Placement ?? new Vec3d(map.Size.X * 32 / 2.0, groundY, map.Size.Z * 32 / 2.0);
         log?.Invoke($"Map size {map.Size}, placing track origin at {origin}");
         foreach (var item in items)
         {
-            var ident = ReadIdent(item);
+            var ident = ReadIdent(item, collection);
             var p = origin + item.Offset;
             var r = item.PitchYawRoll;
             var placed = map.PlaceAnchoredObject(ident, new Vec3((float)p.X, (float)p.Y, (float)p.Z), new Vec3((float)r.X, (float)r.Y, (float)r.Z), Vec3.Zero);
@@ -142,13 +164,13 @@ public static class MapExporter
                 log?.Invoke($"Placed free block {block.Name} at {at} (yaw {block.Yaw}°, pitch {block.Pitch}°, roll {block.Roll}°), flags 0x{free.Flags:X8}");
                 continue;
             }
-            var coord = new Int3(block.X + map.Size.X / 2, block.Y + GroundBlockY, block.Z + map.Size.Z / 2);
+            var coord = new Int3(block.X + map.Size.X / 2, block.Y + groundBlockY, block.Z + map.Size.Z / 2);
             if (coord.X < 0 || coord.Z < 0 || coord.X >= map.Size.X || coord.Z >= map.Size.Z)
             {
                 log?.Invoke($"Skipped block {block.Name} outside the map at {coord}");
                 continue;
             }
-            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: block.Y == 0, variant: (byte)block.Variant, subVariant: (byte)block.SubVariant);
+            var placed = map.PlaceBlock(block.Name, coord, (Direction)(block.Dir & 3), isGround: stadium && block.Y == 0, variant: (byte)block.Variant, subVariant: (byte)block.SubVariant);
             // Columns under air blocks are pillar blocks with the pillar flag, as the game's editor saves them.
             if (block.Pillar)
                 placed.IsPillar = true;
@@ -168,13 +190,13 @@ public static class MapExporter
             var at = origin + item.Position;
             if (OutsideWorld(map, at))
                 continue;
-            var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
+            var placed = map.PlaceAnchoredObject(new Ident(item.Name, collection, "Nadeo"),
                 new Vec3((float)at.X, (float)at.Y, (float)at.Z),
                 new Vec3((float)(item.Yaw * Math.PI / 180), (float)(item.Pitch * Math.PI / 180), (float)(item.Roll * Math.PI / 180)), Vec3.Zero);
             if (item.Color != ItemColor.Default)
                 placed.Color = (DifficultyColor)(int)item.Color;
             placed.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
-                (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + 8, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
+                (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + rowsBelow, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }
         if (options.Items.Count > 0)
             log?.Invoke($"Placed {options.Items.Count} vanilla items");
@@ -278,11 +300,11 @@ public static class MapExporter
         return Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_')[..27];
     }
 
-    private static Ident ReadIdent(ImportedItem item)
+    private static Ident ReadIdent(ImportedItem item, Id collection)
     {
         var header = Gbx.ParseHeaderNode<CGameItemModel>(item.ItemGbxPath);
         var author = header.Ident?.Author ?? "";
         // Placed custom items are referenced by their path relative to the Items folder.
-        return new Ident(item.RelativeItemPath, new Id(26), author);
+        return new Ident(item.RelativeItemPath, collection, author);
     }
 }

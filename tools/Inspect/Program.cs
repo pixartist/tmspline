@@ -15,6 +15,25 @@ if (args[0] == "--pivot") { foreach (var f in args.Skip(1)) Pivot.Run(f); return
 if (args[0] == "--item") { ItemShape.Run(args[1]); return; }
 if (args[0] == "--chunks") { ChunkInfo.Run(args[1]); return; }
 if (args[0] == "--reflect") { Reflect.Run(args[1]); return; }
+if (args[0] == "--mapprops")
+{
+    // A map's plain properties (numbers, texts, idents, vectors), for comparing maps of different environments.
+    foreach (var f in args.Skip(1))
+    {
+        var m = Gbx.ParseNode<CGameCtnChallenge>(f);
+        Console.WriteLine(f);
+        foreach (var p in m.GetType().GetProperties().OrderBy(p => p.Name))
+        {
+            if (p.GetIndexParameters().Length > 0) continue;
+            object? v;
+            try { v = p.GetValue(m); } catch { continue; }
+            if (v is null || (v is not string && !v.GetType().IsValueType && v is not Ident)) continue;
+            var s = v.ToString() ?? "";
+            if (s.Length > 0 && s.Length < 160) Console.WriteLine($"  {p.Name} = {s}");
+        }
+    }
+    return;
+}
 if (args[0] == "--decorations")
 {
     // Map decorations (mood / stadium) in use, with the size and an example map each.
@@ -79,7 +98,7 @@ if (args[0] == "--variants")
 if (args[0] == "--icon") { foreach (var f in args.Skip(1)) Reflect.Icon(f); return; }
 if (args[0] == "--mobils") { foreach (var f in args.Skip(1)) Reflect.Mobils(f); return; }
 if (args[0] == "--clip") { foreach (var f in args.Skip(1)) Reflect.Clip(f); return; }
-if (args[0] == "--template") { Template.Run(args[1], args[2]); return; }
+if (args[0] == "--template") { Template.Run(args[1], args[2], args.Contains("--keep-blocks")); return; }
 if (args[0] == "--ground") { Ground.Run(args.Skip(1)); return; }
 // Prints a summary of a map: size, blocks, items, embedded files.
 foreach (var path in args)
@@ -88,6 +107,6 @@ foreach (var path in args)
     Console.WriteLine($"{path}\n  name={map.MapName} uid={map.MapUid} author={map.AuthorLogin} size={map.Size} deco={map.Decoration}");
     Console.WriteLine($"  blocks={map.Blocks?.Count} items={map.AnchoredObjects?.Count}");
     foreach (var g in (map.Blocks ?? new()).GroupBy(b => b.Name).Take(15)) Console.WriteLine($"    block {g.Key} x{g.Count()} e.g. coord={g.First().Coord} free={g.First().IsFree} absPos={g.First().AbsolutePositionInMap}");
-    foreach (var o in (map.AnchoredObjects ?? new()).Take(15)) Console.WriteLine($"    item {o.ItemModel} pos={o.AbsolutePositionInMap} pyr={o.PitchYawRoll}");
+    foreach (var o in (map.AnchoredObjects ?? new()).Take(15)) Console.WriteLine($"    item {o.ItemModel} pos={o.AbsolutePositionInMap} pyr={o.PitchYawRoll} unit={o.BlockUnitCoord}");
     if (map.EmbeddedZipData is { Length: > 0 }) using (var zip = map.OpenReadEmbeddedZipData()) foreach (var e in zip.Entries.Take(20)) Console.WriteLine($"    embedded {e.FullName} {e.Length}");
 }

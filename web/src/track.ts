@@ -205,6 +205,10 @@ export interface Track {
 }
 
 /** The document: a map with its tracks. Start, checkpoints and finish are only where the mapper puts them. */
+/** The environments besides Stadium, by the game's names for them. */
+export const MAP_ENVIRONMENTS = ["BlueBay", "GreenCoast", "RedIsland", "WhiteShore"] as const;
+export type MapEnvironment = (typeof MAP_ENVIRONMENTS)[number];
+
 export interface TrackMap {
   /** 3: point widths no longer include the curbs' inset (see LEGACY_CURB_INSET). */
   version: 3;
@@ -213,6 +217,8 @@ export interface TrackMap {
   laps: number;
   /** Without the stadium around the map (the game's "Day (no stadium)" decoration); missing = with. */
   noStadium?: true;
+  /** The game's environment the map is made for; missing = Stadium. The others are water all over, 64 x 64 cells. */
+  environment?: MapEnvironment;
   tracks: Track[];
   /** Vanilla game blocks on the map grid (exported by name; their meshes come from the game). */
   blocks: VanillaBlock[];
@@ -658,9 +664,12 @@ export function parseMap(json: string): TrackMap {
       z0: Number(t.z0) || 0, columns: t.columns, rows: t.rows, skirt: Math.max(0, Number(t.skirt) || 0),
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
+      // The brushes' dabs (five numbers each).
+      ...Object.fromEntries((["edits", "editsOver", "smooths", "smoothsOver"] as const).flatMap((k) =>
+        Array.isArray(t[k]) && t[k].length > 0 && t[k].length % 5 === 0 && t[k].every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ? [[k, t[k] as number[]]] : [])),
     } : undefined;
   const sceneryOptions = doc.sceneryOptions && typeof doc.sceneryOptions === "object" && !Array.isArray(doc.sceneryOptions) ? doc.sceneryOptions : undefined;
-  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...(terrain ? { terrain } : {}), ...(sceneryOptions ? { sceneryOptions } : {}) };
+  return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...((MAP_ENVIRONMENTS as readonly string[]).includes(doc.environment as string) ? { environment: doc.environment as MapEnvironment } : {}), ...(terrain ? { terrain } : {}), ...(sceneryOptions ? { sceneryOptions } : {}) };
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

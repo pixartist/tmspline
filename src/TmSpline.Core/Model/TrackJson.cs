@@ -27,6 +27,9 @@ public static class TrackJson
         /// <summary>Map without the stadium (see TrackMap.NoStadium); missing = with.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public bool? NoStadium { get; set; }
+        /// <summary>The environment (see TrackMap.Environment); missing = Stadium.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Environment { get; set; }
         public List<PointDto> Points { get; set; } = new();
         public List<SegmentDto> Segments { get; set; } = new();
         public List<ObjectDto> Objects { get; set; } = new();
@@ -205,7 +208,8 @@ public static class TrackJson
     {
         if (dto.Version > CurrentVersion)
             throw new JsonException($"Track version {dto.Version} is newer than supported ({CurrentVersion})");
-        var map = new TrackMap { Name = dto.Name, Laps = Math.Clamp(dto.Laps, 1, 99), NoStadium = dto.NoStadium == true };
+        var map = new TrackMap { Name = dto.Name, Laps = Math.Clamp(dto.Laps, 1, 99), NoStadium = dto.NoStadium == true,
+            Environment = Enum.TryParse<MapEnvironment>(dto.Environment, true, out var environment) && Enum.IsDefined(environment) ? environment : MapEnvironment.Stadium };
         map.Tracks.AddRange(Parts(dto).Select(ToTrack));
         if (dto.Version < 3)
             foreach (var track in map.Tracks)
