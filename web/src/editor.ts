@@ -8,7 +8,7 @@ import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
-  add, appendPoint, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, GATES, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -103,7 +103,13 @@ const EFFECT_COLORS: Record<string, number> = {
 };
 
 /** Marker colors of track objects; markers of objects that cannot be built where they are turn red. */
-const OBJECT_COLORS: Record<TrackObjectKind, number> = { Pillar: 0xd8dce4, Hole: 0xff5fa0, Gap: 0xff9f1c, Bump: 0x6fd36f };
+const OBJECT_COLORS: Record<TrackObjectKind, number> = { Pillar: 0xd8dce4, Hole: 0xff5fa0, Gap: 0xff9f1c, Bump: 0x6fd36f, Gate: 0xffd23f };
+/**
+ * A gate block (GateSpecial..., GateGameplay...) is a ring 32 m across standing in the middle of its block, its
+ * opening 26.2 m (from 2.9 m to 29.1 m up). The road runs through it at the object's height in the ring: 3 m, on its
+ * lower rim (only a narrow road fits there), to 16 m, through its middle (26 m fit). Mirrors GateObjects.
+ */
+const GATE_MIDDLE = 16;
 const OBJECT_BLOCKED = 0xff2020;
 
 const GATE_COLORS: Record<string, number> = { Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020 };
@@ -771,6 +777,33 @@ export class Editor {
     return b.dir % 2 === 0 ? [sx, sy, sz] : [sz, sy, sx];
   }
 
+  /**
+   * The tracks' Gate objects as the game's gate blocks, placed freely round the road where each sits: upright to the
+   * surface in its middle, facing along the road (as the export places them: GateObjects.GameBlocks in the core).
+   */
+  private gateBlocks(): VanillaBlock[] {
+    const blocks: VanillaBlock[] = [];
+    for (const t of this.map.tracks) {
+      const placements = this.views.get(t)?.placements ?? [];
+      if (placements.length !== t.objects.length) continue;
+      t.objects.forEach((o, i) => {
+        const gate = o.kind === "Gate" ? GATES[o.gate ?? "Turbo"] : undefined;
+        if (!gate) return;
+        const p = placements[i];
+        const up = new THREE.Vector3(...p.normal).normalize();
+        const tangent = new THREE.Vector3(...p.tangent);
+        const forward = tangent.addScaledVector(up, -tangent.dot(up)).normalize();
+        const right = new THREE.Vector3().crossVectors(up, forward);
+        const turn = new THREE.Matrix4().makeBasis(right, up, forward);
+        const angles = new THREE.Euler().setFromRotationMatrix(turn, "YXZ");
+        const origin = new THREE.Vector3(...p.position).sub(new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE).applyMatrix4(turn));
+        const deg = 180 / Math.PI;
+        blocks.push({ name: gate.block, x: 0, y: 0, z: 0, dir: 0, free: true, position: [origin.x, origin.y, origin.z], yaw: angles.y * deg, pitch: angles.x * deg, roll: angles.z * deg });
+      });
+    }
+    return blocks;
+  }
+
   private syncBlocks(): void {
     this.syncGround();
     const h = this.drag?.pick ?? this.hover;
@@ -778,7 +811,7 @@ export class Editor {
     // Clips (side walls, caps) show on faces without a neighbour, columns included.
     this.blocks.setNeighbours([...this.map.blocks, ...pillars]);
     this.blocks.sync(this.map.blocks, new Set(this.selectedBlocks()), h?.kind === "block" ? h.index : null);
-    this.blocks.syncPillars(pillars);
+    this.blocks.syncPillars([...pillars, ...this.gateBlocks()]);
     this.placeBlockAnchor();
     this.items.sync(this.map.items);
     this.syncTerrain();
@@ -2574,8 +2607,8 @@ export class Editor {
     const { segment, at: fraction } = this.segmentAt(distance);
     o.segment = segment;
     o.at = fraction;
-    if (o.kind !== "Gap") o.offset = clamp(o.offset + step.dot(right), -256, 256);
-    this.showLabel(e, o.kind === "Gap" ? `Gap at ${distance.toFixed(1)} m` : `${o.kind} at ${distance.toFixed(1)} m, ${o.offset >= 0 ? "right" : "left"} ${Math.abs(o.offset).toFixed(1)} m`);
+    if (o.kind !== "Gap" && o.kind !== "Gate") o.offset = clamp(o.offset + step.dot(right), -256, 256);
+    this.showLabel(e, o.kind === "Gap" || o.kind === "Gate" ? `${o.kind} at ${distance.toFixed(1)} m` : `${o.kind} at ${distance.toFixed(1)} m, ${o.offset >= 0 ? "right" : "left"} ${Math.abs(o.offset).toFixed(1)} m`);
     this.changed(false);
   }
 
@@ -2802,6 +2835,8 @@ export class Editor {
     v.surfaceCoords = mesh.surface;
     v.segmentStarts = mesh.segmentStarts;
     v.placements = mesh.objects;
+    // (The gates stand where their objects now are.)
+    if (track.objects.some((o) => o.kind === "Gate")) this.blocks.syncPillars([...pillarColumns(this.map.blocks, this.library), ...this.gateBlocks()]);
     v.quality = quality;
     this.updateEffectArrows(v, mesh);
 

@@ -111,6 +111,21 @@ public static class MeshQualities
         return (rings, meshes);
     }
 
+    /// <summary>The game's blocks the tracks place: their gates (GateObjects), freely placed.</summary>
+    public static List<VanillaBlock> GameGates(TrackMap map, MeshQuality quality)
+    {
+        var blocks = new List<VanillaBlock>();
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            if (!track.Objects.Any(o => o.Kind == TrackObjectKind.Gate)) continue;
+            var rings = TrackSampler.Sample(track, Sampler(quality));
+            if (rings.Count < 2) continue;
+            blocks.AddRange(GateObjects.GameBlocks(track, rings, TrackSampler.SegmentStarts(track)));
+        }
+        return blocks;
+    }
+
     /// <summary>The game's items the tracks place: obstacle pillars (placed pillars) and curve signs (segment signs).</summary>
     public static List<VanillaItem> GamePillars(TrackMap map, MeshQuality quality)
     {

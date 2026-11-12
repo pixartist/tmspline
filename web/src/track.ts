@@ -164,7 +164,31 @@ export const defaultSegment = (): TrackSegment => ({
   signs: "None", signSide: "Both", signSpacing: 16,
 });
 
-export const OBJECT_KINDS = ["Pillar", "Hole", "Gap", "Bump"] as const;
+export const OBJECT_KINDS = ["Pillar", "Hole", "Gap", "Bump", "Gate"] as const;
+/**
+ * The gates a Gate object can be: the game's own gate blocks (their trigger gives the effect or the other car; an item
+ * of ours cannot), by the key kept in the file. Mirrors GateObjects.Blocks in the core.
+ */
+export const GATES: Record<string, { block: string; label: string }> = {
+  Turbo: { block: "GateSpecialTurbo", label: "Turbo" },
+  Turbo2: { block: "GateSpecialTurbo2", label: "Turbo (red)" },
+  TurboRoulette: { block: "GateSpecialTurboRoulette", label: "Turbo roulette" },
+  ReactorBoost: { block: "GateSpecialBoost", label: "Reactor boost" },
+  ReactorBoost2: { block: "GateSpecialBoost2", label: "Reactor boost (red)" },
+  ReactorBoostOriented: { block: "GateSpecialBoostOriented", label: "Reactor boost, along the gate" },
+  ReactorBoost2Oriented: { block: "GateSpecialBoost2Oriented", label: "Reactor boost (red), along the gate" },
+  SlowMotion: { block: "GateSpecialSlowMotion", label: "Slow motion" },
+  NoSteering: { block: "GateSpecialNoSteering", label: "No steering" },
+  NoBrakes: { block: "GateSpecialNoBrake", label: "No brakes" },
+  FreeWheeling: { block: "GateSpecialNoEngine", label: "No engine" },
+  Cruise: { block: "GateSpecialCruise", label: "Cruise" },
+  Fragile: { block: "GateSpecialFragile", label: "Fragile" },
+  Reset: { block: "GateSpecialReset", label: "Reset" },
+  CarStadium: { block: "GateGameplayStadium", label: "Car: Stadium" },
+  CarSnow: { block: "GateGameplaySnow", label: "Car: Snow" },
+  CarRally: { block: "GateGameplayRally", label: "Car: Rally" },
+  CarDesert: { block: "GateGameplayDesert", label: "Car: Desert" },
+};
 export type TrackObjectKind = (typeof OBJECT_KINDS)[number];
 export const OBJECT_SHAPES = ["Round", "Rect"] as const;
 export type ObjectShape = (typeof OBJECT_SHAPES)[number];
@@ -188,12 +212,16 @@ export interface TrackObject {
   width: number;
   /** Pillars: how far they stand up from the road; bumps: how high the hump is (negative: a dip), in meters. */
   height: number;
+  /** Gates: which (a key of GATES). */
+  gate?: string;
   /** Pillars: the game item's colour (absent: Default). */
   color?: ItemColor;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {
   if (kind === "Bump") return { kind, segment, at, offset, shape: "Round", length: 10, width: 8, height: 1 };
+  // (Its height: how high in the ring the road runs; in its middle, where the ring is widest, a road of 26 m fits.)
+  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: 16, gate: "Turbo" };
   const size = kind === "Pillar" ? 2 : kind === "Hole" ? 6 : 16;
   return { kind, segment, at, offset: kind === "Gap" ? 0 : offset, shape: "Round", length: size, width: kind === "Gap" ? 0 : size, height: 4 };
 }

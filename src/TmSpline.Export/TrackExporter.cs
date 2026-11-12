@@ -48,7 +48,8 @@ public static class TrackExporter
             Laps = request.Map.Laps,
             NoStadium = request.Map.NoStadium,
             Environment = request.Map.Environment,
-            Blocks = request.Map.Blocks,
+            // The map's blocks, and the tracks' gates as the game's gate blocks.
+            Blocks = [.. request.Map.Blocks, .. MeshQualities.GameGates(request.Map, request.Quality)],
             // Vanilla items: the map's own (trees ...) and the placed pillars as the game's obstacle pillars.
             Items = [.. request.Map.Items, .. MeshQualities.GamePillars(request.Map, request.Quality)],
         }, log);

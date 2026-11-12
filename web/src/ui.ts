@@ -53,7 +53,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
+  GATES, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -180,6 +180,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     Hole: "Click the road to cut a hole into it (H)",
     Gap: "Click the road to leave a gap there, e.g. for a jump",
     Bump: "Click the road to put a bump (hump or dip) into it",
+    Gate: "Click the road to put one of the game's gates round it there (an effect, or another car)",
   };
   const placeButtons = OBJECT_KINDS.map((kind) =>
     [kind, button(kind, placeTitles[kind], () => editor.setPlaceMode(editor.placeMode === kind ? null : kind))] as const);
@@ -961,6 +962,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         if (v === "Default") delete x.color;
         else x.color = v as ItemColor;
       }));
+    } else if (obj.kind === "Gate") {
+      selectField(root, "Gate", Object.keys(GATES), () => o().gate ?? "Turbo", (v) => editor.edit((tr) => (tr.objects[s.index].gate = v)),
+        false, Object.fromEntries(Object.entries(GATES).map(([k, g]) => [k, g.label])));
+      rangeField(root, "Road at (m up the ring)", 0, 32, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(0.1, Math.min(32, v)))), 32);
     } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
         false, { Rect: "Rectangle" });
@@ -974,7 +979,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     }
     buttonRow(root, [{ label: "Delete", onClick: removeObject(editor) }]);
     const placed = editor.placement(s.index)?.placed ?? true;
-    if (!placed) hint(root, obj.kind === "Pillar" ? "This pillar is not built: it stands in a gap." : "This gap has no length on the track.");
+    if (!placed && obj.kind !== "Gate") hint(root, obj.kind === "Pillar" ? "This pillar is not built: it stands in a gap." : "This gap has no length on the track.");
     hint(root, {
       Pillar: "Drag the marker to move the pillar. It exports as the game's own obstacle pillar (round, 7 m tall, 2 to 16 m "
         + "thick), standing on the road upright to the surface (also on banked and bent road) and inside the driving surface.",
@@ -982,6 +987,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "always stays inside the driving surface. Length runs along the road, width across it.",
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "
         + "so you can build jumps.",
+      Gate: "Drag the marker to move the gate along the road. It is the game's own gate block: a ring 32 m across with an "
+        + "opening of 26 m, standing round the road upright to its surface, so its effect or car switch works as in the game. "
+        + "The ring does not change size. \"Road at\" sets how high in the ring the road runs: 16 m is its middle, where a road "
+        + "26 m wide just fits (the lower half of the ring hangs under the road); lower values lift the ring, for narrow roads.",
       Bump: "Drag the marker to move the bump. A smooth hump in the driving surface (negative height: a dip), real "
         + "geometry the car drives over; it flattens out towards the road's edges. The surface is cut finer around it "
         + "(see the segment's bump detail).",

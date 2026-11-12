@@ -253,6 +253,8 @@ public enum TrackObjectKind
     Gap,
     /// <summary>A smooth hump (or dip, with a negative height) in the driving surface.</summary>
     Bump,
+    /// <summary>One of the game's own gates round the road: an effect (as the road's effects) or another car (GateObjects).</summary>
+    Gate,
 }
 
 public enum ObjectShape
@@ -283,6 +285,8 @@ public sealed class TrackObject
     public double Height { get; set; } = 4;
     /// <summary>Pillars: the game item's colour.</summary>
     public ItemColor Color { get; set; }
+    /// <summary>Gates: which (a key of GateObjects.Blocks).</summary>
+    public string Gate { get; set; } = "Turbo";
 }
 
 /// <summary>
