@@ -92,10 +92,12 @@ public static class Surfaces
     /// PhysicsId="NotCollidable" override for collision.
     /// </summary>
     /// <remarks>
-    /// On trial: in the item it is made the game's own checkpoint effect (RaceTriggerFXCheckpoint, the plane in the
-    /// game's checkpoint blocks). The importer's material list has no such material, so the item is imported with the
-    /// glass and the link is set afterwards (GamePath, as for the cliffs' rock).
+    /// In the item it is made the game's own checkpoint effect (RaceTriggerFXCheckpoint, the plane in the game's
+    /// checkpoint blocks; RaceTriggerFXFinish, red, on finish gates). The importer's material list has no such
+    /// materials, so the item is imported with the glass and the link is set afterwards (GamePath, as for the cliffs'
+    /// rock). The game has no such effect for starts (its start blocks have no plane).
     /// </remarks>
+    public static readonly TmMaterial GateCurtainFinish = new("GateCurtainFinish", "GlassWaterWall", Color: "FF6060", GamePath: @"Stadium\Media\Material\RaceTriggerFXFinish");
     public static readonly TmMaterial GateCurtain = new("GateCurtain", "GlassWaterWall", Color: "80C8FF", GamePath: @"Stadium\Media\Material\RaceTriggerFXCheckpoint");
 
     /// <summary>Visible gate of a race waypoint, colored like the samples (start green, finish red ...).</summary>

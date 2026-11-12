@@ -124,7 +124,9 @@ public static class WaypointBuilder
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
-            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, outline), outline.Count, segment, curtain.GamePath is null ? CurtainTiling : 1);
+            // The game's own effect is the finish's (red) on finish gates.
+            var effect = curtain == Surfaces.GateCurtain && type != Waypoint.Checkpoint ? Surfaces.GateCurtainFinish : curtain;
+            place.Curtain(plane, plane.MaterialIndex(effect), CurtainOutline(ring, settings, outline), outline.Count, segment, CurtainTiling, effect.GamePath is not null);
             chunk.NotCollidable.Add(plane);
         }
 
@@ -292,7 +294,12 @@ public static class WaypointBuilder
 
         /// <summary>A double-sided strip between bottom/top point pairs in the ring plane (the see-through plane).</summary>
         /// <param name="row">Lightmap row reserved for it.</param>
-        public void Curtain(MeshChunk chunk, int material, List<((double X, double Y) Bottom, (double X, double Y) Top)> pairs, int row, int segment, float tiling)
+        /// <param name="effect">
+        /// False: glass, its texture `tiling` times across and up. True: the game's checkpoint effect, laid out as on
+        /// the game's own gates (GateExpandable's planes: u from 0.138 to 0.978 across a panel 8 m wide, v from 0.032 to
+        /// 0.963 over 8 m of height; left of 0.138 the texture holds a bright beam), in panels of about 8 m.
+        /// </param>
+        public void Curtain(MeshChunk chunk, int material, List<((double X, double Y) Bottom, (double X, double Y) Top)> pairs, int row, int segment, float tiling, bool effect = false)
         {
             Vector3 Local((double X, double Y) p)
             {
@@ -300,38 +307,71 @@ public static class WaypointBuilder
                 var l = frame.ToLocal(world - itemOrigin);
                 return new Vector3((float)l.X, (float)l.Y, (float)l.Z);
             }
+            static double Far((double X, double Y) a, (double X, double Y) b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+            static (double X, double Y) Mix((double X, double Y) a, (double X, double Y) b, double t) => (a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
+
+            // Where each pair lies along the strip (by its bottom line), metres.
+            var at = new double[pairs.Count];
+            for (var i = 1; i < pairs.Count; i++) at[i] = at[i - 1] + Far(pairs[i - 1].Bottom, pairs[i].Bottom);
+            var width = Math.Max(at[^1], 1e-6);
+            ((double X, double Y) Bottom, (double X, double Y) Top) At(double d)
+            {
+                var i = 1;
+                while (i + 1 < pairs.Count && at[i] < d) i++;
+                var t = at[i] > at[i - 1] ? Math.Clamp((d - at[i - 1]) / (at[i] - at[i - 1]), 0, 1) : 0;
+                return (Mix(pairs[i - 1].Bottom, pairs[i].Bottom, t), Mix(pairs[i - 1].Top, pairs[i].Top, t));
+            }
+
+            // The strip in panels, each with the texture once across: (pair, where along the strip, u).
+            var panels = new List<List<(((double X, double Y) Bottom, (double X, double Y) Top) Pair, double At, float U)>>();
+            var count = effect ? Math.Max(1, (int)Math.Round(width / 8)) : 1;
+            for (var k = 0; k < count; k++)
+            {
+                double from = width * k / count, to = width * (k + 1) / count;
+                float U(double d) => !effect ? (float)(d / width) * tiling : 0.138f + 0.84f * (float)((d - from) / (to - from));
+                var panel = new List<(((double X, double Y), (double X, double Y)), double, float)> { (At(from), from, U(from)) };
+                for (var i = 0; i < pairs.Count; i++)
+                    if (at[i] > from + 1e-4 && at[i] < to - 1e-4) panel.Add((pairs[i], at[i], U(at[i])));
+                panel.Add((At(to), to, U(to)));
+                panels.Add(panel);
+            }
 
             foreach (var side in new[] { 1, -1 })
             {
                 var n = frame.ToLocal(ring.Tangent * side);
                 var normal = new Vector3((float)n.X, (float)n.Y, (float)n.Z);
-                var b = chunk.Positions.Count;
-                for (var i = 0; i < pairs.Count; i++)
+                foreach (var panel in panels)
                 {
-                    var f = (float)i / Math.Max(1, pairs.Count - 1);
-                    foreach (var (p, v) in new[] { (pairs[i].Bottom, 0f), (pairs[i].Top, 1f) })
+                    var b = chunk.Positions.Count;
+                    foreach (var (pair, d, u0) in panel)
                     {
-                        chunk.Positions.Add(Local(p));
-                        chunk.Normals.Add(normal);
-                        chunk.Uv0.Add(new Vector2(f, v) * tiling);
-                        // Each side gets half of the reserved lightmap row.
-                        var u = (side > 0 ? 0.02f : 0.52f) + 0.46f * f;
-                        chunk.Uv1.Add(new Vector2(u, (row + 0.1f + 0.8f * v) / _rows));
+                        var f = (float)(d / width);
+                        var high = !effect ? tiling : 0.032f + 0.931f * (float)(Far(pair.Bottom, pair.Top) / 8);
+                        var low = !effect ? 0 : 0.032f;
+                        foreach (var (p, v, up) in new[] { (pair.Bottom, low, 0f), (pair.Top, high, 1f) })
+                        {
+                            chunk.Positions.Add(Local(p));
+                            chunk.Normals.Add(normal);
+                            chunk.Uv0.Add(new Vector2(u0, v));
+                            // Each side gets half of the reserved lightmap row.
+                            var u = (side > 0 ? 0.02f : 0.52f) + 0.46f * f;
+                            chunk.Uv1.Add(new Vector2(u, (row + 0.1f + 0.8f * up) / _rows));
+                        }
                     }
-                }
-                for (var i = 0; i + 1 < pairs.Count; i++)
-                {
-                    int a0 = b + i * 2, a1 = a0 + 1, c0 = a0 + 2, c1 = a0 + 3;
-                    // Wind each side so it faces its normal (forward / backward along the road).
-                    if (side > 0)
+                    for (var i = 0; i + 1 < panel.Count; i++)
                     {
-                        chunk.Triangles.Add(new Triangle(a0, c0, c1, material, segment));
-                        chunk.Triangles.Add(new Triangle(a0, c1, a1, material, segment));
-                    }
-                    else
-                    {
-                        chunk.Triangles.Add(new Triangle(a0, c1, c0, material, segment));
-                        chunk.Triangles.Add(new Triangle(a0, a1, c1, material, segment));
+                        int a0 = b + i * 2, a1 = a0 + 1, c0 = a0 + 2, c1 = a0 + 3;
+                        // Wind each side so it faces its normal (forward / backward along the road).
+                        if (side > 0)
+                        {
+                            chunk.Triangles.Add(new Triangle(a0, c0, c1, material, segment));
+                            chunk.Triangles.Add(new Triangle(a0, c1, a1, material, segment));
+                        }
+                        else
+                        {
+                            chunk.Triangles.Add(new Triangle(a0, c1, c0, material, segment));
+                            chunk.Triangles.Add(new Triangle(a0, a1, c1, material, segment));
+                        }
                     }
                 }
             }
