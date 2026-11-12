@@ -190,7 +190,7 @@ public static class ServerApp
         {
             try
             {
-                var bytes = service.TerrainDab(request.Key ?? "", request.Dabs ?? [], request.Over);
+                var bytes = service.TerrainDab(request.Key ?? "", request.Dabs ?? [], request.Over, request.Smooth);
                 return bytes is null ? Results.NotFound() : Results.Bytes(bytes, "application/octet-stream");
             }
             catch (ExportRejectedException e)

@@ -77,6 +77,11 @@ public static class TrackJson
         /// <summary>The same, for dabs the roads do not cut through.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public double[]? EditsOver { get; set; }
+        /// <summary>The smoothing brush's dabs (five numbers each, as Edits), cut by the roads and not.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double[]? Smooths { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double[]? SmoothsOver { get; set; }
     }
 
     public sealed class ItemDto
@@ -224,6 +229,8 @@ public static class TrackJson
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
                 Edits = t.Edits is { } edits && edits.Length % 5 == 0 && edits.All(double.IsFinite) ? edits : [],
                 EditsOver = t.EditsOver is { } over && over.Length % 5 == 0 && over.All(double.IsFinite) ? over : [],
+                Smooths = t.Smooths is { } smooths && smooths.Length % 5 == 0 && smooths.All(double.IsFinite) ? smooths : [],
+                SmoothsOver = t.SmoothsOver is { } smoothsOver && smoothsOver.Length % 5 == 0 && smoothsOver.All(double.IsFinite) ? smoothsOver : [],
                 NoiseHeight = dto.SceneryOptions?.OwnTerrain?.Noise is { } nh && double.IsFinite(nh) ? Math.Clamp(nh, 0, 256) : null,
                 NoiseSize = dto.SceneryOptions?.OwnTerrain?.NoiseSize is { } ns && double.IsFinite(ns) ? Math.Clamp(ns, 16, 512) : null,
             };

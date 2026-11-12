@@ -966,19 +966,21 @@ export class Editor {
    */
   clearRoads(): boolean {
     const grid = this.map.terrain;
-    if (!grid?.editsOver?.length) return false;
+    if (!grid?.editsOver?.length && !grid?.smoothsOver?.length) return false;
     this.onBeforeEdit(structuredClone(this.map));
     this.lastMerge = { time: 0 };
-    grid.edits = [...(grid.edits ?? []), ...grid.editsOver];
+    grid.edits = [...(grid.edits ?? []), ...(grid.editsOver ?? [])];
     grid.editsOver = [];
+    grid.smooths = [...(grid.smooths ?? []), ...(grid.smoothsOver ?? [])];
+    grid.smoothsOver = [];
     this.onChange();
     this.syncTerrain(true);
     return true;
   }
 
-  /** Whether the brush works on the solid (raise, lower) and not on the height map. */
+  /** Whether the brush works on the solid (raise, lower, smooth) and not on the height map. */
   private get sculpting(): boolean {
-    return this.terrainPaint?.brush === "raise" || this.terrainPaint?.brush === "lower";
+    return this.terrainPaint?.brush === "raise" || this.terrainPaint?.brush === "lower" || this.terrainPaint?.brush === "smooth";
   }
 
   /** Where the brush is: on the land's mesh for the solid's brushes (walls and roofs too), else on the height map. */
@@ -989,7 +991,7 @@ export class Editor {
   }
 
   /** Dabs not yet built into the land shown (sent to the server one batch at a time), and whether a batch is on its way. */
-  private pendingDabs: { dabs: number[]; over: boolean } | null = null;
+  private pendingDabs: { dabs: number[]; over: boolean; smooth: boolean } | null = null;
   private dabbing = false;
   /** Whether the stroke's dabs all reached the land shown: else the whole is built again when the stroke ends. */
   private liveDabs = false;
@@ -1002,7 +1004,7 @@ export class Editor {
     this.pendingDabs = null;
     this.dabbing = true;
     const build = this.terrainBuild;
-    dabTerrain(key.key, pending.dabs, pending.over).then((chunks) => {
+    dabTerrain(key.key, pending.dabs, pending.over, pending.smooth).then((chunks) => {
       this.dabbing = false;
       // Another land since (an undo, Generate), or the server has lost this one: the whole is built again.
       if (build !== this.terrainBuild || this.terrainMesh !== group) return;
@@ -1105,16 +1107,17 @@ export class Editor {
     stroke.lastTime = performance.now();
     stroke.x0 = Math.min(stroke.x0, at.x); stroke.x1 = Math.max(stroke.x1, at.x);
     stroke.z0 = Math.min(stroke.z0, at.z); stroke.z1 = Math.max(stroke.z1, at.z);
-    if (paint.brush === "raise" || paint.brush === "lower") {
+    if (paint.brush === "raise" || paint.brush === "lower" || paint.brush === "smooth") {
       // The solid's brushes: a dab is kept with the land (the mesh follows when the stroke ends). One on the spot of
-      // the last (the brush held still) adds to it.
-      const amount = (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH;
-      const edits = paint.uncut ? (grid.editsOver ??= []) : (grid.edits ??= []);
+      // the last (the brush held still) adds to it. A smoothing dab's amount is how much it blurs.
+      const smooth = paint.brush === "smooth";
+      const amount = smooth ? paint.strength : (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH;
+      const edits = smooth ? (paint.uncut ? (grid.smoothsOver ??= []) : (grid.smooths ??= [])) : paint.uncut ? (grid.editsOver ??= []) : (grid.edits ??= []);
       const n = edits.length;
       if (this.liveDabs) {
         const over = !!paint.uncut;
-        if (this.pendingDabs && this.pendingDabs.over === over) this.pendingDabs.dabs.push(at.x, at.y, at.z, paint.radius, amount);
-        else this.pendingDabs = { dabs: [at.x, at.y, at.z, paint.radius, amount], over };
+        if (this.pendingDabs && this.pendingDabs.over === over && this.pendingDabs.smooth === smooth) this.pendingDabs.dabs.push(at.x, at.y, at.z, paint.radius, amount);
+        else this.pendingDabs = { dabs: [at.x, at.y, at.z, paint.radius, amount], over, smooth };
         this.flushDabs();
       }
       if (n >= 5 && edits[n - 2] === paint.radius && Math.hypot(edits[n - 5] - at.x, edits[n - 4] - at.y, edits[n - 3] - at.z) < 0.01) edits[n - 1] += amount;
@@ -1122,7 +1125,7 @@ export class Editor {
         edits.push(at.x, at.y, at.z, paint.radius, amount);
         if (!this.dabMarks) { this.dabMarks = new THREE.Group(); this.scene.add(this.dabMarks); }
         const mark = new THREE.Mesh(new THREE.SphereGeometry(Math.max(1, paint.radius / 6), 12, 8),
-          new THREE.MeshBasicMaterial({ color: paint.brush === "raise" ? 0xffe066 : 0x66b3ff, transparent: true, opacity: 0.5, depthTest: false }));
+          new THREE.MeshBasicMaterial({ color: paint.brush === "raise" ? 0xffe066 : paint.brush === "lower" ? 0x66b3ff : 0x7be08a, transparent: true, opacity: 0.5, depthTest: false }));
         mark.position.copy(at);
         mark.renderOrder = 10;
         this.dabMarks.add(mark);

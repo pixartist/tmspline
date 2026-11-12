@@ -71,6 +71,9 @@ public static class VoxelTerrain
     /// <summary>A part of the land is built with this much round it (cells there are as in the whole; beyond it they are left large), and its triangles' normals take in those up to half of it out; metres.</summary>
     private const float Margin = 48;
 
+    /// <summary>The smoothing brush: the blur's width for one dab of amount 1, and the widest it gets; metres.</summary>
+    private const float BlurPerDab = 2, MaxBlur = 12;
+
     public static Roads Prepare(TerrainGrid grid, TrackMap map)
     {
         var rooms = StitchedTerrain.Rooms(grid, map);
@@ -179,16 +182,53 @@ public static class VoxelTerrain
         // (First those the roads cut through, then from firstOver on those that come after the cut.)
         var dabs = grid.Edits.Concat(grid.EditsOver).ToArray();
         var firstOver = grid.Edits.Length;
-        var dabsAt = new Dictionary<(int, int), List<int>>();
-        for (var i = 0; i + 4 < dabs.Length; i += 5)
+        static Dictionary<(int, int), List<int>> BySquare(double[] dabs)
         {
-            double x = dabs[i], z = dabs[i + 2], r = dabs[i + 3];
-            for (var bx = (int)Math.Floor((x - r) / Coarse); bx <= (int)Math.Floor((x + r) / Coarse); bx++)
-                for (var bz = (int)Math.Floor((z - r) / Coarse); bz <= (int)Math.Floor((z + r) / Coarse); bz++)
-                {
-                    if (!dabsAt.TryGetValue((bx, bz), out var list)) dabsAt[(bx, bz)] = list = [];
-                    list.Add(i);
-                }
+            var at = new Dictionary<(int, int), List<int>>();
+            for (var i = 0; i + 4 < dabs.Length; i += 5)
+            {
+                double x = dabs[i], z = dabs[i + 2], r = dabs[i + 3];
+                for (var bx = (int)Math.Floor((x - r) / Coarse); bx <= (int)Math.Floor((x + r) / Coarse); bx++)
+                    for (var bz = (int)Math.Floor((z - r) / Coarse); bz <= (int)Math.Floor((z + r) / Coarse); bz++)
+                    {
+                        if (!at.TryGetValue((bx, bz), out var list)) at[(bx, bz)] = list = [];
+                        list.Add(i);
+                    }
+            }
+            return at;
+        }
+        var dabsAt = BySquare(dabs);
+        // The smoothing brush's dabs, kept the same way: where they lie the solid is blurred, the wider the more of
+        // them add up there (BlurPerDab metres at an amount of 1, growing with the root of the sum, as blurring
+        // again and again does; MaxBlur at most). Those the roads cut through blur the land before the cut, the
+        // others the whole after it.
+        var blurs = grid.Smooths.Concat(grid.SmoothsOver).ToArray();
+        var firstBlurOver = grid.Smooths.Length;
+        var blursAt = BySquare(blurs);
+        float Blur(Vector3 p, bool over)
+        {
+            if (!blursAt.TryGetValue(((int)MathF.Floor(p.X / Coarse), (int)MathF.Floor(p.Z / Coarse)), out var list)) return 0;
+            var sum = 0f;
+            foreach (var i in list)
+            {
+                if (i >= firstBlurOver != over) continue;
+                float dx = p.X - (float)blurs[i], dy = p.Y - (float)blurs[i + 1], dz = p.Z - (float)blurs[i + 2], r = (float)blurs[i + 3];
+                var t = (dx * dx + dy * dy + dz * dz) / (r * r);
+                if (t < 1) sum += MathF.Abs((float)blurs[i + 4]) * (1 - t) * (1 - t);
+            }
+            return MathF.Min(MaxBlur, BlurPerDab * MathF.Sqrt(sum));
+        }
+        // A field blurred at a place: its mean over the place, six points half the width off along the axes and the
+        // eight corners the full width off (a flat or evenly sloping surface stays where it is).
+        float Blurred(Func<Vector3, float> field, Vector3 p, bool over)
+        {
+            var h = blursAt.Count == 0 ? 0 : Blur(p, over);
+            if (h < 0.05f) return field(p);
+            var sum = 2 * field(p);
+            float a = h / 2, c = h * 0.577f;
+            sum += 2 * (field(p + new Vector3(a, 0, 0)) + field(p - new Vector3(a, 0, 0)) + field(p + new Vector3(0, a, 0)) + field(p - new Vector3(0, a, 0)) + field(p + new Vector3(0, 0, a)) + field(p - new Vector3(0, 0, a)));
+            for (var k = 0; k < 8; k++) sum += field(p + new Vector3((k & 1) == 0 ? -c : c, (k & 2) == 0 ? -c : c, (k & 4) == 0 ? -c : c));
+            return sum / 22;
         }
         float Painted(Vector3 p, bool over)
         {
@@ -206,10 +246,29 @@ public static class VoxelTerrain
         // In a box: how far the dabs there can move the surface at most, and the smallest of their radii (0: none there).
         (float Reach, float Radius, float Over) PaintedIn(Vector3 c, float half)
         {
-            if (dabsAt.Count == 0) return (0, 0, 0);
+            if (dabsAt.Count == 0 && blursAt.Count == 0) return (0, 0, 0);
             // A large cell: taken as painted (its children are looked at properly).
-            if (half > 4 * Coarse) return (1e6f, 0, firstOver < dabs.Length ? 1e6f : 0);
+            if (half > 4 * Coarse) return (1e6f, 0, firstOver < dabs.Length || firstBlurOver < blurs.Length ? 1e6f : 0);
             float reach = 0, radius = float.MaxValue, reachOver = 0;
+            // Smoothing moves the surface by its blur's width at most.
+            float blur = 0, blurOver = 0;
+            var blurred = new HashSet<int>();
+            for (var bx = (int)MathF.Floor((c.X - half) / Coarse); bx <= (int)MathF.Floor((c.X + half) / Coarse); bx++)
+                for (var bz = (int)MathF.Floor((c.Z - half) / Coarse); bz <= (int)MathF.Floor((c.Z + half) / Coarse); bz++)
+                {
+                    if (!blursAt.TryGetValue((bx, bz), out var list)) continue;
+                    foreach (var i in list)
+                    {
+                        var r = (float)blurs[i + 3];
+                        if (MathF.Abs(c.X - (float)blurs[i]) > half + r || MathF.Abs(c.Y - (float)blurs[i + 1]) > half + r || MathF.Abs(c.Z - (float)blurs[i + 2]) > half + r || !blurred.Add(i)) continue;
+                        if (i >= firstBlurOver) blurOver += MathF.Abs((float)blurs[i + 4]); else blur += MathF.Abs((float)blurs[i + 4]);
+                        radius = MathF.Min(radius, r);
+                    }
+                }
+            blur = MathF.Min(MaxBlur, BlurPerDab * MathF.Sqrt(blur));
+            blurOver = MathF.Min(MaxBlur, BlurPerDab * MathF.Sqrt(blurOver));
+            reach = blur + blurOver;
+            reachOver = blurOver;
             var seen = new HashSet<int>();
             for (var bx = (int)MathF.Floor((c.X - half) / Coarse); bx <= (int)MathF.Floor((c.X + half) / Coarse); bx++)
                 for (var bz = (int)MathF.Floor((c.Z - half) / Coarse); bz <= (int)MathF.Floor((c.Z + half) / Coarse); bz++)
@@ -227,9 +286,12 @@ public static class VoxelTerrain
             return reach > 0 ? (reach, radius, reachOver) : (0, 0, 0);
         }
 
-        float Field(Vector3 p)
+        float Land(Vector3 p) => p.Y - LandAt(p.X, p.Z) - Painted(p, false);
+        Func<Vector3, float> landField = Land, cutField = Cut;
+        float Field(Vector3 p) => Blurred(cutField, p, true);
+        float Cut(Vector3 p)
         {
-            var f = p.Y - LandAt(p.X, p.Z) - Painted(p, false);
+            var f = Blurred(landField, p, false);
             if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
             {
                 var cut = -room(p);
@@ -448,7 +510,7 @@ public static class VoxelTerrain
             // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
             // back onto the floor.
             // (Not where land was worked into the road's space: that stays where it was put, and its floor shows.)
-            if (Painted(p, true) != 0) return;
+            if (Painted(p, true) != 0 || Blur(p, true) > 0) return;
             if (deck != default && d < 0 && d > -2 * v)
             {
                 p += deck * d;

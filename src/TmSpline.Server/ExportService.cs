@@ -122,7 +122,7 @@ public sealed partial class ExportService
     /// under the key: the chunks they reach, built again and packed as TerrainPreview's. Null when there is no such
     /// terrain (the server was restarted: the editor asks for the whole again).
     /// </summary>
-    public byte[]? TerrainDab(string key, double[] dabs, bool over)
+    public byte[]? TerrainDab(string key, double[] dabs, bool over, bool smooth = false)
     {
         Painting? painting;
         lock (_painting) _painting.TryGetValue(key, out painting);
@@ -131,7 +131,9 @@ public sealed partial class ExportService
             throw new ExportRejectedException("Dabs are five numbers each.");
         lock (painting)
         {
-            if (over) grid.EditsOver = [.. grid.EditsOver, .. dabs];
+            if (smooth && over) grid.SmoothsOver = [.. grid.SmoothsOver, .. dabs];
+            else if (smooth) grid.Smooths = [.. grid.Smooths, .. dabs];
+            else if (over) grid.EditsOver = [.. grid.EditsOver, .. dabs];
             else grid.Edits = [.. grid.Edits, .. dabs];
             // The chunks a dab changes: those within its radius, and a little more (the cells round it get smaller).
             var keys = new HashSet<(int X, int Z)>();
@@ -153,6 +155,8 @@ public sealed partial class ExportService
         public string? Key { get; set; }
         public double[]? Dabs { get; set; }
         public bool Over { get; set; }
+        /// <summary>The smoothing brush's dabs, not the raising and lowering ones'.</summary>
+        public bool Smooth { get; set; }
     }
 
     public async Task<ExportedMap> ExportAsync(ExportRequestDto request, CancellationToken ct)

@@ -32,6 +32,10 @@ public sealed class TerrainGrid
     public double[] Edits { get; set; } = [];
     /// <summary>Dabs like <see cref="Edits"/> that come after the roads' cut: land worked into the road's own space (a bump on it, a rock in a tunnel).</summary>
     public double[] EditsOver { get; set; } = [];
+    /// <summary>The smoothing brush's dabs (x, y, z, radius, amount each): the solid is blurred where they lie, the more the more they add up to; the roads cut through the result.</summary>
+    public double[] Smooths { get; set; } = [];
+    /// <summary>Dabs like <see cref="Smooths"/> that come after the roads' cut (the cut's own edges are smoothed too).</summary>
+    public double[] SmoothsOver { get; set; } = [];
 
     public double Height(int c, int r) => c < 0 || r < 0 || c >= Columns || r >= Rows ? double.NaN : Heights[r * Columns + c];
 

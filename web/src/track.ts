@@ -250,6 +250,9 @@ export interface TerrainGrid {
   edits?: number[];
   /** Dabs like `edits` that the roads do not cut through: land worked into the road's own space. */
   editsOver?: number[];
+  /** The smoothing brush's dabs (five numbers each, as edits): the solid is blurred there; cut by the roads, and not. */
+  smooths?: number[];
+  smoothsOver?: number[];
 }
 
 /**

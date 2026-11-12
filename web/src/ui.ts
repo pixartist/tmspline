@@ -646,16 +646,17 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       selectField(root, "Brush", ["off", "raise", "lower", "smooth", "flatten"], () => paint.brush, (v) => { paint.brush = v as typeof paint.brush; apply(); relayout(); }, false,
         { off: "Off", raise: "Raise", lower: "Lower", smooth: "Smooth", flatten: "Flatten (to where the stroke starts)" });
       numberField(root, "Radius (m)", () => paint.radius, (v) => { paint.radius = Math.max(4, Math.min(256, v)); apply(); }, 4);
-      numberField(root, paint.brush === "raise" || paint.brush === "lower" ? `Strength (x ${RAISE_PER_STRENGTH} m per dab)` : "Strength (0 to 1)", () => paint.strength,
-        (v) => { paint.strength = Math.max(0.05, Math.min(paint.brush === "raise" || paint.brush === "lower" ? 16 : 1, v)); apply(); }, 0.25);
-      if (paint.brush === "raise" || paint.brush === "lower")
+      const solid = paint.brush === "raise" || paint.brush === "lower" || paint.brush === "smooth";
+      numberField(root, paint.brush === "raise" || paint.brush === "lower" ? `Strength (x ${RAISE_PER_STRENGTH} m per dab)` : solid ? "Strength" : "Strength (0 to 1)", () => paint.strength,
+        (v) => { paint.strength = Math.max(0.05, Math.min(solid ? 16 : 1, v)); apply(); }, 0.25);
+      if (solid)
         checkbox(root, "Into the roads (not cut by them)", () => paint.uncut, (v) => { paint.uncut = v; apply(); });
       // What was painted into the roads cannot be painted away by the other brushes (the roads cut those): this does it.
       buttonRow(root, [{ label: "Clear roads", onClick: () => { scenery.note = editor.clearRoads() ? "The roads cut through everything painted again." : "Nothing is painted into the roads."; editor.onChange(); } }]);
-      hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). Raise and lower work where the "
-        + "cursor meets the land, also on a cutting's side or a tunnel's wall and roof; the land is built again after "
-        + "each stroke, and the roads cut through what was added unless \"Into the roads\" is ticked (Clear roads cuts those free again). Smooth and flatten "
-        + "work on open ground. Each stroke is one undo step; generating again replaces the painted land.");
+      hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). Raise, lower and smooth work where the "
+        + "cursor meets the land, also on a cutting's side or a tunnel's wall and roof, and the land follows while you paint; "
+        + "the roads cut through the result unless \"Into the roads\" is ticked (Clear roads cuts those free again). Flatten "
+        + "works on open ground. Each stroke is one undo step; generating again replaces the painted land.");
     }
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
       ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "

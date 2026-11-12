@@ -122,11 +122,11 @@ export interface TerrainChunk { x: number; z: number; mesh: TerrainMesh }
  * The brush's dabs (x, y, z, radius, amount each; `over`: not cut by the roads) built into the terrain last built under
  * the key: the chunks they changed. Null when the server no longer has that terrain (ask for the whole again).
  */
-export async function dabTerrain(key: string, dabs: number[], over: boolean): Promise<TerrainChunk[] | null> {
+export async function dabTerrain(key: string, dabs: number[], over: boolean, smooth = false): Promise<TerrainChunk[] | null> {
   const response = await fetch("/api/terrain/dab", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key, dabs, over }),
+    body: JSON.stringify({ key, dabs, over, smooth }),
   });
   if (!response.ok) return null;
   return decodeChunks(new Uint8Array(await response.arrayBuffer()));
