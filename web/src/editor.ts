@@ -243,7 +243,7 @@ export class Editor {
   /** Axis gizmo moves of blocks: the anchor and the selected blocks when the move started. */
   private gizmoBlocks: { anchor: THREE.Vector3; blocks: MovedBlock[] } | null = null;
   private readonly raycaster = new THREE.Raycaster();
-  private readonly ground: THREE.Mesh;
+  private ground: THREE.Mesh;
   private readonly label: HTMLDivElement;
 
   /** Preview per track (keyed by the track object, so undo and deleting tracks need no bookkeeping). */
@@ -770,6 +770,7 @@ export class Editor {
   }
 
   private syncBlocks(): void {
+    this.syncGround();
     const h = this.drag?.pick ?? this.hover;
     const pillars = pillarColumns(this.map.blocks, this.library);
     // Clips (side walls, caps) show on faces without a neighbour, columns included.
@@ -1512,30 +1513,55 @@ export class Editor {
 
   // ---- scene setup ---------------------------------------------------------------------------
 
-  private createGround(): THREE.Mesh {
-    const size = MAP_HALF_EXTENT * 2;
+  /** The environment the ground is drawn for (undefined: Stadium). */
+  private groundFor: string | undefined;
+
+  /** The ground follows the map's environment: grass on the stadium's grid, or water (see-through, the land goes on under it). */
+  private syncGround(): void {
+    if (this.groundFor === this.map.environment) return;
+    this.groundFor = this.map.environment;
+    this.scene.remove(this.ground);
+    this.ground.traverse((o) => {
+      const m = o as THREE.Mesh;
+      m.geometry?.dispose();
+      for (const material of [m.material].flat()) material?.dispose();
+    });
+    this.ground = this.createGround(!!this.map.environment);
+    this.scene.add(this.ground);
+  }
+
+  private createGround(water = false): THREE.Mesh {
+    // The other environments' maps are 64 cells wide, and water all over.
+    const half = water ? 1024 : MAP_HALF_EXTENT;
+    const size = half * 2;
     // The clickable ground reaches as far as tracks may go; beyond the grid it is darker: the game has no ground there.
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_HALF_EXTENT * 2 + 1024, WORLD_HALF_EXTENT * 2 + 1024),
       // Pushed back in depth: the grid's own ground lies right on top of it and must win at every distance
       // (1 cm apart, the two would flicker against each other far from the camera).
-      new THREE.MeshStandardMaterial({ color: 0x46553f, roughness: 1, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 16 }),
+      water
+        ? new THREE.MeshStandardMaterial({ color: 0x1f4f78, roughness: 0.6, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 16 })
+        : new THREE.MeshStandardMaterial({ color: 0x46553f, roughness: 1, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 16 }),
     );
+    if (water) ground.renderOrder = 2;
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
-    const inside = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }));
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(size, size), water
+      ? new THREE.MeshStandardMaterial({ color: 0x3f9bd6, roughness: 0.4, transparent: true, opacity: 0.45, depthWrite: false })
+      : new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }));
+    if (water) inside.renderOrder = 2;
     inside.position.z = 0.01;
     ground.add(inside);
 
     // 32 m block grid inside the map, plus a brighter map boundary.
-    const grid = new THREE.GridHelper(size, size / 32, 0x5c8a40, 0x5c8a40);
+    const grid = new THREE.GridHelper(size, size / 32, water ? 0x2f7fb8 : 0x5c8a40, water ? 0x2f7fb8 : 0x5c8a40);
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.6;
     grid.position.y = 0.02;
     ground.add(grid);
     grid.rotation.x = Math.PI / 2;
 
-    const h = MAP_HALF_EXTENT;
+    const h = half;
     const border = new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(-h, -h, 0.1), new THREE.Vector3(h, -h, 0.1),
