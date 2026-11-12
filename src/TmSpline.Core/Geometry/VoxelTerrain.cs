@@ -23,7 +23,7 @@ public static class VoxelTerrain
 {
     /// <summary>The smallest cells' size, metres (TMSPLINE_VOXEL).</summary>
     public static float Voxel { get; set; } =
-        float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VOXEL"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : 1f;
+        float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VOXEL"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : 1.5f;
 
     /// <summary>Within this of a road the cells are the smallest, and no cell is larger than Coarsest; metres (TMSPLINE_VOXEL_NEAR, TMSPLINE_VOXEL_COARSEST).</summary>
     public static float Near { get; set; } = Setting("TMSPLINE_VOXEL_NEAR", 3);
