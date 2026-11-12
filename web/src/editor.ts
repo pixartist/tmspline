@@ -8,7 +8,7 @@ import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
-  add, appendPoint, GATES, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, GATES, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -112,7 +112,14 @@ const OBJECT_COLORS: Record<TrackObjectKind, number> = { Pillar: 0xd8dce4, Hole:
 const GATE_MIDDLE = 16;
 const OBJECT_BLOCKED = 0xff2020;
 
-const GATE_COLORS: Record<string, number> = { Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020 };
+const GATE_COLORS: Record<string, number> = {
+  Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020,
+  // The frames of effect and car gates (Surfaces.EffectGate in the core).
+  Turbo: 0xf0d020, Turbo2: 0xe03020, TurboRoulette: 0xf08020, ReactorBoost: 0xf0b030, ReactorBoostOriented: 0xf0b030,
+  ReactorBoost2: 0xe04030, ReactorBoost2Oriented: 0xe04030, SlowMotion: 0x40a0f0, NoSteering: 0xc050e0, NoBrakes: 0xe06090,
+  FreeWheeling: 0x808890, Cruise: 0x30c0c0, Fragile: 0xf07030, Reset: 0x40d060,
+  CarStadium: 0xe0e0e0, CarSnow: 0xa0d8ff, CarRally: 0xc08040, CarDesert: 0xe0c060,
+};
 
 const COLORS = {
   point: 0xffffff, start: 0x3fdc6a, selected: 0xffd23f, handle: 0x4fa3ff, otherTrack: 0x8a96a8,
@@ -796,9 +803,21 @@ export class Editor {
         const right = new THREE.Vector3().crossVectors(up, forward);
         const turn = new THREE.Matrix4().makeBasis(right, up, forward);
         const angles = new THREE.Euler().setFromRotationMatrix(turn, "YXZ");
-        const origin = new THREE.Vector3(...p.position).sub(new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE).applyMatrix4(turn));
         const deg = 180 / Math.PI;
-        blocks.push({ name: gate.block, x: 0, y: 0, z: 0, dir: 0, free: true, position: [origin.x, origin.y, origin.z], yaw: angles.y * deg, pitch: angles.x * deg, roll: angles.z * deg });
+        // A block with the point `inBlock` of it (metres from its origin corner) at `at`.
+        const put = (name: string, at: THREE.Vector3, inBlock: THREE.Vector3) => {
+          const origin = at.clone().sub(inBlock.applyMatrix4(turn));
+          blocks.push({ name, x: 0, y: 0, z: 0, dir: 0, free: true, position: [origin.x, origin.y, origin.z], yaw: angles.y * deg, pitch: angles.x * deg, roll: angles.z * deg });
+        };
+        const at = new THREE.Vector3(...p.position);
+        if (!o.frame) return put(gate.block, at, new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE));
+        // With a frame: the game's flat panels (32 m wide, 8 m high, standing in the middle of their block from
+        // 0.21 m under its floor) side by side and over one another; the placement is the middle of their lower
+        // edge, and tells how many it takes across (in place of the offset).
+        const across = Math.max(1, Math.round(p.across)), rows = Math.max(1, Math.round(clamp(o.height, 1, 100) / 8));
+        for (let a = 0; a < across; a++)
+          for (let r = 0; r < rows; r++)
+            put(gatePanel(o.gate ?? "Turbo"), at.clone().addScaledVector(right, (a - (across - 1) / 2) * 32).addScaledVector(up, r * 8), new THREE.Vector3(GATE_MIDDLE, -0.21, GATE_MIDDLE));
       });
     }
     return blocks;

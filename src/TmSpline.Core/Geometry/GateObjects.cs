@@ -30,15 +30,72 @@ public static class GateObjects
     private const double Middle = 16;
 
     /// <summary>
-    /// The track's gates as free blocks: upright to the surface in the road's middle, facing along the road; the block
-    /// turned by (yaw, pitch, roll) as free blocks are (Ry·Rx·Rz, the same as PillarBuilder.UprightAngles gives).
+    /// The game's flat gate panel for a gate (GateExpandable...: 32 m wide, 8 m high, standing in the middle of its
+    /// block, from 0.21 m under the block's floor up), for the gates with a frame of our own. Freely placed it is
+    /// the panel alone: the posts the game sets between such blocks on its grid do not come with it.
+    /// </summary>
+    public static string Panel(string gate) => gate.StartsWith("Car", StringComparison.Ordinal)
+        ? "GateExpandableGameplay" + gate[3..]
+        : "GateExpandable" + Blocks[gate]["Gate".Length..].Replace("Oriented", "");
+
+    private const double PanelSunk = 0.21;
+
+    private static IEnumerable<TrackObject> Gates(Track track, double[] segmentStarts) =>
+        track.Objects.Where(o => o.Kind == TrackObjectKind.Gate && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1 && Blocks.ContainsKey(o.Gate));
+
+    /// <summary>
+    /// Where a gate with a frame stands: the middle of its panels' lower edge, with the ring's up and the road's
+    /// direction (the frame and the panels lie in the ring's plane), and how many panels it takes across and up.
+    /// </summary>
+    public static (Vec3d Point, Vec3d Up, Vec3d Forward, WaypointBuilder.EffectFrame Layout) FrameAt(TrackObject o, Ring ring, RoadMeshSettings settings)
+    {
+        var layout = WaypointBuilder.EffectFrameAt(ring, o.Height, settings);
+        return (ring.Position + ring.Right * layout.CenterX + ring.Up * layout.Bottom, ring.Up, ring.Tangent, layout);
+    }
+
+    /// <summary>The frames of the track's gates that have one, as items (meshes of our own).</summary>
+    public static IEnumerable<MeshChunk> Frames(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts, Vec3d origin, RoadMeshSettings settings, string namePrefix)
+    {
+        var index = 0;
+        foreach (var o in Gates(track, segmentStarts))
+        {
+            index++;
+            if (!o.Frame) continue;
+            var ring = TrackObjects.RingAt(rings, TrackObjects.CenterDistance(o, segmentStarts));
+            yield return WaypointBuilder.BuildEffectFrame(ring, o.Segment, o.Gate, o.Height, origin, settings, $"{namePrefix}_{index:D2}");
+        }
+    }
+
+    /// <summary>
+    /// The track's gates as free blocks: the game's ring upright to the surface in the road's middle, facing along
+    /// the road, or (with a frame) its panels side by side and over one another in the frame. Turned by (yaw, pitch,
+    /// roll) as free blocks are (Ry·Rx·Rz, the same as PillarBuilder.UprightAngles gives).
     /// </summary>
     public static IEnumerable<VanillaBlock> GameBlocks(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts)
     {
-        foreach (var o in track.Objects.Where(o => o.Kind == TrackObjectKind.Gate && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1))
+        var settings = new RoadMeshSettings();
+        foreach (var o in Gates(track, segmentStarts))
         {
-            if (!Blocks.TryGetValue(o.Gate, out var block)) continue;
+            var block = Blocks[o.Gate];
             var ring = TrackObjects.RingAt(rings, TrackObjects.CenterDistance(o, segmentStarts));
+            if (o.Frame)
+            {
+                var (foot, frameUp, along, layout) = FrameAt(o, ring, settings);
+                var ahead = (along - frameUp * Vec3d.Dot(along, frameUp)).Normalized();
+                var side = Vec3d.Cross(frameUp, ahead);
+                var angles = PillarBuilder.UprightAngles(ahead, frameUp);
+                for (var i = 0; i < layout.Across; i++)
+                    for (var j = 0; j < layout.Up; j++)
+                    {
+                        var middle = foot + side * ((i - (layout.Across - 1) / 2.0) * WaypointBuilder.EffectFrame.PanelWidth) + frameUp * (j * WaypointBuilder.EffectFrame.PanelHeight);
+                        yield return new VanillaBlock
+                        {
+                            Name = Panel(o.Gate), Free = true, Position = middle - side * Middle + frameUp * PanelSunk - ahead * Middle,
+                            Yaw = angles.Yaw, Pitch = angles.Pitch, Roll = angles.Roll,
+                        };
+                    }
+                continue;
+            }
             var (point, up) = TrackObjects.SurfacePoint(ring, 0);
             var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
             var right = Vec3d.Cross(up, forward);

@@ -165,6 +165,12 @@ export const defaultSegment = (): TrackSegment => ({
 });
 
 export const OBJECT_KINDS = ["Pillar", "Hole", "Gap", "Bump", "Gate"] as const;
+/** A new gate's height: with a frame the frame's, with the game's ring where the road runs in it (its middle, where a road of 26 m fits). */
+export const GATE_FRAME_HEIGHT = 8, GATE_RING_HEIGHT = 16;
+/** The game's flat gate panel for a gate with a frame (mirrors GateObjects.Panel in the core). */
+export const gatePanel = (gate: string) => gate.startsWith("Car")
+  ? `GateExpandableGameplay${gate.slice(3)}`
+  : `GateExpandable${GATES[gate].block.slice("Gate".length).replace("Oriented", "")}`;
 /**
  * The gates a Gate object can be: the game's own gate blocks (their trigger gives the effect or the other car; an item
  * of ours cannot), by the key kept in the file. Mirrors GateObjects.Blocks in the core.
@@ -214,14 +220,18 @@ export interface TrackObject {
   height: number;
   /** Gates: which (a key of GATES). */
   gate?: string;
+  /**
+   * Gates: a frame of our own round the road with the game's flat gate panels in it, not the game's ring. The height
+   * is then the frame's (in steps of the panels' 8 m), else how high in the ring the road runs.
+   */
+  frame?: boolean;
   /** Pillars: the game item's colour (absent: Default). */
   color?: ItemColor;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {
   if (kind === "Bump") return { kind, segment, at, offset, shape: "Round", length: 10, width: 8, height: 1 };
-  // (Its height: how high in the ring the road runs; in its middle, where the ring is widest, a road of 26 m fits.)
-  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: 16, gate: "Turbo" };
+  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: GATE_FRAME_HEIGHT, gate: "Turbo", frame: true };
   const size = kind === "Pillar" ? 2 : kind === "Hole" ? 6 : 16;
   return { kind, segment, at, offset: kind === "Gap" ? 0 : offset, shape: "Round", length: size, width: kind === "Gap" ? 0 : size, height: 4 };
 }

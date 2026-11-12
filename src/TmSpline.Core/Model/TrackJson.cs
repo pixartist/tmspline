@@ -138,6 +138,9 @@ public static class TrackJson
         /// <summary>Gates: which (see TrackObject.Gate).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Gate { get; set; }
+        /// <summary>Gates: our own frame with the game's panels (see TrackObject.Frame).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Frame { get; set; }
     }
 
     public sealed class PointDto
@@ -299,7 +302,7 @@ public static class TrackJson
             track.Objects.Add(new TrackObject
             {
                 Kind = o.Kind, Segment = o.Segment, At = Math.Clamp(o.At, 0, 1), Offset = o.Offset, Shape = o.Shape,
-                Gate = o.Gate is { } gate && Geometry.GateObjects.Blocks.ContainsKey(gate) ? gate : "Turbo",
+                Gate = o.Gate is { } gate && Geometry.GateObjects.Blocks.ContainsKey(gate) ? gate : "Turbo", Frame = o.Frame,
                 Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width),
                 // Bumps may be dips (negative height).
                 Height = o.Kind == TrackObjectKind.Bump ? Math.Clamp(o.Height, -20, 20) : Math.Max(0.1, o.Height), Color = o.Color,
@@ -329,7 +332,7 @@ public static class TrackJson
         Objects = track.Objects.Select(o => new ObjectDto
         {
             Kind = o.Kind, Segment = o.Segment, At = o.At, Offset = o.Offset, Shape = o.Shape, Length = o.Length, Width = o.Width, Height = o.Height, Color = o.Color,
-            Gate = o.Kind == TrackObjectKind.Gate ? o.Gate : null,
+            Gate = o.Kind == TrackObjectKind.Gate ? o.Gate : null, Frame = o.Frame,
         }).ToList(),
     };
 
