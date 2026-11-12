@@ -102,10 +102,41 @@ public sealed partial class ExportService
     public (byte[] Data, string FileName) Model(ExportRequestDto request)
     {
         var (map, name) = Validate(request);
-        var (_, meshes) = MeshQualities.BuildExport(map, request.Quality ?? MeshQuality.Normal, 64);
-        if (map.Terrain is { } grid) meshes.AddRange(TerrainMeshBuilder.Build(grid, map));
-        return (ObjWriter.Write(meshes, name), TrackExporter.SafeName(name) + ".obj");
+        var quality = request.Quality ?? MeshQuality.Normal;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation("3D model of '{Name}' at {Quality}: {Tracks} track(s), terrain {Terrain}", name, quality, map.Tracks.Count,
+            map.Terrain is { } t ? $"{t.Columns} x {t.Rows} ({t.Quality})" : "none");
+        try
+        {
+            var (_, meshes) = MeshQualities.BuildExport(map, quality, 64);
+            if (map.Terrain is { } grid) meshes.AddRange(TerrainMeshBuilder.Build(grid, map));
+            var data = ObjWriter.Write(meshes, name);
+            _logger.LogInformation("3D model of '{Name}' built: {Items} items, {Triangles} triangles, {Bytes:0.0} MB in {Seconds:0.0} s",
+                name, meshes.Count, meshes.Sum(m => m.Triangles.Count + m.NotCollidable.Sum(c => c.Triangles.Count)), data.Length / 1e6, watch.Elapsed.TotalSeconds);
+            return (data, TrackExporter.SafeName(name) + ".obj");
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "3D model of '{Name}' failed after {Seconds:0.0} s", name, watch.Elapsed.TotalSeconds);
+            throw;
+        }
     }
+
+    /// <summary>How a 3D model's download ended, for the log: sent in full, or the editor went away before.</summary>
+    public void ModelSent(string fileName, long bytes, bool aborted)
+    {
+        if (aborted) _logger.LogWarning("3D model {File}: the editor closed the connection before all {Bytes:0.0} MB were sent", fileName, bytes / 1e6);
+        else _logger.LogInformation("3D model {File}: sent ({Bytes:0.0} MB)", fileName, bytes / 1e6);
+    }
+
+    /// <summary>What the editor says went wrong with a download it asked for (it has no log of its own).</summary>
+    public void ClientFailure(ClientFailureDto report) =>
+        _logger.LogWarning("The editor reports a failed download: {What} while {Stage} after {Seconds:0.0} s (request {Bytes:0.0} MB): {Message}",
+            Clip(report.What), Clip(report.Stage), report.Seconds, report.RequestBytes / 1e6, Clip(report.Message));
+
+    private static string Clip(string? text) => text is null ? "" : new string(text.Where(c => !char.IsControl(c)).Take(300).ToArray());
+
+    public sealed record ClientFailureDto(string? What, string? Stage, string? Message, double Seconds, long RequestBytes);
 
     /// <summary>The map's own terrain as the export builds it, packed for the editor (TerrainMeshBuilder.Preview).</summary>
     public byte[] TerrainPreview(ExportRequestDto request, string? key = null)

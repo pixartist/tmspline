@@ -289,17 +289,40 @@ function exportMap(track: TrackMap, author: Author, quality: Quality): Promise<{
   return download("/api/export", { track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }, "track.Map.Gbx");
 }
 
-/** Posts the request and saves the file that comes back (named by the server, else `fallback`). */
+/**
+ * Posts the request and saves the file that comes back (named by the server, else `fallback`). When that fails without
+ * an answer from the server (the browser's "Failed to fetch"), the error says at which step, and the server is told for
+ * its log (the app's tmspline.log).
+ */
 async function download(url: string, body: unknown, fallback: string): Promise<{ name: string; bytes: number }> {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error(await problemMessage(response, "Export failed"));
-
-  const blob = await response.blob();
-  const name = /filename="?([^";]+)"?/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? fallback;
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
-  a.click();
-  URL.revokeObjectURL(a.href);
-  return { name, bytes: blob.size };
+  const text = JSON.stringify(body);
+  const started = performance.now();
+  let stage = "sending the request";
+  let answered = false;
+  try {
+    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: text });
+    if (!response.ok) {
+      answered = true;
+      throw new Error(await problemMessage(response, "Export failed"));
+    }
+    stage = "receiving the file";
+    const blob = await response.blob();
+    stage = "saving the file";
+    const name = /filename="?([^";]+)"?/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? fallback;
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return { name, bytes: blob.size };
+  } catch (err) {
+    if (answered) throw err;
+    const message = (err as Error).message;
+    void fetch("/api/export/failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ what: url, stage, message, seconds: (performance.now() - started) / 1000, requestBytes: text.length }),
+    }).catch(() => {});
+    throw new Error(`${message} (while ${stage}, after ${((performance.now() - started) / 1000).toFixed(1)} s)`);
+  }
 }
 
 /** Writes the map into the game's Maps folder (Maps/TMSpline), where the TMSpline Live plugin reloads it. */

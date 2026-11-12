@@ -171,17 +171,29 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The map as a 3D model (meshes only, no importer).
-        app.MapPost("/api/export/model", (ExportRequestDto request, ExportService service) =>
+        app.MapPost("/api/export/model", (ExportRequestDto request, ExportService service, HttpContext context) =>
         {
             try
             {
                 var (data, fileName) = service.Model(request);
+                // How the download ends goes into the log: the file can be large.
+                var aborted = context.RequestAborted;
+                context.Response.OnCompleted(() => { service.ModelSent(fileName, data.Length, aborted.IsCancellationRequested); return Task.CompletedTask; });
                 return Results.File(data, "model/obj", fileName);
             }
             catch (ExportRejectedException e)
             {
                 return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest, title: "Invalid track");
             }
+        })
+        .RequireRateLimiting("estimate")
+        .DisableAntiforgery();
+
+        // A download that failed in the editor (it cannot write the log itself).
+        app.MapPost("/api/export/failed", (ExportService.ClientFailureDto report, ExportService service) =>
+        {
+            service.ClientFailure(report);
+            return Results.NoContent();
         })
         .RequireRateLimiting("estimate")
         .DisableAntiforgery();
