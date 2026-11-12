@@ -30,6 +30,11 @@ public sealed class MeshChunk
     /// gameplay id). The exported item is made such a gate after the import (ItemExporter.MakeEffectGate).
     /// </summary>
     public string? TriggerGameplay { get; init; }
+    /// <summary>
+    /// The mesh is exported with vertex colours of this grey (0 black to 1 white): the game's effect planes
+    /// (TriggerFX materials) take their opacity from them, white fully there, and show nothing without (black).
+    /// </summary>
+    public double? VertexShade { get; init; }
     /// <summary>Linked checkpoint group of a checkpoint gate (TrackPoint.CheckpointGroup), 0 when not linked.</summary>
     public int WaypointOrder { get; init; }
     /// <summary>Color of the placed item (the game's palette); what it tints depends on the materials.</summary>

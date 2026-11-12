@@ -112,6 +112,31 @@ public static class Surfaces
         _ => "E0E0E0",
     });
 
+    /// <summary>
+    /// The see-through plane in a gate of our own: the game's effect plane of that effect, by the importer's name for
+    /// it (TriggerFXTurbo for Turbo, [effect]_TriggerFX for the others; the names a tester read from the game's gates).
+    /// They show only with vertex colours (white: fully there; MeshChunk.WhiteVertexColors), which the importer keeps
+    /// only for materials its list declares them for: the exporter adds that (ImporterFiles.Prepare). Where the game
+    /// has no plane of its own for an effect (the cars, and the road effects without a gate of the game's), the
+    /// checkpoints' plane.
+    /// </summary>
+    public static TmMaterial EffectGatePlane(string gate)
+    {
+        var folder = gate switch
+        {
+            "Turbo2" or "TurboRoulette" or "SlowMotion" or "NoSteering" or "Cruise" or "Fragile" or "Reset" => gate,
+            "ReactorBoost" or "ReactorBoostOriented" => "Boost", "ReactorBoost2" or "ReactorBoost2Oriented" => "Boost2",
+            "NoBrakes" => "NoBrake", "FreeWheeling" => "NoEngine",
+            _ => null,
+        };
+        // The cars' gates have one plane of their own in the game (a neutral white): imported as the turbo plane, so
+        // that its vertex colours are kept, and made that material afterwards.
+        return gate == "Turbo" ? new($"GateFx_{gate}", "TriggerFXTurbo")
+            : folder is not null ? new($"GateFx_{gate}", $"{folder}_TriggerFX")
+            : gate.StartsWith("Car", StringComparison.Ordinal) ? new($"GateFx_{gate}", "TriggerFXTurbo", GamePath: @"Stadium\Media\Material\TriggerFXGateGameplay")
+            : GateCurtain with { Name = $"GateFx_{gate}" };
+    }
+
     /// <summary>Visible gate of a race waypoint, colored like the samples (start green, finish red ...).</summary>
     public static TmMaterial Gate(Waypoint waypoint) => waypoint switch
     {

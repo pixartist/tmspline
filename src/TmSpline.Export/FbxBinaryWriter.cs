@@ -179,6 +179,8 @@ public static class FbxBinaryWriter
         };
         if (withMaterials)
             layer0.Add(LayerElement("LayerElementMaterial", 0));
+        if (mesh.VertexShade is not null)
+            layer0.Add(LayerElement("LayerElementColor", 0));
 
         var geometry = new List<Node>
         {
@@ -206,6 +208,19 @@ public static class FbxBinaryWriter
                 new("MappingInformationType", "ByPolygon"),
                 new("ReferenceInformationType", "IndexToDirect"),
                 new("Materials", mesh.Triangles.Select(t => t.Material).ToArray()),
+            ]));
+        }
+        if (mesh.VertexShade is { } shade)
+        {
+            // One colour (a grey) for every corner.
+            geometry.Add(new("LayerElementColor", 0, Children:
+            [
+                new("Version", 101),
+                new("Name", "Col"),
+                new("MappingInformationType", "ByPolygonVertex"),
+                new("ReferenceInformationType", "IndexToDirect"),
+                new("Colors", new double[] { shade, shade, shade, 1 }),
+                new("ColorIndex", new int[corners.Length]),
             ]));
         }
         geometry.Add(new("Layer", 0, Children: layer0));

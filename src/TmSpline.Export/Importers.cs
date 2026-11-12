@@ -40,9 +40,34 @@ public static class ImporterFiles
         Directory.CreateDirectory(target);
         foreach (var f in Required)
             File.Copy(Path.Combine(importerDir, f), Path.Combine(target, f), overwrite: true);
+        var library = Path.Combine(target, "NadeoImporterMaterialLib.txt");
+        File.WriteAllText(library, WithEffectColours(File.ReadAllText(library)));
         File.WriteAllText(Path.Combine(target, "Nadeo.ini"),
             $"[Trackmania]\r\nWindowTitle=Trackmania\r\nDistro=AZURO\r\nUserDir={userDirForIni}\r\nCommonDir={userDirForIni}\\..\\common\r\n",
             Encoding.ASCII);
+    }
+
+    /// <summary>
+    /// The importer's material list with vertex colours declared (DColor0) for the game's effect planes (TriggerFXTurbo,
+    /// Turbo_TriggerFX ... and the SpecialFX ones): the importer keeps a mesh's vertex colours only for materials that
+    /// declare them, and Nadeo's list (2022) leaves these out, so their glow, which takes its opacity from the vertex
+    /// colours, came out black, that is, not at all. (Only our own copy of the list is changed, never the game's.)
+    /// </summary>
+    public static string WithEffectColours(string library)
+    {
+        var lines = library.Split('\n').ToList();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i].Trim();
+            if (!line.StartsWith("DMaterial(", StringComparison.Ordinal) || !(line.Contains("TriggerFX") || line.Contains("SpecialFX"))) continue;
+            // The material's own lines: up to the next material (or the file's end).
+            var end = i + 1;
+            while (end < lines.Count && !lines[end].TrimStart().StartsWith("DMaterial(", StringComparison.Ordinal) && !lines[end].TrimStart().StartsWith('#')) end++;
+            if (lines.Skip(i + 1).Take(end - i - 1).Any(l => l.TrimStart().StartsWith("DColor0", StringComparison.Ordinal))) continue;
+            var last = Enumerable.Range(i + 1, end - i - 1).LastOrDefault(k => lines[k].TrimStart().StartsWith("DUvLayer", StringComparison.Ordinal), i);
+            lines.Insert(last + 1, "\t\tDColor0\t\t()" + (lines[i].EndsWith('\r') ? "\r" : ""));
+        }
+        return string.Join('\n', lines);
     }
 
     public static async Task<string> RunProcessAsync(ProcessStartInfo psi, TimeSpan timeout, CancellationToken ct)
