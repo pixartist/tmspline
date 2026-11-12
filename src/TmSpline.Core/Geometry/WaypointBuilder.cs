@@ -200,18 +200,23 @@ public static class WaypointBuilder
         var samples = Enumerable.Range(0, 33).Select(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 32)).ToList();
         var lowest = samples.Min(p => p.Y);
         var beside = (borders ? settings.BorderThickness * ring.BorderScale : 0) + BeamWidth / 2 + 0.15;
-        (double X, double Y) Post(int side)
+        // A bar from the road's edge out to each post's foot holds the frame to the road: on a road bent downwards
+        // (its edges tucked in under its widest place) the posts stand well clear of the edges.
+        ((double X, double Y) Edge, (double X, double Y) Foot) Post(int side)
         {
             var edge = RoadMeshBuilder.SurfaceSample(ring, side * half);
             var outer = edge.X >= 0 ? samples.Max(p => p.X) + beside : samples.Min(p => p.X) - beside;
-            return (outer, edge.Y - settings.Thickness);
+            var y = edge.Y - settings.Thickness / 2;
+            return ((edge.X, y), (outer, y));
         }
         var (right, left) = (Post(1), Post(-1));
         var top = Math.Max(lowest + height, Math.Max(Foot(1).Y, Foot(-1).Y) + BeamWidth);
-        points.Add(right);
-        points.Add((right.X, top));
-        points.Add((left.X, top));
-        points.Add(left);
+        points.Add(right.Edge);
+        points.Add(right.Foot);
+        points.Add((right.Foot.X, top));
+        points.Add((left.Foot.X, top));
+        points.Add(left.Foot);
+        points.Add(left.Edge);
         return points;
     }
 
@@ -251,8 +256,8 @@ public static class WaypointBuilder
         }
 
         // From the surface straight up to the beam, between the posts.
-        if (outline.Count < 4) return pairs;
-        double top = outline[1].Y - BeamWidth / 2, from = Math.Min(outline[1].X, outline[2].X), to = Math.Max(outline[1].X, outline[2].X);
+        if (outline.Count < 6) return pairs;
+        double top = outline[2].Y - BeamWidth / 2, from = Math.Min(outline[2].X, outline[3].X), to = Math.Max(outline[2].X, outline[3].X);
         for (var i = 0; i <= ArchSegments; i++)
         {
             var bottom = Offset(half - ring.Width * i / ArchSegments, 0.05);
