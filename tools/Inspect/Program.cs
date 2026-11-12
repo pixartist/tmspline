@@ -105,8 +105,8 @@ foreach (var path in args)
 {
     var map = Gbx.ParseNode<CGameCtnChallenge>(path);
     Console.WriteLine($"{path}\n  name={map.MapName} uid={map.MapUid} author={map.AuthorLogin} size={map.Size} deco={map.Decoration}");
-    Console.WriteLine($"  blocks={map.Blocks?.Count} items={map.AnchoredObjects?.Count}");
+    Console.WriteLine($"  blocks={map.Blocks?.Count} items={map.AnchoredObjects?.Count} deco collection={map.Decoration.Collection.Number}/{map.Decoration.Collection.String} mapinfo={map.MapInfo.Collection.Number}/{map.MapInfo.Collection.String}");
     foreach (var g in (map.Blocks ?? new()).GroupBy(b => b.Name).Take(15)) Console.WriteLine($"    block {g.Key} x{g.Count()} e.g. coord={g.First().Coord} free={g.First().IsFree} absPos={g.First().AbsolutePositionInMap}");
-    foreach (var o in (map.AnchoredObjects ?? new()).Take(15)) Console.WriteLine($"    item {o.ItemModel} pos={o.AbsolutePositionInMap} pyr={o.PitchYawRoll} unit={o.BlockUnitCoord}");
+    foreach (var o in (map.AnchoredObjects ?? new()).Take(15)) Console.WriteLine($"    item {o.ItemModel} pos={o.AbsolutePositionInMap} pyr={o.PitchYawRoll} unit={o.BlockUnitCoord} collection={o.ItemModel.Collection.Number}/{o.ItemModel.Collection.String}");
     if (map.EmbeddedZipData is { Length: > 0 }) using (var zip = map.OpenReadEmbeddedZipData()) foreach (var e in zip.Entries.Take(20)) Console.WriteLine($"    embedded {e.FullName} {e.Length}");
 }

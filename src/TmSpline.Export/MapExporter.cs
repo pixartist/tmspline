@@ -125,7 +125,9 @@ public static class MapExporter
         log?.Invoke($"Map size {map.Size}, placing track origin at {origin}");
         foreach (var item in items)
         {
-            var ident = ReadIdent(item, collection);
+            // Our own items are Stadium's (the importer makes them so), whatever the map's environment: named with the
+            // map's collection the game does not find them ("Missing items", seen in a Blue Bay export).
+            var ident = ReadIdent(item, new Id(StadiumCollection));
             var p = origin + item.Offset;
             var r = item.PitchYawRoll;
             var placed = map.PlaceAnchoredObject(ident, new Vec3((float)p.X, (float)p.Y, (float)p.Z), new Vec3((float)r.X, (float)r.Y, (float)r.Z), Vec3.Zero);
