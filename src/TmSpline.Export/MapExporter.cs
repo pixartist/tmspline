@@ -70,31 +70,26 @@ public static class MapExporter
         var size = tree.Contains("Small") ? 0 : tree.Contains("Medium") ? 1 : 2;
         return environment switch
         {
-            MapEnvironment.BlueBay => new[] { "PalmEcotone", "PalmGrove", "PalmForest" }[size],
-            MapEnvironment.GreenCoast => new[] { "Ecotone", "Grove", "Forest" }[size],
-            MapEnvironment.WhiteShore => new[] { "Bush", "Grove", "Forest" }[size],
-            MapEnvironment.RedIsland => "Cactus",
+            MapEnvironment.BlueBay => new[] { "PalmTreeSmallA", "PalmTreeSugarMediumA", "PalmTreeBigA0" }[size],
+            MapEnvironment.GreenCoast => new[] { "TreeSmallA", "TreeMediumA", "TreeBigA" }[size],
+            MapEnvironment.WhiteShore => new[] { "TreeFirSmall", "TreeFirMedium", "TreeFirBig" }[size],
+            MapEnvironment.RedIsland => new[] { "CactusSmallA", "CactusMediumA", "CactusBigA" }[size],
             _ => tree,
         };
     }
 
     /// <summary>
-    /// The environments' vegetation items are many plants under one name: which one an item is, is its variant, kept
-    /// in its flags (variant * 256). Without it every item is variant 0, a small bush. These are the variants the
-    /// game's editor gave each name in maps saved by it (2026-11-12); others may exist.
+    /// Some vegetation items are several plants under one name: which one an item is, is its variant, kept in its
+    /// flags (variant * 256). These are the variants seen on White Shore's firs in a map saved by the game
+    /// (2026-11-12); others may exist. (The names the game's editor plants in groups work the same way; without a
+    /// variant every one of them is variant 0, a small bush.)
     /// </summary>
     private static int[] Variants(MapEnvironment environment, string name) => (environment, name) switch
     {
-        (MapEnvironment.BlueBay, "PalmEcotone") => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 22, 31, 32, 33, 34],
-        (MapEnvironment.BlueBay, "PalmForest") => [11, 12, 13, 14, 15, 16, 17, 18, 19, 23, 24],
-        (MapEnvironment.BlueBay, "PalmGrove") => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 31, 32, 33, 34],
-        (MapEnvironment.GreenCoast, "Ecotone") => [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21, 36, 38, 39],
-        (MapEnvironment.GreenCoast, "Forest") => [30, 31, 32],
-        (MapEnvironment.GreenCoast, "Grove") => [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 21, 22, 23, 37, 38],
-        (MapEnvironment.RedIsland, "Cactus") => [0, 5, 7, 8, 9, 10, 12, 13],
-        (MapEnvironment.WhiteShore, "Bush") => [0, 1, 2],
-        (MapEnvironment.WhiteShore, "Forest") => [1, 2, 3, 4, 6, 7, 8, 11],
-        (MapEnvironment.WhiteShore, "Grove") => [0, 1, 2, 5, 6, 7, 9, 11, 14],
+        (MapEnvironment.WhiteShore, "TreeFirBig") => [1],
+        (MapEnvironment.WhiteShore, "TreeFirMedium") => [0, 1, 2, 5],
+        (MapEnvironment.WhiteShore, "TreeFirSmall") => [0, 2, 5],
+        (MapEnvironment.WhiteShore, "TreeFirVerySmall") => [0, 2, 4, 5],
         _ => [0],
     };
 
@@ -247,8 +242,7 @@ public static class MapExporter
                 var pick = (uint)(((long)Math.Round(at.X * 10) * 73856093) ^ ((long)Math.Round(at.Z * 10) * 19349663)) % (uint)variants.Length;
                 placed.Flags = (short)(variants[pick] << 8);
             }
-            // (The game saves its groups' plants without a cell, single plants with theirs.)
-            placed.BlockUnitCoord = !stadium && Variants(options.Environment, placed.ItemModel.Id).Length > 1 ? new Byte3(255, 255, 255) : new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
+            placed.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)Math.Floor(at.X / 32), 0, 255),
                 (byte)Math.Clamp((int)Math.Floor(at.Y / 8) + rowsBelow, 0, 255), (byte)Math.Clamp((int)Math.Floor(at.Z / 32), 0, 255));
         }
         if (options.Items.Count > 0)

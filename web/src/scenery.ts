@@ -204,6 +204,23 @@ const BLUE_BAY = {
   plants: ["PlantSmallA", "PlantSmallB", "PlantSmallC", "PlantSmallD"],
 };
 
+const letters = (name: string, to: string) => Array.from({ length: to.charCodeAt(0) - 64 }, (_, i) => name + String.fromCharCode(65 + i));
+const GREEN_COAST = {
+  trees: [...letters("TreeBig", "B"), ...letters("TreeMedium", "B"), ...letters("TreeSmall", "C"), ...letters("TreeBushyMedium", "C"), ...letters("TreeBushySmall", "C")],
+  thin: [...letters("TreeThinBig", "C"), "TreeThinBushyBigA", "TreeThinBushySmallA", ...letters("TreeThinMedium", "C"), ...letters("TreeThinSmall", "D")],
+  bushes: [...letters("BushBig", "D"), ...letters("BushMedium", "F"), ...letters("BushSmall", "D")],
+};
+const RED_ISLAND = {
+  cacti: [...letters("CactusBig", "E"), ...letters("CactusMedium", "D"), ...letters("CactusSmall", "E")],
+  pines: ["Big", "Medium", "Small"].flatMap((size) => [1, 2, 3].map((n) => `TreePine${size}A${n}`)),
+  bushes: [...letters("BushBig", "D"), ...letters("BushMedium", "E"), ...letters("BushSmall", "C")],
+};
+const WHITE_SHORE = {
+  firs: ["TreeFirBig", "TreeFirMedium", "TreeFirSmall", "TreeFirVerySmall"],
+  dead: ["TreePineDeadBigA", "TreePineDeadMediumA", "TreePineDeadSmallA", "TreePineDeadVerySmallA"],
+  bushes: ["BushMediumA", "BushSmallA", "BushSmallB"],
+};
+
 export const FORESTS: { id: string; label: string; trees: string[]; environment?: string }[] = [
   { id: "spring", label: "Spring trees", trees: ["SpringTreeVerySmall", "SpringTreeSmall", "SpringTreeMedium", "SpringTreeBig", "SpringTreeTall"] },
   { id: "fall", label: "Fall trees", trees: ["FallTreeVerySmall", "FallTreeSmall", "FallTreeMedium", "FallTreeBig", "FallTreeTall"] },
@@ -225,15 +242,21 @@ export const FORESTS: { id: string; label: string; trees: string[]; environment?
   { id: "bluebay-bush", label: "Bushes", trees: BLUE_BAY.bushes, environment: "BlueBay" },
   { id: "bluebay-plants", label: "Small plants", trees: BLUE_BAY.plants, environment: "BlueBay" },
   { id: "bluebay-tree", label: "Trees", trees: ["TreeMediumA"], environment: "BlueBay" },
-  { id: "greencoast", label: "Green Coast (all kinds)", trees: ["Ecotone", "Grove", "Forest"], environment: "GreenCoast" },
-  { id: "greencoast-forest", label: "Forest", trees: ["Forest"], environment: "GreenCoast" },
-  { id: "greencoast-grove", label: "Grove", trees: ["Grove"], environment: "GreenCoast" },
-  { id: "greencoast-ecotone", label: "Ecotone", trees: ["Ecotone"], environment: "GreenCoast" },
-  { id: "whiteshore", label: "White Shore (all kinds)", trees: ["Bush", "Grove", "Forest"], environment: "WhiteShore" },
-  { id: "whiteshore-forest", label: "Forest", trees: ["Forest"], environment: "WhiteShore" },
-  { id: "whiteshore-grove", label: "Grove", trees: ["Grove"], environment: "WhiteShore" },
-  { id: "whiteshore-bush", label: "Bushes", trees: ["Bush"], environment: "WhiteShore" },
-  { id: "redisland", label: "Cacti", trees: ["Cactus"], environment: "RedIsland" },
+  // Green Coast, Red Island and White Shore: their single plants (every one of them, from maps saved by the game).
+  { id: "greencoast-mix", label: "Green mix (trees, bushes)", trees: [...GREEN_COAST.trees, ...GREEN_COAST.thin, ...GREEN_COAST.bushes], environment: "GreenCoast" },
+  { id: "greencoast-trees", label: "Trees", trees: GREEN_COAST.trees, environment: "GreenCoast" },
+  { id: "greencoast-thin", label: "Thin trees", trees: GREEN_COAST.thin, environment: "GreenCoast" },
+  { id: "greencoast-bush", label: "Bushes", trees: GREEN_COAST.bushes, environment: "GreenCoast" },
+  { id: "greencoast-flowers", label: "Flowers", trees: ["FlowerSmallA", "FlowerSmallB", "FlowerSmallC"], environment: "GreenCoast" },
+  { id: "redisland-mix", label: "Desert mix (cacti, pines, bushes)", trees: [...RED_ISLAND.cacti, ...RED_ISLAND.pines, ...RED_ISLAND.bushes], environment: "RedIsland" },
+  { id: "redisland-cacti", label: "Cacti", trees: RED_ISLAND.cacti, environment: "RedIsland" },
+  { id: "redisland-pines", label: "Pines", trees: RED_ISLAND.pines, environment: "RedIsland" },
+  { id: "redisland-bush", label: "Bushes", trees: RED_ISLAND.bushes, environment: "RedIsland" },
+  { id: "redisland-small", label: "Flowers and grass", trees: ["FlowerSmallA", "FlowerSmallB", "GrassB", "GrassC", "GrassD"], environment: "RedIsland" },
+  { id: "whiteshore-mix", label: "Snow mix (firs, dead pines, bushes)", trees: [...WHITE_SHORE.firs, ...WHITE_SHORE.dead, ...WHITE_SHORE.bushes], environment: "WhiteShore" },
+  { id: "whiteshore-firs", label: "Firs", trees: WHITE_SHORE.firs, environment: "WhiteShore" },
+  { id: "whiteshore-dead", label: "Dead pines", trees: WHITE_SHORE.dead, environment: "WhiteShore" },
+  { id: "whiteshore-bush", label: "Bushes", trees: WHITE_SHORE.bushes, environment: "WhiteShore" },
 ];
 
 /** The forests of an environment (undefined: Stadium). */
