@@ -1004,8 +1004,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "
         + "so you can build jumps.",
       Gate: "Drag the marker to move the gate along the road. Start, checkpoints and finish are gates too (a map can "
-        + "also get them later in the game's editor); a start near the beginning of an open road and a finish near its "
-        + "end stand a little way in. Driving through an effect gate gives the effect or switches the car. "
+        + "also get them later in the game's editor). Driving through an effect gate gives the effect or switches the car. "
         + "Our gate is fitted to the road like the checkpoint gates, on any road shape, and exists for every effect. The "
         + "game's own gates keep their size: the flat gate is a frame 32 m wide and 8 m high, the road runs over its sill; "
         + "the ring is 32 m across with an opening of 26 m, and \"Road at\" sets how high in it the road runs (16 m is its "

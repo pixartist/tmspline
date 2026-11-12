@@ -742,19 +742,38 @@ export function parseMap(json: string): TrackMap {
   return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...((MAP_ENVIRONMENTS as readonly string[]).includes(doc.environment as string) ? { environment: doc.environment as MapEnvironment } : {}), ...(terrain ? { terrain } : {}), ...(sceneryOptions ? { sceneryOptions } : {}) };
 }
 
+/** How far a start on an open track's first point and a finish on its last stood in from the road's end (WaypointBuilder.EndInset in the core). */
+const LEGACY_END_INSET = 16;
+
+/** A segment's length, roughly (its curve in 48 straight pieces): for placing things a distance along it. */
+function roughSegmentLength(t: Track, segment: number): number {
+  const curve = segmentBezier(t, segment);
+  let length = 0, from = bezierAt(curve, 0);
+  for (let k = 1; k <= 48; k++) {
+    const to = bezierAt(curve, k / 48);
+    length += Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+    from = to;
+  }
+  return length;
+}
+
 /**
  * Start, checkpoints and finish stood on the spline's points until 0.7.0 (TrackPoint.waypoint): each becomes a Gate
- * object at its point, with its height, plane and linked group. (A start on an open track's first point and a finish
- * on its last still stand a little way in: the core does that for gates near the road's ends.)
+ * object at its point, with its height, plane and linked group. A start on an open track's first point and a finish
+ * on its last stood 16 m in from the road's end: they are put there, so the map stays as it was.
  */
 function waypointsToGates(t: Track): void {
   const last = t.points.length - 1;
+  // (At most a third of the segment in, as the core's inset was at most a third of the road.)
+  const inset = (segment: number) => Math.min(1 / 3, LEGACY_END_INSET / Math.max(1, roughSegmentLength(t, segment)));
   t.points.forEach((p, i) => {
     const point = p as TrackPoint & { gateHeight?: number; gatePlane?: boolean; checkpointGroup?: number };
     if (p.waypoint && p.waypoint !== "None" && t.segments.length > 0) {
       const atEnd = !t.closed && i === last;
+      const segment = Math.min(atEnd ? i - 1 : i, t.segments.length - 1);
+      const at = !t.closed && i === 0 && p.waypoint === "Start" ? inset(segment) : atEnd && p.waypoint === "Finish" ? 1 - inset(segment) : atEnd ? 1 : 0;
       t.objects.push({
-        kind: "Gate", segment: Math.min(atEnd ? i - 1 : i, t.segments.length - 1), at: atEnd ? 1 : 0, offset: 0, shape: "Round", length: 1, width: 1,
+        kind: "Gate", segment, at, offset: 0, shape: "Round", length: 1, width: 1,
         height: point.gateHeight ?? DEFAULT_GATE_HEIGHT, gate: p.waypoint,
         ...(point.gatePlane === false ? { plane: false as const } : {}),
         ...(p.waypoint === "Checkpoint" && (point.checkpointGroup ?? 0) > 0 ? { checkpointGroup: point.checkpointGroup } : {}),

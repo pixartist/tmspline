@@ -63,23 +63,18 @@ public static class WaypointBuilder
         Enum.TryParse<Waypoint>(gate, out var type) && Enum.IsDefined(type) ? type : Waypoint.None;
 
     /// <summary>
-    /// The track's race gates that are Gate objects, anywhere on the road, with where each stands: on an open track a
-    /// start within EndInset of the road's beginning stands that far in, and a finish that far before its end (as
-    /// the gates on the first and last point do).
+    /// The track's race gates that are Gate objects, with where each stands: exactly where it was put, up to the
+    /// road's very ends (gates on the first and last point of an open track were moved EndInset in; as objects they
+    /// are the mapper's to place).
     /// </summary>
     public static IEnumerable<(TrackObject Object, Waypoint Type, double Distance)> RaceGates(Track track, double[] segmentStarts)
     {
-        var length = segmentStarts[^1];
-        var inset = Math.Min(EndInset, length / 3);
         foreach (var o in track.Objects)
         {
             if (o.Kind != TrackObjectKind.Gate || o.Segment < 0 || o.Segment >= segmentStarts.Length - 1) continue;
             var type = RaceGate(o.Gate);
             if (type == Waypoint.None) continue;
-            var distance = TrackObjects.CenterDistance(o, segmentStarts);
-            if (!track.Closed && type == Waypoint.Start) distance = Math.Max(distance, inset);
-            if (!track.Closed && type == Waypoint.Finish) distance = Math.Min(distance, length - inset);
-            yield return (o, type, distance);
+            yield return (o, type, TrackObjects.CenterDistance(o, segmentStarts));
         }
     }
 
