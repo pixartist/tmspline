@@ -373,7 +373,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     h = Math.min(h, MAX_LAND);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land). Outside it there is no ground: land ends there.
-    // In the environments with water, height 0 is the water's surface: the land goes on under it (shores, the sea's bed).
+    // In the environments with water the land goes on under it (shores, the sea's bed); its surface lies at -0.85 m.
     if (water) heights[i] = Math.max(h, MIN_LAND);
     else if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;

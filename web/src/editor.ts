@@ -177,6 +177,8 @@ const Y_MIN = -8, Y_MAX = 1960;
 const ROAD_SURFACE = 2;
 /** Highest block level above the ground (the exported map grows to fit, up to 255 rows of 8 m; the ground is row 9). */
 export const MAX_BLOCK_LEVEL = 240;
+/** The water's surface in the environments with water, metres (the game's blocks' level 0 is height 0). */
+const WATER_SURFACE = -0.85;
 const DIRECTION_NAMES = ["North", "East", "South", "West"];
 /** Touchpad wheel delta (pixels) per level step with Ctrl+wheel; a mouse wheel notch is about 100 and always one step. */
 const WHEEL_LEVEL_STEP = 100;
@@ -1566,7 +1568,8 @@ export class Editor {
     );
     if (water) ground.renderOrder = 2;
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
+    // (The water's surface lies 0.85 m under height 0: MapExporter.WaterSurface.)
+    ground.position.y = water ? WATER_SURFACE - 0.01 : -0.05;
     const inside = new THREE.Mesh(new THREE.PlaneGeometry(size, size), water
       ? new THREE.MeshStandardMaterial({ color: 0x3f9bd6, roughness: 0.4, transparent: true, opacity: 0.45, depthWrite: false })
       : new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }));
@@ -2839,8 +2842,8 @@ export class Editor {
     if (!m) {
       const [surface, effect] = name.split("_");
       // See-through plane inside checkpoint/finish gates.
-      if (surface === "GateCurtain") {
-        const curtain = new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
+      if (surface === "GateCurtain" || surface === "GateCurtainFinish") {
+        const curtain = new THREE.MeshBasicMaterial({ color: surface === "GateCurtain" ? 0x9fd8ff : 0xff8080, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
         this.roadMaterials.set(name, curtain);
         return curtain;
       }
