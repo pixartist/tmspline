@@ -261,7 +261,12 @@ export interface TerrainGrid {
   /** The smoothing brush's dabs (five numbers each, as edits): the solid is blurred there; cut by the roads, and not. */
   smooths?: number[];
   smoothsOver?: number[];
+  /** How fine the mesh is (the cells at the roads' edges: 1, 1.5, 2, 2 m, and Low's grow sooner away from them); missing: High. */
+  quality?: TerrainQuality;
 }
+
+export const TERRAIN_QUALITIES = ["Fine", "High", "Medium", "Low"] as const;
+export type TerrainQuality = (typeof TERRAIN_QUALITIES)[number];
 
 /**
  * A vanilla item of the game's Stadium collection (e.g. "SpringTreeTall") standing at `position` (metres, its base),
@@ -666,6 +671,7 @@ export function parseMap(json: string): TrackMap {
       z0: Number(t.z0) || 0, columns: t.columns, rows: t.rows, skirt: Math.max(0, Number(t.skirt) || 0),
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
+      ...((TERRAIN_QUALITIES as readonly string[]).includes(t.quality as string) && t.quality !== "High" ? { quality: t.quality as TerrainQuality } : {}),
       // The brushes' dabs (five numbers each).
       ...Object.fromEntries((["edits", "editsOver", "smooths", "smoothsOver"] as const).flatMap((k) =>
         Array.isArray(t[k]) && t[k].length > 0 && t[k].length % 5 === 0 && t[k].every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ? [[k, t[k] as number[]]] : [])),

@@ -790,6 +790,21 @@ export class Editor {
   private terrainKey: { key: string; tracks: string } | null = null;
   private terrainShown: TerrainGrid | undefined;
   private terrainBuild = 0;
+  /** The triangles of each chunk of the land shown (by its name); null while it is being built. */
+  private terrainTriangles: Map<string, number> | null = null;
+  /** The land's size has changed (or is being measured again). */
+  onTerrainSize: () => void = () => {};
+
+  /**
+   * What the land shown adds to an exported map: its triangles, and bytes as the server estimates them
+   * (MeshQualities.EstimateTerrainBytes: an item per chunk and 24.3 bytes per triangle). Null: no land, or being built.
+   */
+  terrainSize(): { triangles: number; bytes: number } | null {
+    if (!this.terrainTriangles) return null;
+    let triangles = 0, bytes = 0;
+    for (const n of this.terrainTriangles.values()) if (n > 0) { triangles += n; bytes += 1480 + 24.3 * n; }
+    return { triangles, bytes };
+  }
 
   /**
    * Shows the map's own terrain as the export builds it (the core in the worker: grid chunks and the strips to the
@@ -800,6 +815,8 @@ export class Editor {
     if (grid === this.terrainShown && !force) return;
     this.terrainShown = grid;
     const build = ++this.terrainBuild;
+    this.terrainTriangles = null;
+    this.onTerrainSize();
     if (!grid) { this.setTerrainMesh(null); this.setQuickTerrain(false); this.setBusy("terrain", null); return; }
     this.setBusy("terrain", "Meshing the terrain…");
     const tracks = JSON.stringify(this.map.tracks);
@@ -823,6 +840,8 @@ export class Editor {
       for (const chunk of chunks) if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, materials));
       this.setTerrainMesh(group, materials);
       this.terrainKey = key ? { key, tracks } : null;
+      this.terrainTriangles = new Map(chunks.map((c) => [`${c.x},${c.z}`, c.mesh.indices.length / 3]));
+      this.onTerrainSize();
       // All of it as one mesh, for the trees.
       let vertices = 0, corners = 0;
       for (const c of chunks) { vertices += c.mesh.positions.length / 3; corners += c.mesh.indices.length; }
@@ -1014,7 +1033,9 @@ export class Editor {
         const old = group.getObjectByName(`${chunk.x},${chunk.z}`) as THREE.Mesh | undefined;
         if (old) { group.remove(old); old.geometry.dispose(); }
         if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, this.terrainMaterials));
+        this.terrainTriangles?.set(`${chunk.x},${chunk.z}`, chunk.mesh.indices.length / 3);
       }
+      this.onTerrainSize();
       if (this.pendingDabs) this.flushDabs();
       else this.clearDabMarks();
     }).catch(() => { this.dabbing = false; this.liveDabs = false; if (!this.stroke) this.syncTerrain(true); });

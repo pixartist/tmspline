@@ -42,6 +42,22 @@ public static class VoxelTerrain
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
     public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
 
+    /// <summary>
+    /// The cells at a quality: the smallest ones' size, how far the land may bend away from a cell before it is split,
+    /// and how far from a road's edge the smallest cells reach; metres. High is the settings above. Below it the
+    /// smallest cells are 2 m: with larger ones (2.5, 3, 4 m were tried, and 4 m cells right beside the edges) the
+    /// land stood a metre and more into the roads' space in many more places; so Low saves on the land away from the
+    /// roads instead. Triangles against High's, measured on three maps: Fine 1.5 to 1.6 times, Medium 0.6, Low 0.42
+    /// to 0.47.
+    /// </summary>
+    public static (float Voxel, float Tolerance, float Near) Cells(TerrainQuality quality) => quality switch
+    {
+        TerrainQuality.Fine => (1, 1, 3),
+        TerrainQuality.Medium => (2, 2, 3),
+        TerrainQuality.Low => (2, 6, 1),
+        _ => (Voxel, Tolerance, Near),
+    };
+
     private static float Ramp(float a, float b, float x)
     {
         x = Math.Clamp((x - a) / (b - a), 0, 1);
@@ -112,7 +128,10 @@ public static class VoxelTerrain
     /// <param name="region">Only this part of the land (plan: x0, z0, x1, z1), with Margin/2 round it for the normals; null: all.</param>
     public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map, Roads? roads = null, (float X0, float Z0, float X1, float Z1)? region = null)
     {
-        var v = Voxel;
+        var (v, tolerance, near) = Cells(grid.Quality);
+        // Coarser than High: every cell's point is moved onto the surface (as those of grazing cells are). The mean of
+        // a large cell's edge crossings can lie well off it, and then land stood in the roads' space.
+        var settle = grid.Quality > TerrainQuality.High || Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_SETTLE") == "on";
         var prepared = roads ?? Prepare(grid, map);
         var (room, _, nearest, road) = prepared.Rooms;
         // The land's heights, also beyond its outline (each place without land takes its nearest land's: the octree
@@ -328,7 +347,7 @@ public static class VoxelTerrain
         int Wanted(float distance)
         {
             var size = 1;
-            for (var d = Near; distance > d && size * 2 * v <= Coarsest; d *= 2) size *= 2;
+            for (var d = near; distance > d && size * 2 * v <= Coarsest; d *= 2) size *= 2;
             return size;
         }
 
@@ -381,12 +400,12 @@ public static class VoxelTerrain
             // crest, a hollow, a steep bank's foot) the cell is split. Far from the roads the cells were large whatever
             // the land did, and hills came out in facets metres off the height map (rock and grass with them).
             var rough = false;
-            if (!rim && n.Size <= wanted && n.Size > 1 && Tolerance > 0 && landNear && !inRoom)
+            if (!rim && n.Size <= wanted && n.Size > 1 && tolerance > 0 && landNear && !inRoom)
             {
                 float side = n.Size * v / 2, q = side / 2;
                 var corners = (LandAt(c.X - side, c.Z - side) + LandAt(c.X + side, c.Z - side) + LandAt(c.X - side, c.Z + side) + LandAt(c.X + side, c.Z + side)) / 4;
                 var inner = (LandAt(c.X - q, c.Z - q) + LandAt(c.X + q, c.Z - q) + LandAt(c.X - q, c.Z + q) + LandAt(c.X + q, c.Z + q)) / 4;
-                rough = MathF.Abs(LandAt(c.X, c.Z) - corners) > Tolerance || MathF.Abs(inner - corners) > Tolerance;
+                rough = MathF.Abs(LandAt(c.X, c.Z) - corners) > tolerance || MathF.Abs(inner - corners) > tolerance;
             }
             if (!rim && !rough && n.Size <= wanted) return;
             if (!(landNear && !inRoom) && !wall) return;
@@ -421,7 +440,7 @@ public static class VoxelTerrain
             var p = count > 0 ? sum / count : new Vector3(0.5f);
             n.Vertex = mesh.Positions.Count;
             var place = new Vector3((float)(grid.X0 + (n.X + p.X * n.Size) * v), bottom + (n.Y + p.Y * n.Size) * v, (float)(grid.Z0 + (n.Z + p.Z * n.Size) * v));
-            if (count == 0)
+            if (count == 0 || settle)
             {
                 // A cell the surface only grazes (it passes through smaller cells beside it, and none of this one's own
                 // edges cross it) still gives a point to their triangles: the place in it nearest the surface, found

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
+import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainQuality, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
 import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
@@ -33,9 +33,11 @@ export interface OwnTerrainOptions {
   rockAngle: number;
   /** The land climbs to this share of its width at its crest near the outer edge, percent (0: flat; negative: it falls, e.g. into the water), see RISE_PROFILE. */
   rise: number;
+  /** How fine the mesh is (see TerrainGrid.quality). */
+  quality?: TerrainQuality;
 }
 
-export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0 };
+export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0, quality: "High" };
 
 /** Grid spacing, metres (also the size of the road squares for the caps and distances). */
 const CELL = 4;
@@ -366,7 +368,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     else if (h >= 0.05) heights[i] = h;
   }
   // No walls under the land's outer edge: they cost triangles and nobody drives there.
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle, ...(own.quality && own.quality !== "High" ? { quality: own.quality } : {}) };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

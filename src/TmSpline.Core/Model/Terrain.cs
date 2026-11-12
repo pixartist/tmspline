@@ -4,6 +4,13 @@
 public enum TerrainSurface { Grass, Dirt, Ice }
 
 /// <summary>
+/// How fine the own terrain's mesh is (VoxelTerrain): the size of its smallest cells, those at the roads' edges, and
+/// how far the land may bend away from a cell before it is split (VoxelTerrain.Cells). Coarser: fewer triangles, a
+/// smaller map, land that meets the roads less exactly and hills in larger facets.
+/// </summary>
+public enum TerrainQuality { Fine, High, Medium, Low }
+
+/// <summary>
 /// Own terrain round the tracks: heights on a square grid of vertices (editor coordinates, metres), exported as custom
 /// items. Vertex (c, r) stands at x = X0 + c Cell, z = Z0 + r Cell; Heights holds rows one after another, NaN where there
 /// is no terrain. A grid square becomes land where its four corners have heights; land at its outer edge gets a skirt
@@ -21,6 +28,8 @@ public sealed class TerrainGrid
     public double Skirt { get; set; } = 16;
     /// <summary>Land steeper than this (degrees) is rock (Surfaces.TerrainRock), as are the skirts; 90: never.</summary>
     public double RockAngle { get; set; } = 90;
+    /// <summary>The mesh's fineness (the map's setting).</summary>
+    public TerrainQuality Quality { get; set; } = TerrainQuality.High;
     /// <summary>The scenery panel's noise height and size, metres (null: not given). VoxelTerrain's hills.</summary>
     public double? NoiseHeight { get; set; }
     public double? NoiseSize { get; set; }

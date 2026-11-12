@@ -46,9 +46,10 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.rockAngle = whole(own.rockAngle, 0, 90, t.rockAngle);
   // Maps saved before this option had no rise.
   t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
+  t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
 }
 import {
-  appendPoint, MAP_ENVIRONMENTS, type MapEnvironment, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
@@ -606,6 +607,24 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
       numberField(root, "Rise away from the track (%, 0 = off, negative = falls)", () => t.rise, (v) => { t.rise = Math.max(-100, Math.min(100, v)); }, 5);
+      // The mesh's fineness: the map's own (kept with its land), and changed at once, without generating again.
+      selectField(root, "Mesh quality", TERRAIN_QUALITIES, () => editor.map.terrain?.quality ?? (editor.map.terrain ? "High" : t.quality ?? "High"), (v) => {
+        t.quality = v as TerrainQuality;
+        if (editor.map.terrain && (editor.map.terrain.quality ?? "High") !== v)
+          editor.editMap((m) => {
+            const { quality: _, ...land } = m.terrain!;
+            m.terrain = v === "High" ? land : { ...land, quality: v as TerrainQuality };
+          });
+      }, false, { Fine: "Fine (about 150%)", High: "High (100%)", Medium: "Medium (about 60%)", Low: "Low (about 45%)" });
+      const size = Object.assign(document.createElement("p"), { className: "hint" });
+      const showSize = () => {
+        const s = editor.terrainSize();
+        size.textContent = !editor.map.terrain ? "" : !s ? "Terrain size: measuring…"
+          : `Terrain size: about ${(s.bytes / 1e6).toFixed(2)} MB (${Math.round(s.triangles / 1000)}k triangles). A map's roads and terrain may take 5 MB together.`;
+      };
+      editor.onTerrainSize = showSize;
+      showSize();
+      root.appendChild(size);
     }
     if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     if (!own) numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
