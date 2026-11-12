@@ -31,7 +31,7 @@ export interface OwnTerrainOptions {
   noiseSize: number;
   /** Land steeper than this is rock (the cliffs' material), degrees; 90: none. */
   rockAngle: number;
-  /** The land climbs to this share of its width at its crest near the outer edge, percent (0: flat), see RISE_PROFILE. */
+  /** The land climbs to this share of its width at its crest near the outer edge, percent (0: flat; negative: it falls, e.g. into the water), see RISE_PROFILE. */
   rise: number;
 }
 
@@ -45,6 +45,8 @@ const BLEND = 32;
 const SUNK = -2;
 /** Land stays below this, metres (the export takes up to 1960). */
 const MAX_LAND = 1950;
+/** Under water the land goes down to this, metres. */
+const MIN_LAND = -64;
 
 /** Off the driving surface (curbs), road counts for the land up to this much over the surface in its square, metres (not gates, signs). */
 const CURB_REACH = 3;
@@ -274,7 +276,7 @@ function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows
 }
 
 /** The height map round the roads (world space); null without upright roads or when it would be too big. */
-export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
+export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS, water = false): TerrainGrid | null {
   // Per road square its highest point (the curbs' tops or the surface's edge: the road's shape the land continues), and
   // under walls and inverted road the height the land stays below.
   const { tops, tunnels } = roadShape(roads);
@@ -341,7 +343,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
   }
   // 2. Smoothed: three box blurs each way (close to a Gaussian of the smoothing's radius).
   const slope = own.rise / 100;
-  let smoothed: Float64Array = slope > 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width)) : extended;
+  let smoothed: Float64Array = slope !== 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width)) : extended;
   const radius = Math.max(1, Math.round(own.smoothing / CELL / 1.7));
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
@@ -358,7 +360,9 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     h = Math.min(h, MAX_LAND);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land). Outside it there is no ground: land ends there.
-    if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
+    // In the environments with water, height 0 is the water's surface: the land goes on under it (shores, the sea's bed).
+    if (water) heights[i] = Math.max(h, MIN_LAND);
+    else if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;
     else if (h >= 0.05) heights[i] = h;
   }
   // No walls under the land's outer edge: they cost triangles and nobody drives there.

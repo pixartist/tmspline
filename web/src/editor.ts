@@ -1136,7 +1136,9 @@ export class Editor {
     const c0 = Math.max(0, Math.floor((at.x - paint.radius - x0) / cell)), c1 = Math.min(columns - 1, Math.ceil((at.x + paint.radius - x0) / cell));
     const r0 = Math.max(0, Math.floor((at.z - paint.radius - z0) / cell)), r1 = Math.min(rows - 1, Math.ceil((at.z + paint.radius - z0) / cell));
     const before = grid.heights.slice();
-    const land = (h: number | null) => (h === null ? null : h <= SUNK_LAND + 0.01 ? 0 : h);
+    // (With water, heights below 0 are the land under it; in Stadium land that low is sunk under the ground.)
+    const water = !!this.map.environment;
+    const land = (h: number | null) => (h === null ? null : !water && h <= SUNK_LAND + 0.01 ? 0 : h);
     const rate = Math.min(1, Math.max(0, paint.strength));
     for (let r = r0; r <= r1; r++)
       for (let c = c0; c <= c1; c++) {
@@ -1159,10 +1161,10 @@ export class Editor {
           }
           next = h + (sum / n - h) * w * rate;
         }
-        next = Math.max(-16, Math.min(1990, next));
+        next = Math.max(water ? -64 : -16, Math.min(1990, next));
         // On the stadium's ground, land below it sinks under it (as generated).
         const inside = Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT;
-        grid.heights[k] = inside && next < 0.5 ? SUNK_LAND : next;
+        grid.heights[k] = !water && inside && next < 0.5 ? SUNK_LAND : next;
       }
     this.updateQuickTerrain(c0, r0, c1, r1);
   }
@@ -1260,7 +1262,7 @@ export class Editor {
       // Own terrain: a mesh of our own instead of land blocks (trees on it), replacing the generated scenery.
       const meshes = this.map.tracks.map((t) => this.views.get(t)?.road).filter((r): r is THREE.Mesh => !!r);
       const roads = this.map.tracks.flatMap((t) => { const v = this.views.get(t); return v?.road ? [{ mesh: v.road, surface: v.surfaceCoords }] : []; });
-      const grid = buildTerrainGrid(roads, options, options.ownTerrain);
+      const grid = buildTerrainGrid(roads, options, options.ownTerrain, !!this.map.environment);
       if (!grid) return null;
       const trees = plantOnTerrain(grid, options, roadFootprint(meshes));
       this.lastHeightMap = null;

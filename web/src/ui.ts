@@ -45,7 +45,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.noiseSize = whole(own.noiseSize, 16, 512, t.noiseSize);
   t.rockAngle = whole(own.rockAngle, 0, 90, t.rockAngle);
   // Maps saved before this option had no rise.
-  t.rise = number(own.rise, 0, 100, OWN_TERRAIN_DEFAULTS.rise);
+  t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, type MapEnvironment, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
@@ -605,7 +605,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(256, v))), 1);
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
-      numberField(root, "Rise away from the track (%, 0 = off)", () => t.rise, (v) => { t.rise = Math.max(0, Math.min(100, v)); }, 5);
+      numberField(root, "Rise away from the track (%, 0 = off, negative = falls)", () => t.rise, (v) => { t.rise = Math.max(-100, Math.min(100, v)); }, 5);
     }
     if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     if (!own) numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
