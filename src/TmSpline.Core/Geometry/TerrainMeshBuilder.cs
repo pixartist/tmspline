@@ -132,23 +132,30 @@ public static class TerrainMeshBuilder
         }
         for (var i = 0; i < normals.Length; i++) normals[i] = normals[i].LengthSquared() > 0 ? Vector3.Normalize(normals[i]) : Vector3.UnitY;
         var normalOf = normals.ToList();
-        // How steep the land is at each point, for rock or grass: a height map's smoothed normal; a solid's flattest
-        // face there (at a rim, where land meets a cut's wall, the smoothed normal is neither's, and rock ran out
-        // from it over the land in teeth).
+        // How steep the land is at each point, for rock or grass: the smoothed normal. At a solid's rims (land meeting a
+        // cut's wall: faces of both at one point) the smoothed normal is neither's, and rock ran out from it over the
+        // land in teeth: there the flattest face counts. Only there: on a hillside of large faces the flattest of them
+        // made grass of steep land.
         var flat = normalOf.Select(n => n.Y).ToList();
         if (solid)
         {
-            for (var i = 0; i < flat.Count; i++) flat[i] = -1;
+            var flattest = Enumerable.Repeat(-1f, flat.Count).ToArray();
+            var steepest = Enumerable.Repeat(1f, flat.Count).ToArray();
             foreach (var (a, b, c) in triangles)
             {
                 var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
                     new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
                 if (n.LengthSquared() < 1e-12f) continue;
                 var y = Vector3.Normalize(n).Y;
-                flat[a] = MathF.Max(flat[a], y);
-                flat[b] = MathF.Max(flat[b], y);
-                flat[c] = MathF.Max(flat[c], y);
+                foreach (var i in new[] { a, b, c })
+                {
+                    flattest[i] = MathF.Max(flattest[i], y);
+                    steepest[i] = MathF.Min(steepest[i], y);
+                }
             }
+            var landFrom = grid.RockAngle < 90 ? (float)Math.Cos(grid.RockAngle * Math.PI / 180) : 0.5f;
+            for (var i = 0; i < flat.Count; i++)
+                if (steepest[i] < 0.25f && flattest[i] >= landFrom) flat[i] = flattest[i];
         }
 
         // Outer edges (one triangle only) get a skirt, except along the roads (there the land ends at their edge).

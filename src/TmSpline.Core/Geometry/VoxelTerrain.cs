@@ -31,6 +31,9 @@ public static class VoxelTerrain
 
     /// <summary>A triangle at a driving surface is the cut's floor under it (left out) when it faces within about 35 degrees of it.</summary>
     private const float FloorAlike = 0.82f;
+    /// <summary>How far the land may lie from a cell's one point before the cell is split, metres (TMSPLINE_VOXEL_TOLERANCE; 0: cells by the distance from the roads alone).</summary>
+    public static float Tolerance { get; set; } = Setting("TMSPLINE_VOXEL_TOLERANCE", 1);
+
     /// <summary>Debug: TMSPLINE_VOXEL_FLOOR=keep leaves the cuts' floors under the roads in.</summary>
     private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
@@ -373,7 +376,19 @@ public static class VoxelTerrain
             var rim = landNear && wall && !inRoom && above + reach > 1;
             var wanted = Wanted(from);
             if (painted > 0 && landNear && dabRadius > 0) while (wanted > 1 && wanted * v > dabRadius / 4) wanted /= 2;
-            if (!rim && n.Size <= wanted) return;
+            // The land's own shape asks for smaller cells too, wherever it is: a cell gives the land one point, at the
+            // mean of its corners' heights, and where the land in it bends away from that by more than Tolerance (a
+            // crest, a hollow, a steep bank's foot) the cell is split. Far from the roads the cells were large whatever
+            // the land did, and hills came out in facets metres off the height map (rock and grass with them).
+            var rough = false;
+            if (!rim && n.Size <= wanted && n.Size > 1 && Tolerance > 0 && landNear && !inRoom)
+            {
+                float side = n.Size * v / 2, q = side / 2;
+                var corners = (LandAt(c.X - side, c.Z - side) + LandAt(c.X + side, c.Z - side) + LandAt(c.X - side, c.Z + side) + LandAt(c.X + side, c.Z + side)) / 4;
+                var inner = (LandAt(c.X - q, c.Z - q) + LandAt(c.X + q, c.Z - q) + LandAt(c.X - q, c.Z + q) + LandAt(c.X + q, c.Z + q)) / 4;
+                rough = MathF.Abs(LandAt(c.X, c.Z) - corners) > Tolerance || MathF.Abs(inner - corners) > Tolerance;
+            }
+            if (!rim && !rough && n.Size <= wanted) return;
             if (!(landNear && !inRoom) && !wall) return;
             n.Kids = new Node[8];
             for (var k = 0; k < 8; k++)
