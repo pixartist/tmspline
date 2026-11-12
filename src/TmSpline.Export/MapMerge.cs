@@ -35,7 +35,20 @@ public static class MapMerge
         var gbx = Gbx.Parse<CGameCtnChallenge>(edited);
         var map = gbx.Node;
         var old = Gbx.ParseNode<CGameCtnChallenge>(previous);
-        var add = Gbx.ParseNode<CGameCtnChallenge>(next);
+        using var nextBytes = new MemoryStream();
+        next.CopyTo(nextBytes);
+        nextBytes.Position = 0;
+        var add = Gbx.ParseNode<CGameCtnChallenge>(nextBytes);
+        // Another environment than the edited map's: nothing of that map fits the new one (its base, its blocks and
+        // items are the other environment's; merged, the game refuses the map: "Water (in BlueBay)"). The new export
+        // stands as it is.
+        if (map.Decoration.Collection.ToString() != add.Decoration.Collection.ToString())
+        {
+            log?.Invoke($"The edited map is {map.Decoration.Collection}, the new export {add.Decoration.Collection}: not merged, the new export replaces it");
+            nextBytes.Position = 0;
+            nextBytes.CopyTo(output);
+            return new MapMergeResult(0, 0, 0, 0, add.Blocks?.Count ?? 0, add.AnchoredObjects?.Count ?? 0);
+        }
         // Road items of any export of this track (every export gets its own folder "TMSpline\<name>_<id>"): also those of
         // exports this merge has no record of (written by another server, or before the record was kept).
         var oldPrefix = Family(previousItemFolder);
@@ -57,7 +70,11 @@ public static class MapMerge
         var removedItems = items.Count - keptItems.Count;
         log?.Invoke($"Edited map: {blocks.Count} blocks, {items.Count} items; {removedBlocks} blocks and {removedItems} items are the previous export's");
 
-        var addedBlocks = add.Blocks ?? [];
+        // (Not into a cell that holds a kept block: where the game's editor put land in the place of the base's water,
+        // the new export's water block for that cell stays out.)
+        var keptCells = keptBlocks.Where(b => !b.IsFree).Select(b => b.Coord).ToHashSet();
+        var stadium = add.Decoration.Collection.ToString() == "Stadium2020";
+        var addedBlocks = (add.Blocks ?? []).Where(b => stadium || b.IsFree || !keptCells.Contains(b.Coord)).ToList();
         var addedItems = add.AnchoredObjects ?? [];
         map.Blocks = [.. keptBlocks, .. addedBlocks];
         map.AnchoredObjects = [.. keptItems, .. addedItems];
