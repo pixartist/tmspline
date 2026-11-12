@@ -84,8 +84,8 @@ public static class MapExporter
         var stadium = options.Environment == MapEnvironment.Stadium;
         var (groundY, rowsBelow) = Heights(options.Environment);
         var groundBlockY = (int)Math.Floor(groundY / 8) + rowsBelow;
-        // Vanilla items and our own are named with the map's collection (Stadium's as its number, as tested).
-        var collection = stadium ? new Id(StadiumCollection) : map.Decoration.Collection;
+        // (The map's collection: not used for items. Our own are Stadium's; the trees named with the map's collection
+        // were reported missing in a Blue Bay export, so they are tried as Stadium's too.)
         if (options.ClearTemplate)
         {
             // Start from an empty map with its own identity so it never collides with the template,
@@ -192,7 +192,7 @@ public static class MapExporter
             var at = origin + item.Position;
             if (OutsideWorld(map, at))
                 continue;
-            var placed = map.PlaceAnchoredObject(new Ident(item.Name, collection, "Nadeo"),
+            var placed = map.PlaceAnchoredObject(new Ident(item.Name, new Id(StadiumCollection), "Nadeo"),
                 new Vec3((float)at.X, (float)at.Y, (float)at.Z),
                 new Vec3((float)(item.Yaw * Math.PI / 180), (float)(item.Pitch * Math.PI / 180), (float)(item.Roll * Math.PI / 180)), Vec3.Zero);
             if (item.Color != ItemColor.Default)
