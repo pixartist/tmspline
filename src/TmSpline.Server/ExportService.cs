@@ -238,6 +238,8 @@ public sealed partial class ExportService
         : "";
 
     private const double MaxHeight = 1960;
+    /// <summary>The land may lie this deep: in the environments with water it goes on under the surface (the editor makes it down to -64 m).</summary>
+    private const double MinTerrainHeight = -64;
     /// <summary>Most vertices of an own terrain grid (4 m cells: 32 km² or so).</summary>
     private const int MaxTerrainVertices = 2_000_000;
     /// <summary>
@@ -329,8 +331,8 @@ public sealed partial class ExportService
                 throw new ExportRejectedException($"The terrain must stay within {MaxOffset} m of the map's centre");
             if (terrain.RockAngle is { } rockAngle && (!double.IsFinite(rockAngle) || rockAngle < 0 || rockAngle > 90))
                 throw new ExportRejectedException("The terrain's rock angle must be 0 to 90°");
-            if (terrain.Heights.Any(h => h is { } v && (!double.IsFinite(v) || v < -16 || v > MaxHeight)))
-                throw new ExportRejectedException($"Terrain heights must be between -16 and {MaxHeight:0} m");
+            if (terrain.Heights.Any(h => h is { } v && (!double.IsFinite(v) || v < MinTerrainHeight || v > MaxHeight)))
+                throw new ExportRejectedException($"Terrain heights must be between {MinTerrainHeight:0} and {MaxHeight:0} m");
         }
 
         var map = TrackJson.ToMap(dto);
