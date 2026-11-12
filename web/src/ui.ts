@@ -533,7 +533,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${editor.map.blocks.length}:${!!editor.library}`
-    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}`
+    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}:${editor.map.environment ?? ""}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
