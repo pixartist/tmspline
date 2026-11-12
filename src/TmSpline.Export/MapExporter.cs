@@ -46,14 +46,14 @@ public static class MapExporter
     /// Where the editor's height 0 lies in an environment's maps (world metres), and how many block rows lie below
     /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. The others (from maps saved by
     /// the game, 2026-11-12): their water's blocks start at world height 0 (rows 5, 4, 14, 14), and the lowest land
-    /// on them (shores, with the game's vegetation) lies at 1.6 to 2 m; the editor's 0 is taken as the water's surface,
-    /// at 1 m (ASSUMED: under the shores; not measured in game).
+    /// on them (shores, with the game's vegetation) lies at 1.6 to 2 m; the editor's 0 is the water's surface,
+    /// at about -1 m (the owner's reading in game: 2 m lower than the 1 m first assumed).
     /// </summary>
     public static (double GroundY, int RowsBelow) Heights(MapEnvironment environment) => environment switch
     {
-        MapEnvironment.BlueBay => (1, 5),
-        MapEnvironment.GreenCoast => (1, 4),
-        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (1, 14),
+        MapEnvironment.BlueBay => (-1, 5),
+        MapEnvironment.GreenCoast => (-1, 4),
+        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (-1, 14),
         _ => (GroundY, 8),
     };
 
@@ -120,7 +120,7 @@ public static class MapExporter
 
         var stadium = options.Environment == MapEnvironment.Stadium;
         var (groundY, rowsBelow) = Heights(options.Environment);
-        var groundBlockY = (int)Math.Floor(groundY / 8) + rowsBelow;
+        var groundBlockY = (int)Math.Floor(Math.Max(groundY, 0) / 8) + rowsBelow;
         if (options.ClearTemplate)
         {
             // Start from an empty map with its own identity so it never collides with the template,
