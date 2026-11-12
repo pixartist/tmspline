@@ -44,22 +44,29 @@ public static class MapExporter
 
     /// <summary>
     /// Where the editor's height 0 lies in an environment's maps (world metres), and how many block rows lie below
-    /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. The others (from maps saved by
-    /// the game, 2026-11-12): their water's blocks start at world height 0 (rows 5, 4, 14, 14), and the lowest land
-    /// on them (shores, with the game's vegetation) lies at 1.6 to 2 m. The editor's 0 is world height 0 there, so
-    /// that the game's blocks (which stand on their 8 m levels, level 0 at world height 0) lie where the editor shows
-    /// them against the roads; the water's surface is at -0.85 m (WaterSurface), where the editor draws it.
-    /// (Until 0.6.0 the editor's 0 was the water's surface and everything but the blocks went 0.85 m lower.)
+    /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. The others (rows 5, 4, 14, 14,
+    /// from maps saved by the game): the editor's 0 is one of the game's 8 m block levels, so that the game's blocks
+    /// lie where the editor shows them against the roads, namely the level next above the water's surface, which
+    /// the editor draws under it (WaterSurface). The water was measured in game on 2026-11-12 with a ramp marked every
+    /// metre: Blue Bay 7 m, Green Coast about -0.8 m, Red Island about -0.3 m, White Shore -1 m. (Before, all four
+    /// were taken as -0.85 m, which put everything in Blue Bay 8 m under its water.)
     /// </summary>
-    /// <summary>The water's surface in the environments with water, world metres (set by the owner from how it looked in game).</summary>
-    public const double WaterSurface = -0.85;
-
     public static (double GroundY, int RowsBelow) Heights(MapEnvironment environment) => environment switch
     {
-        MapEnvironment.BlueBay => (0, 5),
+        MapEnvironment.BlueBay => (8, 5),
         MapEnvironment.GreenCoast => (0, 4),
         MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (0, 14),
         _ => (GroundY, 8),
+    };
+
+    /// <summary>The water's surface in an environment with water, in the editor's heights (the editor's WATER_SURFACE mirrors it).</summary>
+    public static double WaterSurface(MapEnvironment environment) => environment switch
+    {
+        MapEnvironment.BlueBay => -1,
+        MapEnvironment.GreenCoast => -0.8,
+        MapEnvironment.RedIsland => -0.3,
+        MapEnvironment.WhiteShore => -1,
+        _ => 0,
     };
 
     /// <summary>

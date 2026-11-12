@@ -191,8 +191,8 @@ const Y_MIN = -8, Y_MAX = 1960;
 const ROAD_SURFACE = 2;
 /** Highest block level above the ground (the exported map grows to fit, up to 255 rows of 8 m; the ground is row 9). */
 export const MAX_BLOCK_LEVEL = 240;
-/** The water's surface in the environments with water, metres (the game's blocks' level 0 is height 0). */
-const WATER_SURFACE = -0.85;
+/** The water's surface in each environment with water, in the editor's heights (measured in game; MapExporter.WaterSurface in the core). Height 0 is one of the game's block levels. */
+const WATER_SURFACE: Record<string, number> = { BlueBay: -1, GreenCoast: -0.8, RedIsland: -0.3, WhiteShore: -1 };
 const DIRECTION_NAMES = ["North", "East", "South", "West"];
 /** Touchpad wheel delta (pixels) per level step with Ctrl+wheel; a mouse wheel notch is about 100 and always one step. */
 const WHEEL_LEVEL_STEP = 100;
@@ -1600,11 +1600,12 @@ export class Editor {
       m.geometry?.dispose();
       for (const material of [m.material].flat()) material?.dispose();
     });
-    this.ground = this.createGround(!!this.map.environment);
+    this.ground = this.createGround(this.map.environment);
     this.scene.add(this.ground);
   }
 
-  private createGround(water = false): THREE.Mesh {
+  private createGround(environment?: string): THREE.Mesh {
+    const water = !!environment;
     // The other environments' maps are 64 cells wide, and water all over.
     const half = water ? 1024 : MAP_HALF_EXTENT;
     const size = half * 2;
@@ -1619,8 +1620,8 @@ export class Editor {
     );
     if (water) ground.renderOrder = 2;
     ground.rotation.x = -Math.PI / 2;
-    // (The water's surface lies 0.85 m under height 0: MapExporter.WaterSurface.)
-    ground.position.y = water ? WATER_SURFACE - 0.01 : -0.05;
+    // (The water lies a little under height 0, by the environment.)
+    ground.position.y = water ? (WATER_SURFACE[environment!] ?? -0.85) - 0.01 : -0.05;
     const inside = new THREE.Mesh(new THREE.PlaneGeometry(size, size), water
       ? new THREE.MeshStandardMaterial({ color: 0x3f9bd6, roughness: 0.4, transparent: true, opacity: 0.45, depthWrite: false })
       : new THREE.MeshStandardMaterial({ color: 0x6f9e4f, roughness: 1 }));
