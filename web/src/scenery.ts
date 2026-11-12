@@ -216,7 +216,7 @@ export const FORESTS: { id: string; label: string; trees: string[]; environment?
   { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
   // The other environments' own vegetation (the game's item names there, from maps saved by it, 2026-11-12): Stadium's
   // trees are not in them.
-  // Blue Bay's single plants (every one of them, from a map saved by the game), and the names its editor's groups use.
+  // Blue Bay's single plants (every one of them, from a map saved by the game).
   { id: "bluebay-mix", label: "Tropical mix (palms, bushes, plants)", trees: [...BLUE_BAY.palms, ...BLUE_BAY.sugar, ...BLUE_BAY.bushes, ...BLUE_BAY.plants, "TreeMediumA"], environment: "BlueBay" },
   { id: "bluebay-palms", label: "Palms", trees: BLUE_BAY.palms, environment: "BlueBay" },
   { id: "bluebay-palms-big", label: "Big palms", trees: BLUE_BAY.palms.filter((n) => n.includes("Big")), environment: "BlueBay" },
@@ -225,10 +225,6 @@ export const FORESTS: { id: string; label: string; trees: string[]; environment?
   { id: "bluebay-bush", label: "Bushes", trees: BLUE_BAY.bushes, environment: "BlueBay" },
   { id: "bluebay-plants", label: "Small plants", trees: BLUE_BAY.plants, environment: "BlueBay" },
   { id: "bluebay-tree", label: "Trees", trees: ["TreeMediumA"], environment: "BlueBay" },
-  { id: "bluebay", label: "Palm groups (all kinds)", trees: ["PalmEcotone", "PalmGrove", "PalmForest"], environment: "BlueBay" },
-  { id: "bluebay-forest", label: "Palm groups: forest", trees: ["PalmForest"], environment: "BlueBay" },
-  { id: "bluebay-grove", label: "Palm groups: grove", trees: ["PalmGrove"], environment: "BlueBay" },
-  { id: "bluebay-ecotone", label: "Palm groups: ecotone", trees: ["PalmEcotone"], environment: "BlueBay" },
   { id: "greencoast", label: "Green Coast (all kinds)", trees: ["Ecotone", "Grove", "Forest"], environment: "GreenCoast" },
   { id: "greencoast-forest", label: "Forest", trees: ["Forest"], environment: "GreenCoast" },
   { id: "greencoast-grove", label: "Grove", trees: ["Grove"], environment: "GreenCoast" },
