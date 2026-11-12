@@ -38,6 +38,8 @@ public static class VoxelTerrain
     private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
     private const float FloorCover = 2f;
+    /// <summary>Under an open road (land up to its edges, not over it) the floor stays within this of each edge, in smallest cells.</summary>
+    private const float FloorStrip = 0.5f;
 
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
     public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
@@ -590,7 +592,13 @@ public static class VoxelTerrain
             }
             // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
             // shows through the slot between the land's edge and the driving surface.
-            if (MathF.Abs(d) < v && LandAt(p.X, p.Z) - p.Y > FloorCover + v) under[i] = deck;
+            // Under the road the floor goes too, covered or not (the road lies on it and nothing shows it), but for a
+            // strip under each edge (FloorStrip cells from the rail), which closes that slot. (By the distance from the
+            // rails, not by the place across the road: a half-pipe is wider than the line between its rails.)
+            if (MathF.Abs(d) >= v || deck == default) return;
+            if (LandAt(p.X, p.Z) - p.Y > FloorCover + v) { under[i] = deck; return; }
+            var (edge, _, _) = road(p);
+            if (edge > FloorStrip * v) under[i] = deck;
         });
         var kept = new AdaptiveMesh();
         var index = new Dictionary<int, int>();
