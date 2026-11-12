@@ -3,7 +3,7 @@ import { showExportDialog } from "./export";
 import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
-import { FORESTS, SCENERY_THEMES } from "./scenery";
+import { FORESTS, forestsOf, SCENERY_THEMES } from "./scenery";
 import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
@@ -626,10 +626,13 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     // The theme sets the land's surface and the cliffs, and picks its forest (which can still be changed).
     selectField(root, "Theme", SCENERY_THEMES.map((th) => th.id), () => scenery.theme, (v) => {
       scenery.theme = v;
-      scenery.forest = SCENERY_THEMES.find((th) => th.id === v)?.forest ?? scenery.forest;
+      if (!editor.map.environment) scenery.forest = SCENERY_THEMES.find((th) => th.id === v)?.forest ?? scenery.forest;
     }, false, Object.fromEntries(SCENERY_THEMES.map((th) => [th.id, th.label])));
-    selectField(root, "Forest", ["none", ...FORESTS.map((f) => f.id)], () => scenery.forest, (v) => { scenery.forest = v; relayout(); }, false,
-      { none: "None", ...Object.fromEntries(FORESTS.map((f) => [f.id, f.label])) });
+    // Each environment has its own vegetation: a forest of another one becomes this one's first.
+    const forests = forestsOf(editor.map.environment);
+    if (scenery.forest !== "none" && !forests.some((f) => f.id === scenery.forest)) scenery.forest = forests[0]?.id ?? "none";
+    selectField(root, "Forest", ["none", ...forests.map((f) => f.id)], () => scenery.forest, (v) => { scenery.forest = v; relayout(); }, false,
+      { none: "None", ...Object.fromEntries(forests.map((f) => [f.id, f.label])) });
     if (scenery.forest !== "none") {
       numberField(root, "Forest density (%)", () => Math.round(scenery.density * 100), (v) => (scenery.density = int(v, 0, 100) / 100), 10);
       numberField(root, "Tree clearance (m)", () => scenery.clearance, (v) => (scenery.clearance = Math.max(0, Math.min(64, v))), 1);

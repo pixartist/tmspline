@@ -63,6 +63,8 @@ public static class MapExporter
     /// </summary>
     private static string Vegetation(MapEnvironment environment, string tree)
     {
+        // The editor places these by name already; a Stadium tree (an older map) becomes one by its size.
+        if (tree is "PalmEcotone" or "PalmGrove" or "PalmForest" or "Ecotone" or "Grove" or "Forest" or "Bush" or "Cactus") return tree;
         var size = tree.Contains("Small") ? 0 : tree.Contains("Medium") ? 1 : 2;
         return environment switch
         {

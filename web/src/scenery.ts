@@ -196,7 +196,7 @@ export function clearOfRoads(footprint: Set<string>, px: number, pz: number, cle
  * Forests: the game's tree items by kind, smallest first. The SpringTree names are confirmed from maps saved by the
  * game; the others follow the game's files (VegetTreeModel) and still need a check in game.
  */
-export const FORESTS: { id: string; label: string; trees: string[] }[] = [
+export const FORESTS: { id: string; label: string; trees: string[]; environment?: string }[] = [
   { id: "spring", label: "Spring trees", trees: ["SpringTreeVerySmall", "SpringTreeSmall", "SpringTreeMedium", "SpringTreeBig", "SpringTreeTall"] },
   { id: "fall", label: "Fall trees", trees: ["FallTreeVerySmall", "FallTreeSmall", "FallTreeMedium", "FallTreeBig", "FallTreeTall"] },
   { id: "fir", label: "Firs", trees: ["FirMedium", "FirTall"] },
@@ -206,7 +206,25 @@ export const FORESTS: { id: string; label: string; trees: string[] }[] = [
   // Confirmed from a map saved by the game: these are the only two cactus items.
   { id: "cacti", label: "Cacti", trees: ["CactusVerySmall", "CactusMedium"] },
   { id: "mixed", label: "Mixed (spring, fall, firs)", trees: ["SpringTreeSmall", "SpringTreeMedium", "SpringTreeTall", "FallTreeMedium", "FallTreeBig", "FirMedium", "FirTall"] },
+  // The other environments' own vegetation (the game's item names there, from maps saved by it, 2026-11-12): Stadium's
+  // trees are not in them.
+  { id: "bluebay", label: "Palms (all kinds)", trees: ["PalmEcotone", "PalmGrove", "PalmForest"], environment: "BlueBay" },
+  { id: "bluebay-forest", label: "Palm forest", trees: ["PalmForest"], environment: "BlueBay" },
+  { id: "bluebay-grove", label: "Palm grove", trees: ["PalmGrove"], environment: "BlueBay" },
+  { id: "bluebay-ecotone", label: "Palm ecotone", trees: ["PalmEcotone"], environment: "BlueBay" },
+  { id: "greencoast", label: "Green Coast (all kinds)", trees: ["Ecotone", "Grove", "Forest"], environment: "GreenCoast" },
+  { id: "greencoast-forest", label: "Forest", trees: ["Forest"], environment: "GreenCoast" },
+  { id: "greencoast-grove", label: "Grove", trees: ["Grove"], environment: "GreenCoast" },
+  { id: "greencoast-ecotone", label: "Ecotone", trees: ["Ecotone"], environment: "GreenCoast" },
+  { id: "whiteshore", label: "White Shore (all kinds)", trees: ["Bush", "Grove", "Forest"], environment: "WhiteShore" },
+  { id: "whiteshore-forest", label: "Forest", trees: ["Forest"], environment: "WhiteShore" },
+  { id: "whiteshore-grove", label: "Grove", trees: ["Grove"], environment: "WhiteShore" },
+  { id: "whiteshore-bush", label: "Bushes", trees: ["Bush"], environment: "WhiteShore" },
+  { id: "redisland", label: "Cacti", trees: ["Cactus"], environment: "RedIsland" },
 ];
+
+/** The forests of an environment (undefined: Stadium). */
+export const forestsOf = (environment: string | undefined) => FORESTS.filter((f) => f.environment === environment);
 
 /** Small deterministic random numbers (mulberry32), seeded per cell so regenerating gives the same forest. */
 function random(seed: number): () => number {
