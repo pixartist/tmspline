@@ -82,6 +82,7 @@ export function showExportDialog(track: TrackMap): void {
       <p class="error" hidden></p>
       <div class="actions">
         <button value="cancel" formnovalidate>Close</button>
+        <button value="model" class="model" title="The roads and the own terrain as a Wavefront OBJ file (metres, Y up), for Blender and other 3D programs. Without the game's blocks, trees and textures.">3D model (.obj)</button>
         <button value="game" class="game" hidden title="Write the map into Documents\Trackmania\Maps\TMSpline; the TMSpline Live plugin reloads it in the game's editor">Export to game</button>
         <button value="export" class="primary">Export</button>
       </div>
@@ -96,6 +97,7 @@ export function showExportDialog(track: TrackMap): void {
   const note = dialog.querySelector<HTMLElement>(".estimate-note")!;
   const exportButton = dialog.querySelector<HTMLButtonElement>("button.primary")!;
   const gameButton = dialog.querySelector<HTMLButtonElement>("button.game")!;
+  const modelButton = dialog.querySelector<HTMLButtonElement>("button.model")!;
   // Only local setups write into the game's folder (the server says so).
   void fetch("/api/health").then((r) => r.json()).then((h) => (gameButton.hidden = !h.exportToGame), () => {});
   void setupImporter(dialog, (ready) => (exportButton.disabled = gameButton.disabled = !ready));
@@ -134,6 +136,27 @@ export function showExportDialog(track: TrackMap): void {
 
   form.addEventListener("submit", async (e) => {
     const action = (e.submitter as HTMLButtonElement | null)?.value;
+    if (action === "model") {
+      // The meshes alone: no importer, no author.
+      e.preventDefault();
+      const q = quality();
+      modelButton.disabled = true;
+      modelButton.textContent = "Building…";
+      error.hidden = true;
+      result.hidden = true;
+      try {
+        const { name, bytes } = await download("/api/export/model", { track, quality: q }, "track.obj");
+        result.textContent = `Downloaded ${name}: ${mb(bytes)} at ${q} quality. In Blender: File > Import > Wavefront (.obj).`;
+        result.classList.remove("over");
+        result.hidden = false;
+      } catch (err) {
+        showError((err as Error).message);
+      } finally {
+        modelButton.disabled = false;
+        modelButton.textContent = "3D model (.obj)";
+      }
+      return;
+    }
     if (action !== "export" && action !== "game") return;
     const toGame = action === "game";
     e.preventDefault();
@@ -262,16 +285,17 @@ async function estimate(track: TrackMap): Promise<Estimate[]> {
   return (await response.json()) as Estimate[];
 }
 
-async function exportMap(track: TrackMap, author: Author, quality: Quality): Promise<{ name: string; bytes: number }> {
-  const response = await fetch("/api/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }),
-  });
+function exportMap(track: TrackMap, author: Author, quality: Quality): Promise<{ name: string; bytes: number }> {
+  return download("/api/export", { track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }, "track.Map.Gbx");
+}
+
+/** Posts the request and saves the file that comes back (named by the server, else `fallback`). */
+async function download(url: string, body: unknown, fallback: string): Promise<{ name: string; bytes: number }> {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error(await problemMessage(response, "Export failed"));
 
   const blob = await response.blob();
-  const name = /filename="?([^";]+)"?/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? "track.Map.Gbx";
+  const name = /filename="?([^";]+)"?/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? fallback;
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
   a.click();
   URL.revokeObjectURL(a.href);

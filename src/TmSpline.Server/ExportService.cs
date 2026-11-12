@@ -95,6 +95,18 @@ public sealed partial class ExportService
         }).ToList();
     }
 
+    /// <summary>
+    /// The map as a 3D model (Wavefront OBJ) for Blender and the like: the meshes the export makes items of, at the
+    /// request's quality, with the own terrain. No importer is needed. The game's blocks and trees are not in it.
+    /// </summary>
+    public (byte[] Data, string FileName) Model(ExportRequestDto request)
+    {
+        var (map, name) = Validate(request);
+        var (_, meshes) = MeshQualities.BuildExport(map, request.Quality ?? MeshQuality.Normal, 64);
+        if (map.Terrain is { } grid) meshes.AddRange(TerrainMeshBuilder.Build(grid, map));
+        return (ObjWriter.Write(meshes, name), TrackExporter.SafeName(name) + ".obj");
+    }
+
     /// <summary>The map's own terrain as the export builds it, packed for the editor (TerrainMeshBuilder.Preview).</summary>
     public byte[] TerrainPreview(ExportRequestDto request, string? key = null)
     {

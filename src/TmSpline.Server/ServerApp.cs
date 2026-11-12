@@ -170,6 +170,22 @@ public static class ServerApp
         .RequireRateLimiting("estimate")
         .DisableAntiforgery();
 
+        // The map as a 3D model (meshes only, no importer).
+        app.MapPost("/api/export/model", (ExportRequestDto request, ExportService service) =>
+        {
+            try
+            {
+                var (data, fileName) = service.Model(request);
+                return Results.File(data, "model/obj", fileName);
+            }
+            catch (ExportRejectedException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest, title: "Invalid track");
+            }
+        })
+        .RequireRateLimiting("estimate")
+        .DisableAntiforgery();
+
         // The own terrain's preview mesh, built natively (the editor's WebAssembly core takes many times as long).
         app.MapPost("/api/terrain", (ExportRequestDto request, string? key, ExportService service) =>
         {
