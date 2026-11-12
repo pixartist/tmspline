@@ -288,13 +288,20 @@ public sealed class TrackObject
     public double Height { get; set; } = 4;
     /// <summary>Pillars: the game item's colour.</summary>
     public ItemColor Color { get; set; }
-    /// <summary>Gates: which (a key of GateObjects.Blocks).</summary>
+    /// <summary>
+    /// Gates: which. An effect or a car (a key of GateObjects), or a race gate: Start, Checkpoint, Finish, StartFinish
+    /// (WaypointBuilder; until 0.7.0 those stood on the spline's points, TrackPoint.Waypoint, which is still read).
+    /// </summary>
     public string Gate { get; set; } = "Turbo";
     /// <summary>
     /// Gates: a gate of our own fitted to the road (the height is the gate's), or one of the game's blocks (the ring's
     /// height is how high in it the road runs). See GateObjects.
     /// </summary>
     public GateLook Look { get; set; }
+    /// <summary>Race gates (Gate = Start, Checkpoint, Finish, StartFinish): the see-through plane in the gate.</summary>
+    public bool Plane { get; set; } = true;
+    /// <summary>Checkpoint gates: the group of linked checkpoints it belongs to (0: none), as TrackPoint.CheckpointGroup.</summary>
+    public int CheckpointGroup { get; set; }
 }
 
 /// <summary>

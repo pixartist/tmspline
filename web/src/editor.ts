@@ -8,7 +8,7 @@ import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
-  add, appendPoint, GATES, gateLook, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, GATES, gateLook, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -1991,13 +1991,16 @@ export class Editor {
   /** Joins the gates of each linked checkpoint group with green bars, in track order, at the tops of the gates. */
   private updateCheckpointLinks(): void {
     const groups = new Map<number, THREE.Vector3[]>();
-    for (const t of this.map.tracks)
-      for (const p of t.points)
-        if (p.waypoint === "Checkpoint" && (p.checkpointGroup ?? 0) > 0) {
-          const list = groups.get(p.checkpointGroup!) ?? [];
-          list.push(new THREE.Vector3(p.position[0], p.position[1] + (p.gateHeight ?? DEFAULT_GATE_HEIGHT), p.position[2]));
-          groups.set(p.checkpointGroup!, list);
-        }
+    for (const t of this.map.tracks) {
+      const placements = this.views.get(t)?.placements ?? [];
+      if (placements.length !== t.objects.length) continue;
+      t.objects.forEach((o, i) => {
+        if (o.kind !== "Gate" || o.gate !== "Checkpoint" || !((o.checkpointGroup ?? 0) > 0)) return;
+        const list = groups.get(o.checkpointGroup!) ?? [];
+        list.push(new THREE.Vector3(...placements[i].position).addScaledVector(new THREE.Vector3(...placements[i].normal), o.height));
+        groups.set(o.checkpointGroup!, list);
+      });
+    }
     for (const child of this.checkpointLinks.children) (child as THREE.Mesh).geometry.dispose();
     this.checkpointLinks.clear();
     const up = new THREE.Vector3(0, 1, 0);

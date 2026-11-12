@@ -54,7 +54,33 @@ public static class WaypointBuilder
             !track.Closed && w.Point == 0 && w.Type == Waypoint.Start ? inset
             : !track.Closed && w.Point == last && w.Type == Waypoint.Finish ? length - inset
             : !track.Closed && w.Point == last ? length
-            : segmentStarts[Math.Min(w.Point, segmentStarts.Length - 1)]).ToList();
+            : segmentStarts[Math.Min(w.Point, segmentStarts.Length - 1)])
+            .Concat(RaceGates(track, segmentStarts).Select(g => g.Distance)).ToList();
+    }
+
+    /// <summary>The race gate a Gate object is (its Gate is Start, Checkpoint, Finish or StartFinish), or None (an effect, a car).</summary>
+    public static Waypoint RaceGate(string gate) =>
+        Enum.TryParse<Waypoint>(gate, out var type) && Enum.IsDefined(type) ? type : Waypoint.None;
+
+    /// <summary>
+    /// The track's race gates that are Gate objects, anywhere on the road, with where each stands: on an open track a
+    /// start within EndInset of the road's beginning stands that far in, and a finish that far before its end (as
+    /// the gates on the first and last point do).
+    /// </summary>
+    public static IEnumerable<(TrackObject Object, Waypoint Type, double Distance)> RaceGates(Track track, double[] segmentStarts)
+    {
+        var length = segmentStarts[^1];
+        var inset = Math.Min(EndInset, length / 3);
+        foreach (var o in track.Objects)
+        {
+            if (o.Kind != TrackObjectKind.Gate || o.Segment < 0 || o.Segment >= segmentStarts.Length - 1) continue;
+            var type = RaceGate(o.Gate);
+            if (type == Waypoint.None) continue;
+            var distance = TrackObjects.CenterDistance(o, segmentStarts);
+            if (!track.Closed && type == Waypoint.Start) distance = Math.Max(distance, inset);
+            if (!track.Closed && type == Waypoint.Finish) distance = Math.Min(distance, length - inset);
+            yield return (o, type, distance);
+        }
     }
 
     /// <param name="namePrefix">Item name prefix, so several tracks can share one item folder (tools).</param>
@@ -68,8 +94,15 @@ public static class WaypointBuilder
             var ring = RingAt(track, rings, point, type);
             if (ring is null)
                 continue;
-            chunks.Add(BuildGate(track, ring, point, type, origin, settings, namePrefix));
+            var at = track.Points[point];
+            chunks.Add(BuildGate(track, ring, Math.Min(point, Math.Max(0, track.SegmentCount - 1)), type, at.GateHeight, at.GatePlane, at.CheckpointGroup,
+                origin, settings, $"{namePrefix}_{point:D2}"));
         }
+        // And the race gates placed as objects, anywhere on the road.
+        var index = 0;
+        foreach (var (o, type, distance) in RaceGates(track, TrackSampler.SegmentStarts(track)))
+            chunks.Add(BuildGate(track, TrackObjects.RingAt(rings, distance), o.Segment, type, o.Height, o.Plane, o.CheckpointGroup,
+                origin, settings, $"{namePrefix}_G{++index:D2}"));
         return chunks;
     }
 
@@ -130,21 +163,22 @@ public static class WaypointBuilder
         return chunk;
     }
 
-    private static MeshChunk BuildGate(Track track, Ring ring, int point, Waypoint type, Vec3d origin, RoadMeshSettings settings, string namePrefix)
+    private static MeshChunk BuildGate(Track track, Ring ring, int segment, Waypoint type, double gateHeight, bool gatePlane, int group,
+        Vec3d origin, RoadMeshSettings settings, string name)
     {
         var frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(ring.Tangent, settings.Rotation);
         var offset = settings.WorldSpace ? Vec3d.Zero : ring.Position - origin;
         var itemOrigin = origin + offset;
-        var segment = Math.Min(point, Math.Max(0, track.SegmentCount - 1));
+        segment = Math.Clamp(segment, 0, Math.Max(0, track.SegmentCount - 1));
         var chunk = new MeshChunk
         {
-            Name = $"{namePrefix}_{point:D2}", ItemOffset = offset, Frame = frame, Waypoint = type,
-            WaypointOrder = type == Waypoint.Checkpoint ? Math.Max(0, track.Points[point].CheckpointGroup) : 0,
+            Name = name, ItemOffset = offset, Frame = frame, Waypoint = type,
+            WaypointOrder = type == Waypoint.Checkpoint ? Math.Max(0, group) : 0,
         };
 
         var (minX, maxX, minY, maxY) = RoadMeshBuilder.SurfaceExtents(ring);
         var bottom = Math.Min(minY, 0) - settings.Thickness - 0.5;
-        var height = Math.Clamp(track.Points[point].GateHeight, 1, 100);
+        var height = Math.Clamp(gateHeight, 1, 100);
         var top = Math.Max(maxY, 0) + height;
         var left = minX - settings.BorderThickness - 1.0 - PostSize / 2;
         var right = maxX + settings.BorderThickness + 1.0 + PostSize / 2;
@@ -159,7 +193,7 @@ public static class WaypointBuilder
             place.Beam(chunk, gate, outline[i], outline[i + 1], segment);
 
         // See-through plane where the trigger is, like the native gates: where the point asks for it.
-        if (settings.GateCurtain is { } curtain && track.Points[point].GatePlane && type is Waypoint.Checkpoint or Waypoint.Finish or Waypoint.StartFinish)
+        if (settings.GateCurtain is { } curtain && gatePlane && type is Waypoint.Checkpoint or Waypoint.Finish or Waypoint.StartFinish)
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };

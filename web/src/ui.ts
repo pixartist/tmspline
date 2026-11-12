@@ -52,8 +52,8 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.seed = whole(own.seed, 0, 999999, 0);
 }
 import {
-  appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
+  appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -180,7 +180,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     Hole: "Click the road to cut a hole into it (H)",
     Gap: "Click the road to leave a gap there, e.g. for a jump",
     Bump: "Click the road to put a bump (hump or dip) into it",
-    Gate: "Click the road to put one of the game's gates round it there (an effect, or another car)",
+    Gate: "Click the road to put a gate there: start, checkpoint, finish, an effect or another car",
   };
   const placeButtons = OBJECT_KINDS.map((kind) =>
     [kind, button(kind, placeTitles[kind], () => editor.setPlaceMode(editor.placeMode === kind ? null : kind))] as const);
@@ -537,7 +537,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
-    + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${editor.map.blocks.length}:${!!editor.library}`
+    + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${obj?.checkpointGroup ?? ""}:${editor.map.tracks.flatMap((tr) => tr.objects.map((q) => q.checkpointGroup ?? 0)).join(",")}:${t.closed}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}:${editor.map.environment ?? ""}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
@@ -556,7 +556,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const map = editor.map;
   section("Map");
   textField(root, "Name", () => editor.map.name, (v) => editor.editMap((m) => (m.name = v)));
-  if (map.tracks.some((tr) => tr.points.some((p) => p.waypoint === "StartFinish")))
+  if (map.tracks.some((tr) => tr.objects.some((o) => o.kind === "Gate" && o.gate === "StartFinish")))
     numberField(root, "Laps", () => editor.map.laps, (v) => editor.editMap((m) => (m.laps = Math.max(1, Math.min(99, Math.round(v))))), 1);
   selectField(root, "Environment", ["Stadium", ...MAP_ENVIRONMENTS], () => editor.map.environment ?? "Stadium", (v) => { editor.editMap((m) => {
     if (v === "Stadium") delete m.environment;
@@ -735,38 +735,6 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         (v) => editor.edit((tr) => (tr.points[s.index].borderHeight = v), false, `borderHeight:${s.index}`));
     else
       hint(root, "No borders here: they fade out from the previous point to this one and back in towards the next.");
-    const waypoints = WAYPOINTS.filter((w) => editor.track.closed || w !== "StartFinish");
-    selectField(root, "Waypoint", waypoints, () => p().waypoint, (v) => editor.edit((tr) => (tr.points[s.index].waypoint = v as Waypoint), true),
-      false, { StartFinish: "Start / finish (laps)" });
-    if (p().waypoint !== "None")
-      rangeField(root, "Gate height m", 2, 30, 0.5, () => p().gateHeight ?? DEFAULT_GATE_HEIGHT, (v) => editor.edit((tr) => {
-        const h = Math.max(1, Math.min(100, v));
-        if (h === DEFAULT_GATE_HEIGHT) delete tr.points[s.index].gateHeight;
-        else tr.points[s.index].gateHeight = h;
-      }, false, `gateHeight:${s.index}`), 100);
-    if (p().waypoint !== "None" && p().waypoint !== "Start")
-      checkbox(root, "See-through plane in the gate", () => p().gatePlane !== false, (v) => editor.edit((tr) => {
-        if (v) delete tr.points[s.index].gatePlane;
-        else tr.points[s.index].gatePlane = false;
-      }, true));
-    if (p().waypoint === "Checkpoint") {
-      // Groups in use anywhere on the map (linked checkpoints may sit on different tracks).
-      const groups = [...new Set(editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).filter((g) => g > 0))].sort((a, b) => a - b);
-      const mine = p().checkpointGroup ?? 0;
-      const options = ["0", ...groups.map(String), "new"];
-      const labels: Record<string, string> = { "0": "Not linked", new: "New group" };
-      for (const g of groups) {
-        const count = editor.map.tracks.reduce((n, tr) => n + tr.points.filter((q) => q.checkpointGroup === g).length, 0);
-        labels[String(g)] = `Group ${g} (${count - (g === mine ? 1 : 0)} other${count - (g === mine ? 1 : 0) === 1 ? "" : "s"})`;
-      }
-      selectField(root, "Linked", options, () => String(p().checkpointGroup ?? 0), (v) => editor.edit((tr) => {
-        const point = tr.points[s.index];
-        const group = v === "new" ? Math.max(0, ...groups) + 1 : Number(v);
-        if (group > 0) point.checkpointGroup = group;
-        else delete point.checkpointGroup;
-      }, true), false, labels);
-      hint(root, "Linked checkpoints count as one: passing any checkpoint of the group is enough (e.g. on alternative routes, also on other tracks). Green lines join them in the editor.");
-    }
     buttonRow(root, SHAPE_PRESETS.map((preset) => ({
       label: preset.label,
       onClick: () => editor.edit((tr) => {
@@ -963,8 +931,44 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         else x.color = v as ItemColor;
       }));
     } else if (obj.kind === "Gate") {
-      selectField(root, "Gate", Object.keys(GATES), () => o().gate ?? "Turbo", (v) => { editor.edit((tr) => (tr.objects[s.index].gate = v)); editor.onChange(); },
+      // (Start / finish for laps only on a closed track, as before.)
+      const kinds = Object.keys(GATES).filter((k) => k !== "StartFinish" || editor.track.closed || obj.gate === "StartFinish");
+      selectField(root, "Gate", kinds, () => o().gate ?? "Turbo", (v) => { editor.edit((tr) => {
+        const x = tr.objects[s.index];
+        const was = !!GATES[x.gate ?? "Turbo"]?.race;
+        x.gate = v;
+        // Between a race gate and an effect gate: each kind's own settings.
+        if (!!GATES[v]?.race !== was) { delete x.look; delete x.plane; delete x.checkpointGroup; x.height = GATES[v]?.race ? DEFAULT_GATE_HEIGHT : GATE_HEIGHT; }
+        if (v !== "Checkpoint") delete x.checkpointGroup;
+      }, true); editor.onChange(); },
         false, Object.fromEntries(Object.entries(GATES).map(([k, g]) => [k, g.label])));
+      if (GATES[obj.gate ?? "Turbo"]?.race) {
+        rangeField(root, "Gate height m", 2, 30, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(1, Math.min(100, v)))), 100);
+        if (obj.gate !== "Start")
+          checkbox(root, "See-through plane in the gate", () => o().plane !== false, (v) => editor.edit((tr) => {
+            if (v) delete tr.objects[s.index].plane;
+            else tr.objects[s.index].plane = false;
+          }, true));
+        if (obj.gate === "Checkpoint") {
+          // Groups in use anywhere on the map (linked checkpoints may sit on different tracks).
+          const all = editor.map.tracks.flatMap((tr) => tr.objects.filter((q) => q.kind === "Gate" && q.gate === "Checkpoint").map((q) => q.checkpointGroup ?? 0));
+          const groups = [...new Set(all.filter((g) => g > 0))].sort((a, b) => a - b);
+          const mine = obj.checkpointGroup ?? 0;
+          const options = ["0", ...groups.map(String), "new"];
+          const labels: Record<string, string> = { "0": "Not linked", new: "New group" };
+          for (const g of groups) {
+            const others = all.filter((q) => q === g).length - (g === mine ? 1 : 0);
+            labels[String(g)] = `Group ${g} (${others} other${others === 1 ? "" : "s"})`;
+          }
+          selectField(root, "Linked", options, () => String(o().checkpointGroup ?? 0), (v) => { editor.edit((tr) => {
+            const x = tr.objects[s.index];
+            const group = v === "new" ? Math.max(0, ...groups) + 1 : Number(v);
+            if (group > 0) x.checkpointGroup = group;
+            else delete x.checkpointGroup;
+          }, true); editor.onChange(); }, false, labels);
+          hint(root, "Linked checkpoints count as one: passing any checkpoint of the group is enough (e.g. on alternative routes, also on other tracks). Green lines join them in the editor.");
+        }
+      } else {
       // The game's own gates only where the game has one for the effect.
       const looks = GATES[obj.gate ?? "Turbo"]?.block ? ["custom", "flat", "ring"] : ["custom"];
       selectField(root, "Look", looks, () => gateLook(o()) ?? "custom", (v) => { editor.edit((tr) => {
@@ -977,6 +981,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         rangeField(root, "Height m", 1, 100, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(1, Math.min(100, v)))), 100);
       else if (look === "ring")
         rangeField(root, "Road at (m up the ring)", 0, 32, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(0.1, Math.min(32, v)))), 32);
+      }
     } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
         false, { Rect: "Rectangle" });
@@ -998,7 +1003,9 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "always stays inside the driving surface. Length runs along the road, width across it.",
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "
         + "so you can build jumps.",
-      Gate: "Drag the marker to move the gate along the road. Driving through it gives the effect or switches the car. "
+      Gate: "Drag the marker to move the gate along the road. Start, checkpoints and finish are gates too (a map can "
+        + "also get them later in the game's editor); a start near the beginning of an open road and a finish near its "
+        + "end stand a little way in. Driving through an effect gate gives the effect or switches the car. "
         + "Our gate is fitted to the road like the checkpoint gates, on any road shape, and exists for every effect. The "
         + "game's own gates keep their size: the flat gate is a frame 32 m wide and 8 m high, the road runs over its sill; "
         + "the ring is 32 m across with an opening of 26 m, and \"Road at\" sets how high in it the road runs (16 m is its "
@@ -1010,7 +1017,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   } else {
     hint(root, "Drag a point to move it, click it to show its handles and banking ring. Click the road to edit a segment. "
       + "Ctrl+click the ground to extend the track. Pillar, Hole and Gap place things on the road. "
-      + "Start, checkpoints and finish are only where you set them (select a point → Waypoint), or add them later in the game's editor.");
+      + "Start, checkpoints and finish are gates you place on the road (Gate), or add them later in the game's editor.");
   }
 }
 

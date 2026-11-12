@@ -178,10 +178,15 @@ export type GateLook = "flat" | "ring";
 /** The look a gate gets: the game's blocks only where the game has one for its effect. */
 export const gateLook = (o: TrackObject): GateLook | undefined => (GATES[o.gate ?? "Turbo"]?.block ? o.look : undefined);
 /**
- * The gates a Gate object can be: the game's own gate blocks (their trigger gives the effect or the other car; an item
- * of ours cannot), by the key kept in the file. Mirrors GateObjects.Blocks in the core.
+ * The gates a Gate object can be, by the key kept in the file: the race's own (start, checkpoint, finish: until
+ * 0.7.0 those stood on the spline's points), then the effects and the cars (with the game's gate block where it has
+ * one). Mirrors WaypointBuilder.RaceGate and GateObjects in the core.
  */
-export const GATES: Record<string, { block?: string; label: string }> = {
+export const GATES: Record<string, { block?: string; label: string; race?: true }> = {
+  Start: { label: "Start", race: true },
+  Checkpoint: { label: "Checkpoint", race: true },
+  Finish: { label: "Finish", race: true },
+  StartFinish: { label: "Start / finish (laps)", race: true },
   Turbo: { block: "GateSpecialTurbo", label: "Turbo" },
   Turbo2: { block: "GateSpecialTurbo2", label: "Turbo (red)" },
   TurboRoulette: { block: "GateSpecialTurboRoulette", label: "Turbo roulette" },
@@ -236,13 +241,20 @@ export interface TrackObject {
    * gate blocks (the ring's height is how high in it the road runs).
    */
   look?: GateLook;
+  /** Race gates (checkpoint, finish): false for no see-through plane in the gate. */
+  plane?: false;
+  /**
+   * Checkpoint gates: the group of linked checkpoints it belongs to. The checkpoints of a group count as one (passing
+   * any of them is enough, e.g. on alternative routes); they may sit on different tracks.
+   */
+  checkpointGroup?: number;
   /** Pillars: the game item's colour (absent: Default). */
   color?: ItemColor;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {
   if (kind === "Bump") return { kind, segment, at, offset, shape: "Round", length: 10, width: 8, height: 1 };
-  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: GATE_HEIGHT, gate: "Turbo" };
+  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: DEFAULT_GATE_HEIGHT, gate: "Checkpoint" };
   const size = kind === "Pillar" ? 2 : kind === "Hole" ? 6 : 16;
   return { kind, segment, at, offset: kind === "Gap" ? 0 : offset, shape: "Round", length: size, width: kind === "Gap" ? 0 : size, height: 4 };
 }
@@ -689,6 +701,7 @@ export function parseMap(json: string): TrackMap {
   if (parts.length === 0) throw new Error("The file has no track");
   const tracks = parts.map((p, i) => normalizeTrack(p, parts.length > 1 ? `Track ${i + 1}` : "The track"));
   if (version === 1) addLegacyWaypoints(tracks[0]);
+  for (const t of tracks) waypointsToGates(t);
   if (version < 3)
     for (const t of tracks)
       for (const p of t.points) if (p.borders) p.width = Math.max(1, p.width - 2 * LEGACY_CURB_INSET);
@@ -727,6 +740,31 @@ export function parseMap(json: string): TrackMap {
     } : undefined;
   const sceneryOptions = doc.sceneryOptions && typeof doc.sceneryOptions === "object" && !Array.isArray(doc.sceneryOptions) ? doc.sceneryOptions : undefined;
   return { version: 3, name, laps, tracks, blocks, ...(items.length ? { items } : {}), ...(doc.noStadium === true ? { noStadium: true as const } : {}), ...((MAP_ENVIRONMENTS as readonly string[]).includes(doc.environment as string) ? { environment: doc.environment as MapEnvironment } : {}), ...(terrain ? { terrain } : {}), ...(sceneryOptions ? { sceneryOptions } : {}) };
+}
+
+/**
+ * Start, checkpoints and finish stood on the spline's points until 0.7.0 (TrackPoint.waypoint): each becomes a Gate
+ * object at its point, with its height, plane and linked group. (A start on an open track's first point and a finish
+ * on its last still stand a little way in: the core does that for gates near the road's ends.)
+ */
+function waypointsToGates(t: Track): void {
+  const last = t.points.length - 1;
+  t.points.forEach((p, i) => {
+    const point = p as TrackPoint & { gateHeight?: number; gatePlane?: boolean; checkpointGroup?: number };
+    if (p.waypoint && p.waypoint !== "None" && t.segments.length > 0) {
+      const atEnd = !t.closed && i === last;
+      t.objects.push({
+        kind: "Gate", segment: Math.min(atEnd ? i - 1 : i, t.segments.length - 1), at: atEnd ? 1 : 0, offset: 0, shape: "Round", length: 1, width: 1,
+        height: point.gateHeight ?? DEFAULT_GATE_HEIGHT, gate: p.waypoint,
+        ...(point.gatePlane === false ? { plane: false as const } : {}),
+        ...(p.waypoint === "Checkpoint" && (point.checkpointGroup ?? 0) > 0 ? { checkpointGroup: point.checkpointGroup } : {}),
+      });
+    }
+    p.waypoint = "None";
+    delete point.gateHeight;
+    delete point.gatePlane;
+    delete point.checkpointGroup;
+  });
 }
 
 /** What version 1 did automatically: start (start/finish when closed) at the first point, finish at the last. */

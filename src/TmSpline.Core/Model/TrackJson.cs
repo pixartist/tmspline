@@ -141,6 +141,12 @@ public static class TrackJson
         /// <summary>Gates: "flat" or "ring" for the game's blocks; missing: a gate of our own (see TrackObject.Look).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Look { get; set; }
+        /// <summary>Race gates: the see-through plane; missing = there, false = none.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Plane { get; set; }
+        /// <summary>Checkpoint gates: the linked group; missing = not linked.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? CheckpointGroup { get; set; }
     }
 
     public sealed class PointDto
@@ -302,7 +308,8 @@ public static class TrackJson
             track.Objects.Add(new TrackObject
             {
                 Kind = o.Kind, Segment = o.Segment, At = Math.Clamp(o.At, 0, 1), Offset = o.Offset, Shape = o.Shape,
-                Gate = o.Gate is { } gate && Geometry.GateObjects.Known(gate) ? gate : "Turbo",
+                Gate = o.Gate is { } gate && (Geometry.GateObjects.Known(gate) || Geometry.WaypointBuilder.RaceGate(gate) != Waypoint.None) ? gate : "Turbo",
+                Plane = o.Plane != false, CheckpointGroup = Math.Clamp(o.CheckpointGroup ?? 0, 0, 9999),
                 Look = Enum.TryParse<GateLook>(o.Look, true, out var look) && Enum.IsDefined(look) ? look : GateLook.Custom,
                 Length = Math.Max(0.1, o.Length), Width = Math.Max(0.1, o.Width),
                 // Bumps may be dips (negative height).
@@ -334,6 +341,7 @@ public static class TrackJson
         {
             Kind = o.Kind, Segment = o.Segment, At = o.At, Offset = o.Offset, Shape = o.Shape, Length = o.Length, Width = o.Width, Height = o.Height, Color = o.Color,
             Gate = o.Kind == TrackObjectKind.Gate ? o.Gate : null,
+            Plane = o.Plane ? null : false, CheckpointGroup = o.CheckpointGroup > 0 ? o.CheckpointGroup : null,
             Look = o.Kind == TrackObjectKind.Gate && o.Look != GateLook.Custom ? o.Look.ToString().ToLowerInvariant() : null,
         }).ToList(),
     };

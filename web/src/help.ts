@@ -10,7 +10,7 @@ const CONTROLS: [string, string][] = [
   ["[ / ]", "Width −1 / +1 m at the point (Shift: 4 m)"],
   ["Shape (inspector)", "Sausage · flat · half-pipe · pipe, blended between points"],
   ["Click road", "Select segment (surface, borders, effects)"],
-  ["Waypoint (point)", "Start · checkpoint · finish (only where you set them)"],
+  ["Gate", "Start · checkpoint · finish · effects · cars, anywhere on the road"],
   ["T", "New track in the map (click a grey point or road to edit another track)"],
   ["Ctrl+click ground", "Extend the track"],
   ["N / Del", "Add point at the end · delete point"],
