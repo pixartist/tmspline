@@ -25,7 +25,8 @@ public static class WaypointBuilder
     /// <summary>From this bend on (degrees) the road counts as a pipe and the gate is a ring around it.</summary>
     private const double PipeCurveDegrees = 300;
     private const double TriggerDepth = 4;
-    private const double SpawnHeight = 0.5;
+    /// <summary>The spawn point's height over the driving surface (the car is set down from there).</summary>
+    private const double SpawnHeight = 0.15;
 
     /// <summary>
     /// Start and finish gates on the very ends of an open track move this far inwards along the road (a few car
@@ -123,7 +124,7 @@ public static class WaypointBuilder
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
-            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, height), outline.Count, segment);
+            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, outline), outline.Count, segment);
             chunk.NotCollidable.Add(plane);
         }
 
@@ -139,8 +140,12 @@ public static class WaypointBuilder
         // Spawn point on the road, facing along it and rolled with it (start, and respawn at checkpoints).
         if (type is Waypoint.Start or Waypoint.Checkpoint or Waypoint.StartFinish)
         {
-            var position = frame.ToLocal(ring.Up * SpawnHeight);
-            var up = frame.ToLocal(ring.Up);
+            // On the driving surface in its middle (a road bent across lies above or below the ring's own point there),
+            // standing as the surface does.
+            var middle = RoadMeshBuilder.SurfaceSample(ring, 0);
+            var normal = ring.Right * middle.NX + ring.Up * middle.NY;
+            var position = frame.ToLocal(ring.Right * middle.X + ring.Up * middle.Y + normal * SpawnHeight);
+            var up = frame.ToLocal(normal);
             var roll = Math.Atan2(-up.X, up.Y) * 180 / Math.PI;
             chunk.Sockets.Add((position, new Vec3d(0, 0, roll)));
         }
@@ -174,8 +179,6 @@ public static class WaypointBuilder
             return points;
         }
 
-        var curvature = RoadMeshBuilder.SurfaceSample(ring, half).Curvature;
-        var clearance = curvature > 1e-6 ? Math.Min(height, 0.6 / curvature) : height;
         var borders = segment.Borders;
         // On the border, also where it is still growing (see Ring.BorderScale).
         var baseLift = borders ? ring.BorderHeight * ring.BorderScale : 0;
@@ -189,13 +192,40 @@ public static class WaypointBuilder
             var c = RoadMeshBuilder.CurbPoint(ring, side, outward, baseLift);
             return (c.X, c.Y);
         }
-        points.Add(Foot(1));                                      // right post foot, on the border
-        for (var i = 0; i <= ArchSegments; i++)                   // arch over the road, right to left
+        // The arch: the line at `height` from the surface. Where the road bends up tighter than that (the sides of a
+        // bowl, a half-pipe), the points set off from the surface cross over one another: those nearer to another part
+        // of the surface than the height are no part of that line and are left out, which leaves a clean corner there.
+        // (They were kept, a tangle of beams in the corner, and the height was held down to the tightest bend's.)
+        var surface = Enumerable.Range(0, 97).Select(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 96)).Select(p => (p.X, p.Y)).ToList();
+        double Reach((double X, double Y) q)
         {
-            var s = half - ring.Width * i / ArchSegments;
-            var along = i == 0 ? outward : i == ArchSegments ? -outward : 0;
-            points.Add(Offset(s, clearance, along));
+            var best = double.MaxValue;
+            for (var i = 0; i + 1 < surface.Count; i++)
+            {
+                var (ax, ay) = surface[i];
+                double bx = surface[i + 1].X - ax, by = surface[i + 1].Y - ay;
+                var t = Math.Clamp(((q.X - ax) * bx + (q.Y - ay) * by) / Math.Max(1e-12, bx * bx + by * by), 0, 1);
+                best = Math.Min(best, Math.Sqrt((q.X - ax - bx * t) * (q.X - ax - bx * t) + (q.Y - ay - by * t) * (q.Y - ay - by * t)));
+            }
+            return best;
         }
+        const int steps = ArchSegments * 2;
+        List<(double X, double Y)> Arch(double clearance)
+        {
+            var arch = new List<(double X, double Y)>();
+            for (var i = 0; i <= steps; i++)                      // over the road, right to left
+            {
+                var along = i == 0 ? outward : i == steps ? -outward : 0;
+                var q = Offset(half - ring.Width * i / steps, clearance, along);
+                if (Reach(q) >= clearance - 0.02) arch.Add(q);
+            }
+            return arch;
+        }
+        // (A road closed in so far that nothing lies that high over all of it: as high as there is room.)
+        var arch = Arch(height);
+        for (var lower = height * 0.85; arch.Count < 2 && lower > 0.5; lower *= 0.85) arch = Arch(lower);
+        points.Add(Foot(1));                                      // right post foot, on the border
+        points.AddRange(arch);
         points.Add(Foot(-1));                                     // left post foot
         return points;
     }
@@ -204,7 +234,8 @@ public static class WaypointBuilder
     /// Pairs of points (road surface, top) spanning the see-through plane. For pipes the top is the pipe's center, so
     /// the plane becomes a disc filling the tube; otherwise it reaches from the surface up to the arch.
     /// </summary>
-    private static List<((double X, double Y) Bottom, (double X, double Y) Top)> CurtainOutline(Ring ring, RoadMeshSettings settings, double height)
+    /// <param name="outline">The gate's outline (GateOutline): post foot, arch, post foot.</param>
+    private static List<((double X, double Y) Bottom, (double X, double Y) Top)> CurtainOutline(Ring ring, RoadMeshSettings settings, List<(double X, double Y)> outline)
     {
         var half = ring.Width / 2;
         var pairs = new List<((double, double), (double, double))>();
@@ -234,13 +265,23 @@ public static class WaypointBuilder
             return pairs;
         }
 
-        var curvature = RoadMeshBuilder.SurfaceSample(ring, half).Curvature;
-        var clearance = curvature > 1e-6 ? Math.Min(height, 0.6 / curvature) : height;
-        for (var i = 0; i <= ArchSegments; i++)
+        // From the surface up to the arch, each place across the road to the place as far along the arch (the arch may
+        // be shorter than the road is wide, where it cuts a bend's corner).
+        var arch = outline.Skip(1).Take(outline.Count - 2).ToList();
+        var lengths = new List<double> { 0 };
+        for (var i = 1; i < arch.Count; i++)
+            lengths.Add(lengths[^1] + Math.Sqrt((arch[i].X - arch[i - 1].X) * (arch[i].X - arch[i - 1].X) + (arch[i].Y - arch[i - 1].Y) * (arch[i].Y - arch[i - 1].Y)));
+        (double X, double Y) Along(double f)
         {
-            var s = half - ring.Width * i / ArchSegments;
-            pairs.Add((Offset(s, 0.05), Offset(s, clearance - BeamWidth / 2)));
+            var at = f * lengths[^1];
+            var k = 1;
+            while (k + 1 < arch.Count && lengths[k] < at) k++;
+            var t = lengths[k] > lengths[k - 1] ? Math.Clamp((at - lengths[k - 1]) / (lengths[k] - lengths[k - 1]), 0, 1) : 0;
+            return (arch[k - 1].X + (arch[k].X - arch[k - 1].X) * t, arch[k - 1].Y + (arch[k].Y - arch[k - 1].Y) * t);
         }
+        if (arch.Count < 2) return pairs;
+        for (var i = 0; i <= ArchSegments; i++)
+            pairs.Add((Offset(half - ring.Width * i / ArchSegments, 0.05), Along((double)i / ArchSegments)));
         return pairs;
     }
 
