@@ -122,7 +122,7 @@ export function showExportDialog(track: TrackMap): void {
     const terrain = estimates[0]?.terrainBytes ?? 0;
     note.textContent = (factor ? "Road sizes are scaled by your last export of this track. " : "Sizes are estimates: how well the items compress depends on the track. ")
       + (terrain > 0 ? `Each includes about ${mb(terrain)} of terrain, which is the same at every quality. ` : "")
-      + "The game allows 5 MB of custom items per map.";
+      + "The game's editor allows 5 MB of custom items per map; with Openplanet's \"Infinite embed size\" (it comes with Openplanet) a map can be about 7 MB in all and still be played online.";
   };
   void estimate(track).then((list) => {
     estimates = list;
@@ -159,7 +159,7 @@ export function showExportDialog(track: TrackMap): void {
       if (estimated) setCalibration(track.name, { factor: Math.min(2, Math.max(0.5, (bytes - estimated.terrainBytes) / (estimated.bytes - estimated.terrainBytes))), quality: q });
       showEstimates();
       result.textContent = `${toGame ? "Wrote" : "Downloaded"} ${name}: ${mb(bytes)} at ${q} quality`
-        + (bytes > MAP_LIMIT_BYTES ? " — over the game's 5 MB limit, try a lower quality." : ` (limit 5 MB).`);
+        + (bytes > MAP_LIMIT_BYTES ? " — over the game's 5 MB limit: try a lower quality, or use Openplanet's \"Infinite embed size\" (maps up to about 7 MB play online)." : ` (limit 5 MB).`);
       result.classList.toggle("over", bytes > MAP_LIMIT_BYTES);
       result.hidden = false;
     } catch (err) {

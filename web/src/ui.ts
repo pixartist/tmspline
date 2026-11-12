@@ -620,7 +620,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       const showSize = () => {
         const s = editor.terrainSize();
         size.textContent = !editor.map.terrain ? "" : !s ? "Terrain size: measuring…"
-          : `Terrain size: about ${(s.bytes / 1e6).toFixed(2)} MB (${Math.round(s.triangles / 1000)}k triangles). A map's roads and terrain may take 5 MB together.`;
+          : `Terrain size: about ${(s.bytes / 1e6).toFixed(2)} MB (${Math.round(s.triangles / 1000)}k triangles). A map's roads and terrain may take 5 MB together (about 7 MB with Openplanet's \"Infinite embed size\").`;
       };
       editor.onTerrainSize = showSize;
       showSize();
