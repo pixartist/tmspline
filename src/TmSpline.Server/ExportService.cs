@@ -238,8 +238,8 @@ public sealed partial class ExportService
         : "";
 
     private const double MaxHeight = 1960;
-    /// <summary>The land may lie this deep: in the environments with water it goes on under the surface (the editor makes it down to -64 m).</summary>
-    private const double MinTerrainHeight = -64;
+    /// <summary>The land may lie this deep: in the environments with water it goes on under the surface (the editor makes it down to -64 m; the check leaves room).</summary>
+    private const double MinTerrainHeight = -1024;
     /// <summary>Most vertices of an own terrain grid (4 m cells: 32 km² or so).</summary>
     private const int MaxTerrainVertices = 2_000_000;
     /// <summary>
