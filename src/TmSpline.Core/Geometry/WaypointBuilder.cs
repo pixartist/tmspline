@@ -154,10 +154,10 @@ public static class WaypointBuilder
 
     /// <summary>
     /// The gate outline in the ring plane (right, up). Pipes get a closed ring around the outside of the tube; other
-    /// roads get posts from the borders (or road edges) up to an arch that runs at a constant distance over the
-    /// surface. On tight concave bends the distance shrinks so the arch cannot fold over itself.
+    /// roads get a frame upright in the point's frame: posts straight up from the borders (or road edges) and a beam
+    /// across.
     /// </summary>
-    /// <param name="height">How high the arch runs over the surface, meters.</param>
+    /// <param name="height">How high the beam lies over the road's lowest place, meters.</param>
     private static List<(double X, double Y)> GateOutline(Ring ring, TrackSegment segment, RoadMeshSettings settings, double height)
     {
         var half = ring.Width / 2;
@@ -192,41 +192,16 @@ public static class WaypointBuilder
             var c = RoadMeshBuilder.CurbPoint(ring, side, outward, baseLift);
             return (c.X, c.Y);
         }
-        // The arch: the line at `height` from the surface. Where the road bends up tighter than that (the sides of a
-        // bowl, a half-pipe), the points set off from the surface cross over one another: those nearer to another part
-        // of the surface than the height are no part of that line and are left out, which leaves a clean corner there.
-        // (They were kept, a tangle of beams in the corner, and the height was held down to the tightest bend's.)
-        var surface = Enumerable.Range(0, 97).Select(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 96)).Select(p => (p.X, p.Y)).ToList();
-        double Reach((double X, double Y) q)
-        {
-            var best = double.MaxValue;
-            for (var i = 0; i + 1 < surface.Count; i++)
-            {
-                var (ax, ay) = surface[i];
-                double bx = surface[i + 1].X - ax, by = surface[i + 1].Y - ay;
-                var t = Math.Clamp(((q.X - ax) * bx + (q.Y - ay) * by) / Math.Max(1e-12, bx * bx + by * by), 0, 1);
-                best = Math.Min(best, Math.Sqrt((q.X - ax - bx * t) * (q.X - ax - bx * t) + (q.Y - ay - by * t) * (q.Y - ay - by * t)));
-            }
-            return best;
-        }
-        const int steps = ArchSegments * 2;
-        List<(double X, double Y)> Arch(double clearance)
-        {
-            var arch = new List<(double X, double Y)>();
-            for (var i = 0; i <= steps; i++)                      // over the road, right to left
-            {
-                var along = i == 0 ? outward : i == steps ? -outward : 0;
-                var q = Offset(half - ring.Width * i / steps, clearance, along);
-                if (Reach(q) >= clearance - 0.02) arch.Add(q);
-            }
-            return arch;
-        }
-        // (A road closed in so far that nothing lies that high over all of it: as high as there is room.)
-        var arch = Arch(height);
-        for (var lower = height * 0.85; arch.Count < 2 && lower > 0.5; lower *= 0.85) arch = Arch(lower);
-        points.Add(Foot(1));                                      // right post foot, on the border
-        points.AddRange(arch);
-        points.Add(Foot(-1));                                     // left post foot
+        // A plain frame, upright in the point's own frame whatever the road's sides do: a post straight up from each
+        // foot and a beam across, `height` over the road's lowest place (and clear of the feet, on a road with high
+        // sides). An arch following the surface folded up in a bowl's corners.
+        var (right, left) = (Foot(1), Foot(-1));
+        var lowest = Enumerable.Range(0, 33).Min(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 32).Y);
+        var top = Math.Max(lowest + height, Math.Max(right.Y, left.Y) + BeamWidth);
+        points.Add(right);
+        points.Add((right.X, top));
+        points.Add((left.X, top));
+        points.Add(left);
         return points;
     }
 
@@ -265,23 +240,14 @@ public static class WaypointBuilder
             return pairs;
         }
 
-        // From the surface up to the arch, each place across the road to the place as far along the arch (the arch may
-        // be shorter than the road is wide, where it cuts a bend's corner).
-        var arch = outline.Skip(1).Take(outline.Count - 2).ToList();
-        var lengths = new List<double> { 0 };
-        for (var i = 1; i < arch.Count; i++)
-            lengths.Add(lengths[^1] + Math.Sqrt((arch[i].X - arch[i - 1].X) * (arch[i].X - arch[i - 1].X) + (arch[i].Y - arch[i - 1].Y) * (arch[i].Y - arch[i - 1].Y)));
-        (double X, double Y) Along(double f)
-        {
-            var at = f * lengths[^1];
-            var k = 1;
-            while (k + 1 < arch.Count && lengths[k] < at) k++;
-            var t = lengths[k] > lengths[k - 1] ? Math.Clamp((at - lengths[k - 1]) / (lengths[k] - lengths[k - 1]), 0, 1) : 0;
-            return (arch[k - 1].X + (arch[k].X - arch[k - 1].X) * t, arch[k - 1].Y + (arch[k].Y - arch[k - 1].Y) * t);
-        }
-        if (arch.Count < 2) return pairs;
+        // From the surface straight up to the beam, between the posts.
+        if (outline.Count < 4) return pairs;
+        double top = outline[1].Y - BeamWidth / 2, from = Math.Min(outline[1].X, outline[2].X), to = Math.Max(outline[1].X, outline[2].X);
         for (var i = 0; i <= ArchSegments; i++)
-            pairs.Add((Offset(half - ring.Width * i / ArchSegments, 0.05), Along((double)i / ArchSegments)));
+        {
+            var bottom = Offset(half - ring.Width * i / ArchSegments, 0.05);
+            pairs.Add((bottom, (Math.Clamp(bottom.X, from, to), Math.Max(top, bottom.Y))));
+        }
         return pairs;
     }
 
