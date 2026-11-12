@@ -42,7 +42,7 @@ public static class MapMerge
         // Another environment than the edited map's: nothing of that map fits the new one (its base, its blocks and
         // items are the other environment's; merged, the game refuses the map: "Water (in BlueBay)"). The new export
         // stands as it is.
-        if (map.Decoration.Collection.ToString() != add.Decoration.Collection.ToString())
+        if (map.Decoration.Collection.ToString() != add.Decoration.Collection.ToString() || map.MapInfo.Collection.ToString() != add.MapInfo.Collection.ToString())
         {
             log?.Invoke($"The edited map is {map.Decoration.Collection}, the new export {add.Decoration.Collection}: not merged, the new export replaces it");
             nextBytes.Position = 0;
