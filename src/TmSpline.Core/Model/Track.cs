@@ -141,6 +141,8 @@ public sealed class TrackPoint
 
     /// <summary>How high the gate at this point stands over the road, meters (its arch; the trigger reaches as high).</summary>
     public double GateHeight { get; set; } = DefaultGateHeight;
+    /// <summary>A see-through plane in the gate, where its trigger is (checkpoints, finish). Off unless asked for: driving through it looks odd in game.</summary>
+    public bool GatePlane { get; set; }
     /// <summary>
     /// Linked checkpoint group (Checkpoint waypoints only): checkpoints with the same number, on any track of the map,
     /// count as one, so passing any of them is enough (the game's LinkedCheckpoint with that order). 0: not linked.

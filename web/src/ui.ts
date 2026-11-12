@@ -719,6 +719,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         if (h === DEFAULT_GATE_HEIGHT) delete tr.points[s.index].gateHeight;
         else tr.points[s.index].gateHeight = h;
       }, false, `gateHeight:${s.index}`), 100);
+    if (p().waypoint !== "None" && p().waypoint !== "Start")
+      checkbox(root, "See-through plane in the gate", () => !!p().gatePlane, (v) => editor.edit((tr) => {
+        if (v) tr.points[s.index].gatePlane = true;
+        else delete tr.points[s.index].gatePlane;
+      }, true));
     if (p().waypoint === "Checkpoint") {
       // Groups in use anywhere on the map (linked checkpoints may sit on different tracks).
       const groups = [...new Set(editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).filter((g) => g > 0))].sort((a, b) => a - b);

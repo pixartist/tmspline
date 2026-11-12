@@ -119,8 +119,8 @@ public static class WaypointBuilder
         for (var i = 0; i + 1 < outline.Count; i++)
             place.Beam(chunk, gate, outline[i], outline[i + 1], segment);
 
-        // See-through plane where the trigger is, like the native gates.
-        if (settings.GateCurtain is { } curtain && type is Waypoint.Checkpoint or Waypoint.Finish or Waypoint.StartFinish)
+        // See-through plane where the trigger is, like the native gates: where the point asks for it.
+        if (settings.GateCurtain is { } curtain && track.Points[point].GatePlane && type is Waypoint.Checkpoint or Waypoint.Finish or Waypoint.StartFinish)
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
@@ -258,11 +258,14 @@ public static class WaypointBuilder
         // From the surface straight up to the beam, between the posts.
         if (outline.Count < 6) return pairs;
         double top = outline[2].Y - BeamWidth / 2, from = Math.Min(outline[2].X, outline[3].X), to = Math.Max(outline[2].X, outline[3].X);
+        // As wide as the frame: from post to post, over the bars at their feet and over the road between them.
+        pairs.Add((outline[1], (outline[1].X, top)));
         for (var i = 0; i <= ArchSegments; i++)
         {
             var bottom = Offset(half - ring.Width * i / ArchSegments, 0.05);
             pairs.Add((bottom, (Math.Clamp(bottom.X, from, to), Math.Max(top, bottom.Y))));
         }
+        pairs.Add((outline[4], (outline[4].X, top)));
         return pairs;
     }
 
