@@ -405,7 +405,28 @@ public static class VoxelTerrain
                 }
             var p = count > 0 ? sum / count : new Vector3(0.5f);
             n.Vertex = mesh.Positions.Count;
-            mesh.Positions.Add(new Vector3((float)(grid.X0 + (n.X + p.X * n.Size) * v), bottom + (n.Y + p.Y * n.Size) * v, (float)(grid.Z0 + (n.Z + p.Z * n.Size) * v)));
+            var place = new Vector3((float)(grid.X0 + (n.X + p.X * n.Size) * v), bottom + (n.Y + p.Y * n.Size) * v, (float)(grid.Z0 + (n.Z + p.Z * n.Size) * v));
+            if (count == 0)
+            {
+                // A cell the surface only grazes (it passes through smaller cells beside it, and none of this one's own
+                // edges cross it) still gives a point to their triangles: the place in it nearest the surface, found
+                // from its middle down the field's slope. Left in the middle it stood out of the land as a spike.
+                Vector3 low = World(n.X, n.Y, n.Z), high = World(n.X + n.Size, n.Y + n.Size, n.Z + n.Size);
+                var e = 0.25f * v;
+                for (var step = 0; step < 12; step++)
+                {
+                    var f = Field(place);
+                    if (MathF.Abs(f) < 0.05f) break;
+                    var g = new Vector3(Field(place + new Vector3(e, 0, 0)) - Field(place - new Vector3(e, 0, 0)), Field(place + new Vector3(0, e, 0)) - Field(place - new Vector3(0, e, 0)), Field(place + new Vector3(0, 0, e)) - Field(place - new Vector3(0, 0, e))) / (2 * e);
+                    // On one of the cell's faces it goes on along the face (not against it, which gets nowhere).
+                    if ((place.X <= low.X && f * g.X > 0) || (place.X >= high.X && f * g.X < 0)) g.X = 0;
+                    if ((place.Y <= low.Y && f * g.Y > 0) || (place.Y >= high.Y && f * g.Y < 0)) g.Y = 0;
+                    if ((place.Z <= low.Z && f * g.Z > 0) || (place.Z >= high.Z && f * g.Z < 0)) g.Z = 0;
+                    if (g.LengthSquared() < 1e-6f) break;
+                    place = Vector3.Clamp(place - g * (f / g.LengthSquared()), low, high);
+                }
+            }
+            mesh.Positions.Add(place);
             mesh.Pinned.Add(false);
             return n.Vertex;
         }
@@ -497,6 +518,23 @@ public static class VoxelTerrain
             }
             Count(root);
             foreach (var (size, e) in bySize) Console.WriteLine($"  voxel cells of {size * v} m: {e.Cells} with a point, {e.Inside} of them well under the land, {e.Away0} in a road's square");
+        }
+        // Debug: TMSPLINE_VOXEL_PROBE=x,y,z prints the cells whose points lie within 2 m of that place.
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_PROBE") is { } probe)
+        {
+            var at = probe.Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            void Probe(Node n)
+            {
+                if (n.Kids is not null) { foreach (var k in n.Kids) Probe(k); return; }
+                if (n.Vertex < 0 || Vector3.Distance(mesh.Positions[n.Vertex], new Vector3(at[0], at[1], at[2])) > (at.Length > 3 ? at[3] : 2)) return;
+                Console.WriteLine($"  probe: cell of {n.Size * v} m from {World(n.X, n.Y, n.Z)}, point {mesh.Positions[n.Vertex]}");
+                for (var k = 0; k < 8; k++)
+                {
+                    var w = World(n.X + (k & 1) * n.Size, n.Y + ((k >> 1) & 1) * n.Size, n.Z + ((k >> 2) & 1) * n.Size);
+                    Console.WriteLine($"    corner {w}: field {At(n.X + (k & 1) * n.Size, n.Y + ((k >> 1) & 1) * n.Size, n.Z + ((k >> 2) & 1) * n.Size):0.00}, land {LandAt(w.X, w.Z):0.0}, room {room(w):0.0}, away {Away(w.X, w.Z):0}");
+                }
+            }
+            Probe(root);
         }
         // Only where the editor has land (its outline; the heights are not used): the rest is left out.
         // Nor the cuts' floors under the driving surfaces (the road lies on them): triangles at a driving surface that
