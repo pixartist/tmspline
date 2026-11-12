@@ -38,13 +38,8 @@ public static class VoxelTerrain
     private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
     private const float FloorCover = 2f;
-    /// <summary>
-    /// Under a road the cut's floor lies this far below the driving surface (TMSPLINE_VOXEL_SINK), from SinkFrom
-    /// metres from the road's edges on, in full from SinkFull: on the surface itself its triangles came through the
-    /// road wherever it bends or twists, and the more the larger they are. At the edges the land meets the road as before.
-    /// </summary>
-    public static float FloorSink { get; set; } = Setting("TMSPLINE_VOXEL_SINK", 1.25f);
-    private const float SinkFrom = 0.75f, SinkFull = 3.5f;
+    /// <summary>Under an open road (land up to its edges, not over it) the floor stays within this of each edge, in smallest cells.</summary>
+    private const float FloorStrip = 0.5f;
 
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
     public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
@@ -323,7 +318,7 @@ public static class VoxelTerrain
             var f = Blurred(landField, p, false);
             if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
             {
-                var (inRoom, deck) = nearest(p);
+                var cut = -room(p);
                 // A soft cut over the road: where the land's surface and a room's wall come together (a tunnel's
                 // mouth, a cutting's rim, a thin roof over a shallow tunnel) the edge between them is rounded off, and
                 // land thinner than half of Soften goes altogether; as a hard cut it stood there in teeth and shards.
@@ -331,9 +326,6 @@ public static class VoxelTerrain
                 // exactly. Straight over the road it is soft from the edges' height on: a road coming out of the land
                 // comes out where its cover gets thin, not through a wedge of land thinning to nothing along it.
                 var (edge, over, across) = road(p);
-                // Under the road the floor is sunk (FloorSink): the room is that much deeper there.
-                if (deck != default && edge < 100) inRoom -= FloorSink * Ramp(SinkFrom, SinkFull, edge);
-                var cut = -inRoom;
                 var k = Soften * (edge < 100 ? MathF.Max(Ramp(0.5f, 3, over), (1 - Ramp(0.8f, 1, across)) * Ramp(0, 0.75f, over)) : 1);
                 if (k > 0.01f)
                 {
@@ -377,11 +369,9 @@ public static class VoxelTerrain
             // top and the floor under the road's middle are further): exactly within a square of them, else by the squares.
             var from = MathF.Max(0, Away(c.X, c.Z) - reach - Coarse);
             var above = 0f;
-            var toEdge = 0f;
             if (from <= 0)
             {
                 var (edge, up, _) = road(c);
-                toEdge = edge;
                 from = MathF.Max(0, MathF.Min(edge, 2 * Coarse) - reach);
                 above = up;
             }
@@ -394,21 +384,17 @@ public static class VoxelTerrain
             var landNear = MathF.Abs(over) <= span + painted;
             var wall = false;
             var inRoom = false;
-            var floor = false;
             if (Away(c.X, c.Z) - reach < 2 * Coarse && over < span + painted)
             {
-                var (d, deck) = nearest(c);
+                var d = room(c);
                 // (Dabs that come after the cut can stand in the room, up to their amounts from its wall.)
-                wall = MathF.Abs(d) <= reach + paintedOver + FloorSink;
+                wall = MathF.Abs(d) <= reach + paintedOver;
                 inRoom = d < -reach - paintedOver;
-                // The cut's floor under a road, clear of its edges: nothing shows it (the road lies over it), and
-                // there is no land over it to meet (that is cut away), so it needs no rim's cells.
-                floor = deck != default && toEdge > reach + SinkFull && painted == 0;
             }
             // A rim (the land's surface and a room's wall in one cell, over the road: a tunnel's mouth, a cutting's top,
             // a thin roof) gets the smallest cells wherever it is: one point per cell cannot stand for two surfaces,
             // and larger cells stood there in teeth.
-            var rim = landNear && wall && !inRoom && !floor && above + reach > 1;
+            var rim = landNear && wall && !inRoom && above + reach > 1;
             var wanted = Wanted(from);
             if (painted > 0 && landNear && dabRadius > 0) while (wanted > 1 && wanted * v > dabRadius / 4) wanted /= 2;
             // The land's own shape asks for smaller cells too, wherever it is: a cell gives the land one point, at the
@@ -606,14 +592,13 @@ public static class VoxelTerrain
             }
             // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
             // shows through the slot between the land's edge and the driving surface.
-            if (deck == default) return;
-            var cover = LandAt(p.X, p.Z) - p.Y;
-            if (MathF.Abs(d) < v + FloorSink && cover > FloorCover + v) { under[i] = deck; return; }
-            // And the sunk floor under any road, from where it is sunk in full (SinkFull from the edges): the road lies
-            // over it and the sloping band of floor under each edge closes the land to the road, so nothing shows
-            // that it is gone. Only the cut's floor, which has the land's own height over it: the land's surface
-            // passing under a road that stands over it stays.
-            if (d > FloorSink / 2 && d < v + FloorSink && cover > 0.3f && road(p).Edge > SinkFull) under[i] = deck;
+            // Under the road the floor goes too, covered or not (the road lies on it and nothing shows it), but for a
+            // strip under each edge (FloorStrip cells from the rail), which closes that slot. (By the distance from the
+            // rails, not by the place across the road: a half-pipe is wider than the line between its rails.)
+            if (MathF.Abs(d) >= v || deck == default) return;
+            if (LandAt(p.X, p.Z) - p.Y > FloorCover + v) { under[i] = deck; return; }
+            var (edge, _, _) = road(p);
+            if (edge > FloorStrip * v) under[i] = deck;
         });
         var kept = new AdaptiveMesh();
         var index = new Dictionary<int, int>();
