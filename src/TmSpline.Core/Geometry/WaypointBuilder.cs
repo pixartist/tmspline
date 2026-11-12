@@ -91,46 +91,6 @@ public static class WaypointBuilder
         return rings.FirstOrDefault(r => r.IsVertex && r.SegmentU == 0 && r.Segment == point);
     }
 
-    /// <summary>
-    /// How an effect gate's frame lies in its ring's plane (GateObjects): the game's flat gate panels are 32 m wide
-    /// and 8 m high and cannot be cut, so the frame holds whole panels: `Across` of them side by side, enough to span
-    /// the road with its borders, `Up` rows of them, standing on the road's lowest place, its middle at CenterX.
-    /// </summary>
-    public readonly record struct EffectFrame(double CenterX, double Bottom, int Across, int Up)
-    {
-        public const double PanelWidth = 32, PanelHeight = 8;
-    }
-
-    public static EffectFrame EffectFrameAt(Ring ring, double height, RoadMeshSettings settings)
-    {
-        var (minX, maxX, minY, _) = RoadMeshBuilder.SurfaceExtents(ring);
-        var span = maxX - minX + 2 * settings.BorderThickness * ring.BorderScale;
-        return new((minX + maxX) / 2, minY, Math.Max(1, (int)Math.Ceiling(span / EffectFrame.PanelWidth - 1e-6)),
-            Math.Max(1, (int)Math.Round(Math.Clamp(height, 1, 100) / EffectFrame.PanelHeight)));
-    }
-
-    /// <summary>
-    /// An effect gate's frame as an item: posts beside the panels, a beam over them and a bar under the road (closed
-    /// all round, so it holds on any road shape), in the gate's colour. Plain beams, no trigger: the panels have it.
-    /// </summary>
-    public static MeshChunk BuildEffectFrame(Ring ring, int segment, string gate, double height, Vec3d origin, RoadMeshSettings settings, string name)
-    {
-        var frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(ring.Tangent, settings.Rotation);
-        var offset = settings.WorldSpace ? Vec3d.Zero : ring.Position - origin;
-        var chunk = new MeshChunk { Name = name, ItemOffset = offset, Frame = frame };
-        var layout = EffectFrameAt(ring, height, settings);
-        var half = layout.Across * EffectFrame.PanelWidth / 2 + BeamWidth / 2;
-        double left = layout.CenterX - half, right = layout.CenterX + half;
-        var top = layout.Bottom + layout.Up * EffectFrame.PanelHeight + BeamWidth / 2;
-        var (_, _, minY, _) = RoadMeshBuilder.SurfaceExtents(ring);
-        var under = minY - settings.Thickness - BeamWidth / 2 - 0.1;
-        var material = chunk.MaterialIndex(Surfaces.EffectGate(gate));
-        var place = new BoxPlacer(ring, origin + offset, frame, 5);
-        (double, double)[] corners = [(right, under), (right, top), (left, top), (left, under), (right, under)];
-        for (var i = 0; i + 1 < corners.Length; i++) place.Beam(chunk, material, corners[i], corners[i + 1], segment);
-        return chunk;
-    }
-
     private static MeshChunk BuildGate(Track track, Ring ring, int point, Waypoint type, Vec3d origin, RoadMeshSettings settings, string namePrefix)
     {
         var frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(ring.Tangent, settings.Rotation);

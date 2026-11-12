@@ -114,11 +114,6 @@ const OBJECT_BLOCKED = 0xff2020;
 
 const GATE_COLORS: Record<string, number> = {
   Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020,
-  // The frames of effect and car gates (Surfaces.EffectGate in the core).
-  Turbo: 0xf0d020, Turbo2: 0xe03020, TurboRoulette: 0xf08020, ReactorBoost: 0xf0b030, ReactorBoostOriented: 0xf0b030,
-  ReactorBoost2: 0xe04030, ReactorBoost2Oriented: 0xe04030, SlowMotion: 0x40a0f0, NoSteering: 0xc050e0, NoBrakes: 0xe06090,
-  FreeWheeling: 0x808890, Cruise: 0x30c0c0, Fragile: 0xf07030, Reset: 0x40d060,
-  CarStadium: 0xe0e0e0, CarSnow: 0xa0d8ff, CarRally: 0xc08040, CarDesert: 0xe0c060,
 };
 
 const COLORS = {
@@ -811,13 +806,9 @@ export class Editor {
         };
         const at = new THREE.Vector3(...p.position);
         if (!o.frame) return put(gate.block, at, new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE));
-        // With a frame: the game's flat panels (32 m wide, 8 m high, standing in the middle of their block from
-        // 0.21 m under its floor) side by side and over one another; the placement is the middle of their lower
-        // edge, and tells how many it takes across (in place of the offset).
-        const across = Math.max(1, Math.round(p.across)), rows = Math.max(1, Math.round(clamp(o.height, 1, 100) / 8));
-        for (let a = 0; a < across; a++)
-          for (let r = 0; r < rows; r++)
-            put(gatePanel(o.gate ?? "Turbo"), at.clone().addScaledVector(right, (a - (across - 1) / 2) * 32).addScaledVector(up, r * 8), new THREE.Vector3(GATE_MIDDLE, -0.21, GATE_MIDDLE));
+        // The game's flat gate (it stands in the middle of its block, its sill 1 m over the block's floor): the
+        // placement is the road's lowest place in the middle of its width, and the road runs just over the sill.
+        put(gatePanel(o.gate ?? "Turbo"), at, new THREE.Vector3(GATE_MIDDLE, 1.05, GATE_MIDDLE));
       });
     }
     return blocks;

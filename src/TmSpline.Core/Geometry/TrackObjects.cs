@@ -157,10 +157,9 @@ public static class TrackObjects
             var ring = RingAt(rings, d);
             if (o.Kind == TrackObjectKind.Gate && o.Frame)
             {
-                // A gate with a frame: where its panels stand (the middle of their lower edge, the ring's up), and in
-                // place of the offset how many of them it takes across, for the editor to show them.
-                var (foot, up, along, layout) = GateObjects.FrameAt(o, ring, settings);
-                result.Add(new ObjectPlacement(foot, up, along, d, layout.Across, placed));
+                // A flat gate: where it stands (over the road's lowest place, the ring's up), for the editor to show it.
+                var (foot, up, along) = GateObjects.FlatAt(ring);
+                result.Add(new ObjectPlacement(foot, up, along, d, 0, placed));
                 continue;
             }
             var (point, normal) = SurfacePoint(ring, across);

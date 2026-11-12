@@ -287,10 +287,7 @@ public sealed class TrackObject
     public ItemColor Color { get; set; }
     /// <summary>Gates: which (a key of GateObjects.Blocks).</summary>
     public string Gate { get; set; } = "Turbo";
-    /// <summary>
-    /// Gates: a frame of our own round the road with the game's flat gate panels in it (GateObjects), not the game's
-    /// ring. The height is then the frame's (in steps of the panels' 8 m), else how high in the ring the road runs.
-    /// </summary>
+    /// <summary>Gates: the game's flat gate (GateObjects.Panel), not its ring (whose height is how high in it the road runs).</summary>
     public bool Frame { get; set; }
 }
 

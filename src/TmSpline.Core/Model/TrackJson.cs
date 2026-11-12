@@ -138,7 +138,7 @@ public static class TrackJson
         /// <summary>Gates: which (see TrackObject.Gate).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Gate { get; set; }
-        /// <summary>Gates: our own frame with the game's panels (see TrackObject.Frame).</summary>
+        /// <summary>Gates: the game's flat gate, not its ring (see TrackObject.Frame).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Frame { get; set; }
     }

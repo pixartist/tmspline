@@ -53,7 +53,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  GATE_FRAME_HEIGHT, GATE_RING_HEIGHT, GATES, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
+  GATE_RING_HEIGHT, GATES, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -967,12 +967,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         false, Object.fromEntries(Object.entries(GATES).map(([k, g]) => [k, g.label])));
       selectField(root, "Look", ["frame", "ring"], () => (o().frame ? "frame" : "ring"), (v) => { editor.edit((tr) => {
         const x = tr.objects[s.index];
-        if (v === "frame") { x.frame = true; x.height = GATE_FRAME_HEIGHT; }
+        if (v === "frame") x.frame = true;
         else { delete x.frame; x.height = GATE_RING_HEIGHT; }
-      }); editor.onChange(); }, false, { frame: "Our frame, fitted to the road", ring: "The game's ring" });
-      if (obj.frame)
-        rangeField(root, "Height m (steps of 8)", 8, 64, 8, () => Math.max(8, Math.round(o().height / 8) * 8), (v) => set("Height", (x) => (x.height = Math.max(8, Math.min(64, Math.round(v / 8) * 8)))), 64);
-      else
+      }); editor.onChange(); }, false, { frame: "Flat gate (32 m wide, 8 m high)", ring: "Ring (32 m across)" });
+      if (!obj.frame)
         rangeField(root, "Road at (m up the ring)", 0, 32, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(0.1, Math.min(32, v)))), 32);
     } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
@@ -995,11 +993,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "always stays inside the driving surface. Length runs along the road, width across it.",
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "
         + "so you can build jumps.",
-      Gate: "Drag the marker to move the gate along the road. The effect or car switch comes from the game's own gate blocks "
-        + "(a mesh of ours cannot trigger them). Our frame: the game's flat gate panels (32 m wide, 8 m high, they cannot be cut) "
-        + "in a frame of ours, as many side by side as the road needs, so the frame is 32, 64 ... m wide and stands a little "
-        + "outside narrow roads. The game's ring: 32 m across with an opening of 26 m, always that size; \"Road at\" sets how "
-        + "high in it the road runs (16 m is its middle, where a road 26 m wide just fits).",
+      Gate: "Drag the marker to move the gate along the road. Both looks are the game's own gate blocks, placed round the "
+        + "road (a mesh of ours cannot trigger an effect or a car switch), so they keep their size. The flat gate is a frame "
+        + "32 m wide and 8 m high; the road runs over its sill. The ring is 32 m across with an opening of 26 m; \"Road at\" "
+        + "sets how high in it the road runs (16 m is its middle, where a road 26 m wide just fits).",
       Bump: "Drag the marker to move the bump. A smooth hump in the driving surface (negative height: a dip), real "
         + "geometry the car drives over; it flattens out towards the road's edges. The surface is cut finer around it "
         + "(see the segment's bump detail).",

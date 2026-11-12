@@ -100,17 +100,6 @@ public static class Surfaces
     public static readonly TmMaterial GateCurtainFinish = new("GateCurtainFinish", "GlassWaterWall", Color: "FF6060", GamePath: @"Stadium\Media\Material\RaceTriggerFXFinish");
     public static readonly TmMaterial GateCurtain = new("GateCurtain", "GlassWaterWall", Color: "80C8FF", GamePath: @"Stadium\Media\Material\RaceTriggerFXCheckpoint");
 
-    /// <summary>The frame of an effect or car gate of our own (GateObjects), in its effect's colour (the editor's GATE_COLORS mirrors them).</summary>
-    public static TmMaterial EffectGate(string gate) => new($"Gate_{gate}", "CustomConcrete", Color: gate switch
-    {
-        "Turbo" => "F0D020", "Turbo2" => "E03020", "TurboRoulette" => "F08020",
-        "ReactorBoost" or "ReactorBoostOriented" => "F0B030", "ReactorBoost2" or "ReactorBoost2Oriented" => "E04030",
-        "SlowMotion" => "40A0F0", "NoSteering" => "C050E0", "NoBrakes" => "E06090", "FreeWheeling" => "808890",
-        "Cruise" => "30C0C0", "Fragile" => "F07030", "Reset" => "40D060",
-        "CarSnow" => "A0D8FF", "CarRally" => "C08040", "CarDesert" => "E0C060",
-        _ => "E0E0E0",
-    });
-
     /// <summary>Visible gate of a race waypoint, colored like the samples (start green, finish red ...).</summary>
     public static TmMaterial Gate(Waypoint waypoint) => waypoint switch
     {
