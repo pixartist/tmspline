@@ -5,6 +5,7 @@
 using SkiaSharp;
 using TmSpline.Core.Geometry;
 
+if (args.Length >= 2 && args[0] == "--chunks") { ChunkCheck.Run(args[1]); return; }
 if (args.Length >= 3 && args[0] == "--map") { MapMode.Run(args[1], args[2]); return; }
 if (args.Length >= 3 && args[0] == "--check") { Check.Run(args[1], args[2], args.Length > 3 ? args[3] : "new", args.Length > 4 ? args[4] : null); return; }
 var output = args.Length > 0 ? args[0] : "mesher.png";

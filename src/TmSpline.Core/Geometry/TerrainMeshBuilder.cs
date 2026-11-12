@@ -50,7 +50,7 @@ public static class TerrainMeshBuilder
     /// <summary>The last stitched build's details (for the checker).</summary>
     public static StitchedTerrainResult? LastStitched { get; private set; }
 
-    public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain")
+    public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain", VoxelTerrain.Roads? roads = null)
     {
         if (grid.Columns < 2 || grid.Rows < 2) return [];
         AdaptiveMesh mesh;
@@ -58,7 +58,7 @@ public static class TerrainMeshBuilder
         if (Voxel)
         {
             LastStitched = null;
-            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap());
+            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap(), roads);
         }
         else if (Stitched)
         {
@@ -84,7 +84,7 @@ public static class TerrainMeshBuilder
     /// grass and rock (cut along the rock angle), lightmap UVs, skirts under the outer edge, square chunks.
     /// </summary>
     internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
-        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null, bool solid = false)
+        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null, bool solid = false, HashSet<(int, int)>? only = null)
     {
         // The lining's floors (the room over them, no steeper than the rock angle) are land like that beside them: their
         // points on the land's edge are the land's own (one point, one normal: no crease along the join), the others new.
@@ -211,6 +211,8 @@ public static class TerrainMeshBuilder
         var skirts = new Dictionary<MeshChunk, int>();
         foreach (var (a, b, c) in triangles)
         {
+            // (Building a part: the triangles round it are there for the normals only.)
+            if (only is not null && !only.Contains(((int)Math.Floor(((xs[a] + xs[b] + xs[c]) / 3 - grid.X0) / ChunkSize), (int)Math.Floor(((zs[a] + zs[b] + zs[c]) / 3 - grid.Z0) / ChunkSize)))) continue;
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
             var facing = Vector3.UnitY;
             if (solid)
@@ -402,6 +404,60 @@ public static class TerrainMeshBuilder
     /// Empty (both counts 0) without terrain.
     /// </summary>
     public static byte[] Preview(string mapJson) => Preview(TrackJson.ParseMap(mapJson));
+
+    /// <summary>The chunk (its place in the land's grid of chunks) a plan point is in.</summary>
+    public static (int X, int Z) ChunkOf(TerrainGrid grid, double x, double z) => ((int)Math.Floor((x - grid.X0) / ChunkSize), (int)Math.Floor((z - grid.Z0) / ChunkSize));
+
+    /// <summary>
+    /// Some chunks of the voxel terrain alone (after a dab of the brush): built with the land round them, so they come
+    /// out as in the whole, edge to edge with the chunks beside them.
+    /// </summary>
+    public static List<MeshChunk> BuildChunks(TerrainGrid grid, TrackMap map, VoxelTerrain.Roads roads, HashSet<(int X, int Z)> keys, string namePrefix = "Terrain")
+    {
+        if (keys.Count == 0) return [];
+        var region = ((float)(grid.X0 + keys.Min(k => k.X) * ChunkSize), (float)(grid.Z0 + keys.Min(k => k.Z) * ChunkSize),
+            (float)(grid.X0 + (keys.Max(k => k.X) + 1) * ChunkSize), (float)(grid.Z0 + (keys.Max(k => k.Z) + 1) * ChunkSize));
+        var mesh = VoxelTerrain.Build(grid, map, roads, region);
+        var xs = mesh.Positions.Select(p => (double)p.X).ToList();
+        var ys = mesh.Positions.Select(p => (double)p.Y).ToList();
+        var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
+        var triangles = new List<(int A, int B, int C)>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, null, true, keys.Select(k => (k.X, k.Z)).ToHashSet());
+    }
+
+    /// <summary>
+    /// Chunks packed for the editor, each on its own: "CHNK", their number, then per chunk its place (x, z), vertex and
+    /// triangle counts, rock triangles (the last ones), positions (world), normals, uvs, indices. `keys`: chunks to
+    /// name even when they came out empty (the editor drops what it has there).
+    /// </summary>
+    public static byte[] PackChunks(TerrainGrid grid, List<MeshChunk> chunks, IEnumerable<(int X, int Z)>? keys = null)
+    {
+        var byKey = chunks.ToDictionary(c => ChunkOf(grid, c.ItemOffset.X + ChunkSize / 2, c.ItemOffset.Z + ChunkSize / 2));
+        var all = (keys ?? []).Concat(byKey.Keys).Distinct().OrderBy(k => k.Z).ThenBy(k => k.X).ToList();
+        using var stream = new MemoryStream();
+        using var w = new BinaryWriter(stream);
+        w.Write(0x4B4E4843);
+        w.Write(all.Count);
+        foreach (var key in all)
+        {
+            w.Write(key.X);
+            w.Write(key.Z);
+            if (!byKey.TryGetValue(key, out var c)) { w.Write(0); w.Write(0); w.Write(0); continue; }
+            var o = new Vector3((float)c.ItemOffset.X, (float)c.ItemOffset.Y, (float)c.ItemOffset.Z);
+            var land = c.Triangles.Where(t => c.Materials[t.Material].GamePath is null).ToList();
+            var rock = c.Triangles.Where(t => c.Materials[t.Material].GamePath is not null).ToList();
+            w.Write(c.Positions.Count);
+            w.Write(land.Count + rock.Count);
+            w.Write(rock.Count);
+            foreach (var p in c.Positions) { w.Write(p.X + o.X); w.Write(p.Y + o.Y); w.Write(p.Z + o.Z); }
+            foreach (var n in c.Normals) { w.Write(n.X); w.Write(n.Y); w.Write(n.Z); }
+            foreach (var u in c.Uv0) { w.Write(u.X); w.Write(u.Y); }
+            foreach (var t in land.Concat(rock)) { w.Write(t.A); w.Write(t.B); w.Write(t.C); }
+        }
+        w.Flush();
+        return stream.ToArray();
+    }
 
     /// <summary>See <see cref="Preview(string)"/>.</summary>
     public static byte[] Preview(TrackMap map)

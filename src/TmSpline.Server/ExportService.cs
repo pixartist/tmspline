@@ -96,10 +96,63 @@ public sealed partial class ExportService
     }
 
     /// <summary>The map's own terrain as the export builds it, packed for the editor (TerrainMeshBuilder.Preview).</summary>
-    public byte[] TerrainPreview(ExportRequestDto request)
+    public byte[] TerrainPreview(ExportRequestDto request, string? key = null)
     {
         var (map, _) = Validate(request);
-        return TerrainMeshBuilder.Preview(map);
+        if (map.Terrain is not { } grid || !TerrainMeshBuilder.Voxel) return TerrainMeshBuilder.Preview(map);
+        // The voxel terrain, chunk by chunk; kept under the editor's key, so that the brush's dabs can be built into it
+        // without the map being sent again (TerrainDab).
+        var roads = VoxelTerrain.Prepare(grid, map);
+        var bytes = TerrainMeshBuilder.PackChunks(grid, TerrainMeshBuilder.Build(grid, map, roads: roads));
+        if (!string.IsNullOrEmpty(key) && key.Length <= 64)
+            lock (_painting)
+            {
+                _painting[key] = new Painting(map, roads, DateTime.UtcNow);
+                // A few maps at most (each is a height map and its roads).
+                foreach (var old in _painting.OrderByDescending(p => p.Value.Used).Skip(4).Select(p => p.Key).ToList()) _painting.Remove(old);
+            }
+        return bytes;
+    }
+
+    private sealed record Painting(TrackMap Map, VoxelTerrain.Roads Roads, DateTime Used);
+    private readonly Dictionary<string, Painting> _painting = [];
+
+    /// <summary>
+    /// The brush's dabs (x, y, z, radius, amount each; `over`: not cut by the roads) added to the terrain last built
+    /// under the key: the chunks they reach, built again and packed as TerrainPreview's. Null when there is no such
+    /// terrain (the server was restarted: the editor asks for the whole again).
+    /// </summary>
+    public byte[]? TerrainDab(string key, double[] dabs, bool over)
+    {
+        Painting? painting;
+        lock (_painting) _painting.TryGetValue(key, out painting);
+        if (painting?.Map.Terrain is not { } grid) return null;
+        if (dabs.Length == 0 || dabs.Length % 5 != 0 || dabs.Length > 5 * 256 || !dabs.All(double.IsFinite))
+            throw new ExportRejectedException("Dabs are five numbers each.");
+        lock (painting)
+        {
+            if (over) grid.EditsOver = [.. grid.EditsOver, .. dabs];
+            else grid.Edits = [.. grid.Edits, .. dabs];
+            // The chunks a dab changes: those within its radius, and a little more (the cells round it get smaller).
+            var keys = new HashSet<(int X, int Z)>();
+            for (var i = 0; i < dabs.Length; i += 5)
+            {
+                var reach = Math.Abs(dabs[i + 3]) + 16;
+                var (x0, z0) = TerrainMeshBuilder.ChunkOf(grid, dabs[i] - reach, dabs[i + 2] - reach);
+                var (x1, z1) = TerrainMeshBuilder.ChunkOf(grid, dabs[i] + reach, dabs[i + 2] + reach);
+                for (var x = x0; x <= x1; x++) for (var z = z0; z <= z1; z++) keys.Add((x, z));
+            }
+            if (keys.Count > 64) throw new ExportRejectedException("The dabs reach too far.");
+            return TerrainMeshBuilder.PackChunks(grid, TerrainMeshBuilder.BuildChunks(grid, painting.Map, painting.Roads, keys), keys);
+        }
+    }
+
+    /// <summary>The body of a dab request.</summary>
+    public sealed class TerrainDabDto
+    {
+        public string? Key { get; set; }
+        public double[]? Dabs { get; set; }
+        public bool Over { get; set; }
     }
 
     public async Task<ExportedMap> ExportAsync(ExportRequestDto request, CancellationToken ct)

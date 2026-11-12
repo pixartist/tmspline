@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { buildPreview, buildTerrain, type ObjectPlacement, type PreviewMesh, type PreviewQuality } from "./core";
+import { buildPreview, buildTerrain, dabTerrain, type ObjectPlacement, type PreviewMesh, type PreviewQuality, type TerrainChunk, type TerrainMesh } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
 import { ItemLayer } from "./items";
@@ -782,7 +782,11 @@ export class Editor {
   }
 
   /** The own terrain's preview mesh (see syncTerrain), and the grid it shows. */
-  private terrainMesh: THREE.Mesh | null = null;
+  /** The land: a mesh per chunk (named by its place, "x,z"). */
+  private terrainMesh: THREE.Group | null = null;
+  private terrainMaterials: THREE.Material[] = [];
+  /** The server's name for the land shown (dabs can be built into it there), with the roads it was built for; or null. */
+  private terrainKey: { key: string; tracks: string } | null = null;
   private terrainShown: TerrainGrid | undefined;
   private terrainBuild = 0;
 
@@ -797,9 +801,48 @@ export class Editor {
     const build = ++this.terrainBuild;
     if (!grid) { this.setTerrainMesh(null); this.setQuickTerrain(false); this.setBusy("terrain", null); return; }
     this.setBusy("terrain", "Meshing the terrain…");
-    void buildTerrain(this.map).then((mesh) => {
+    const tracks = JSON.stringify(this.map.tracks);
+    void buildTerrain(this.map).then(({ chunks, key }) => {
       if (build !== this.terrainBuild) return;
       this.setBusy("terrain", null);
+      const textured = (name: string, fallback: number) => {
+        const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
+        const texture = this.library?.textureOf(name);
+        if (texture) {
+          m.map = this.library!.textureImage(texture);
+          m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping;
+        } else m.color.setHex(fallback);
+        return m;
+      };
+      const materials = [
+        textured(TERRAIN_MATERIALS[grid.surface], grid.surface === "Ice" ? 0xdfe8ee : grid.surface === "Dirt" ? 0xb08a5a : 0x5f9a45),
+        textured(ROCK_MATERIALS[grid.surface], 0x8a8076),
+      ];
+      const group = new THREE.Group();
+      for (const chunk of chunks) if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, materials));
+      this.setTerrainMesh(group, materials);
+      this.terrainKey = key ? { key, tracks } : null;
+      // All of it as one mesh, for the trees.
+      let vertices = 0, corners = 0;
+      for (const c of chunks) { vertices += c.mesh.positions.length / 3; corners += c.mesh.indices.length; }
+      const positions = new Float32Array(vertices * 3), indices = new Uint32Array(corners);
+      let v = 0, i = 0;
+      for (const c of chunks) {
+        positions.set(c.mesh.positions, v * 3);
+        for (let k = 0; k < c.mesh.indices.length; k++) indices[i++] = c.mesh.indices[k] + v;
+        v += c.mesh.positions.length / 3;
+      }
+      this.settleTrees({ positions, indices });
+    }).catch((err) => {
+      if (build === this.terrainBuild) this.setBusy("terrain", null);
+      console.error("Terrain preview failed", err);
+    });
+  }
+
+  /** A chunk of the land as a mesh. */
+  private chunkMesh(chunk: TerrainChunk, materials: THREE.Material[]): THREE.Mesh {
+    const mesh: TerrainMesh = chunk.mesh;
+    {
       // The game projects both materials' textures by position: from above for the land, from the side for the rock
       // (each rock triangle on its own vertices, projected along its steeper side).
       const triangles = mesh.indices.length / 3, land = triangles - mesh.rockTriangles;
@@ -824,28 +867,12 @@ export class Editor {
       geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       geo.addGroup(0, land * 3, 0);
       geo.addGroup(land * 3, mesh.rockTriangles * 3, 1);
-      const textured = (name: string, fallback: number) => {
-        const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
-        const texture = this.library?.textureOf(name);
-        if (texture) {
-          m.map = this.library!.textureImage(texture);
-          m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping;
-        } else m.color.setHex(fallback);
-        return m;
-      };
-      const materials = [
-        textured(TERRAIN_MATERIALS[grid.surface], grid.surface === "Ice" ? 0xdfe8ee : grid.surface === "Dirt" ? 0xb08a5a : 0x5f9a45),
-        textured(ROCK_MATERIALS[grid.surface], 0x8a8076),
-      ];
       const m = new THREE.Mesh(geo, materials);
+      m.name = `${chunk.x},${chunk.z}`;
       m.receiveShadow = true;
       m.castShadow = true;
-      this.setTerrainMesh(m);
-      this.settleTrees(mesh);
-    }).catch((err) => {
-      if (build === this.terrainBuild) this.setBusy("terrain", null);
-      console.error("Terrain preview failed", err);
-    });
+      return m;
+    }
   }
 
   /**
@@ -873,13 +900,15 @@ export class Editor {
     this.onChange();
   }
 
-  private setTerrainMesh(mesh: THREE.Mesh | null): void {
+  private setTerrainMesh(mesh: THREE.Group | null, materials: THREE.Material[] = []): void {
     if (this.terrainMesh) {
       this.scene.remove(this.terrainMesh);
-      this.terrainMesh.geometry.dispose();
-      for (const m of [this.terrainMesh.material].flat()) m.dispose();
+      for (const m of this.terrainMesh.children as THREE.Mesh[]) m.geometry.dispose();
+      for (const m of this.terrainMaterials) m.dispose();
     }
     this.terrainMesh = mesh;
+    this.terrainMaterials = materials;
+    this.terrainKey = null;
     this.clearDabMarks();
     if (mesh) this.scene.add(mesh);
     // Built from the painted land: the quick mesh is done, unless a stroke is on (then this one is already behind).
@@ -955,8 +984,37 @@ export class Editor {
   /** Where the brush is: on the land's mesh for the solid's brushes (walls and roofs too), else on the height map. */
   private brushHit(e: PointerEvent): THREE.Vector3 | null {
     if (!this.sculpting || !this.terrainMesh?.visible) return this.terrainHit(e);
-    const hit = this.rayFrom(e).intersectObject(this.terrainMesh, false)[0];
+    const hit = this.rayFrom(e).intersectObject(this.terrainMesh, true)[0];
     return hit ? hit.point.clone() : null;
+  }
+
+  /** Dabs not yet built into the land shown (sent to the server one batch at a time), and whether a batch is on its way. */
+  private pendingDabs: { dabs: number[]; over: boolean } | null = null;
+  private dabbing = false;
+  /** Whether the stroke's dabs all reached the land shown: else the whole is built again when the stroke ends. */
+  private liveDabs = false;
+
+  /** Builds the waiting dabs into the land shown: the server builds the chunks they reach again, and those are swapped in. */
+  private flushDabs(): void {
+    const key = this.terrainKey, pending = this.pendingDabs, group = this.terrainMesh;
+    if (this.dabbing || !pending) return;
+    if (!key || !group || !this.liveDabs) { this.pendingDabs = null; this.liveDabs = false; return; }
+    this.pendingDabs = null;
+    this.dabbing = true;
+    const build = this.terrainBuild;
+    dabTerrain(key.key, pending.dabs, pending.over).then((chunks) => {
+      this.dabbing = false;
+      // Another land since (an undo, Generate), or the server has lost this one: the whole is built again.
+      if (build !== this.terrainBuild || this.terrainMesh !== group) return;
+      if (!chunks) { this.liveDabs = false; this.pendingDabs = null; if (!this.stroke) this.syncTerrain(true); return; }
+      for (const chunk of chunks) {
+        const old = group.getObjectByName(`${chunk.x},${chunk.z}`) as THREE.Mesh | undefined;
+        if (old) { group.remove(old); old.geometry.dispose(); }
+        if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, this.terrainMaterials));
+      }
+      if (this.pendingDabs) this.flushDabs();
+      else this.clearDabMarks();
+    }).catch(() => { this.dabbing = false; this.liveDabs = false; if (!this.stroke) this.syncTerrain(true); });
   }
 
   /** The dabs of the stroke so far, shown until the land's new mesh is there. */
@@ -1002,6 +1060,8 @@ export class Editor {
     this.orbit.enabled = false;
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     if (!this.sculpting) this.setQuickTerrain(true);
+    // The solid's brushes build each dab into the land shown, when the server has it as it is here (the same roads).
+    this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
     this.dab(at);
   }
 
@@ -1032,7 +1092,9 @@ export class Editor {
       }
     this.items.sync(this.map.items);
     this.onChange();
-    this.syncTerrain(true);
+    // The solid's dabs are in the land shown already (or on their way); else the whole is built again.
+    if (this.sculpting && this.liveDabs) this.terrainShown = this.map.terrain;
+    else this.syncTerrain(true);
   }
 
   /** One dab of the brush at a point on the land. */
@@ -1049,6 +1111,12 @@ export class Editor {
       const amount = (paint.brush === "raise" ? 1 : -1) * paint.strength * RAISE_PER_STRENGTH;
       const edits = paint.uncut ? (grid.editsOver ??= []) : (grid.edits ??= []);
       const n = edits.length;
+      if (this.liveDabs) {
+        const over = !!paint.uncut;
+        if (this.pendingDabs && this.pendingDabs.over === over) this.pendingDabs.dabs.push(at.x, at.y, at.z, paint.radius, amount);
+        else this.pendingDabs = { dabs: [at.x, at.y, at.z, paint.radius, amount], over };
+        this.flushDabs();
+      }
       if (n >= 5 && edits[n - 2] === paint.radius && Math.hypot(edits[n - 5] - at.x, edits[n - 4] - at.y, edits[n - 3] - at.z) < 0.01) edits[n - 1] += amount;
       else {
         edits.push(at.x, at.y, at.z, paint.radius, amount);

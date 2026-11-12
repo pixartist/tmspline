@@ -32,6 +32,10 @@ public static class ServerApp
             o.AddPolicy("estimate", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = requestsPerMinute * 3, Window = TimeSpan.FromMinutes(1) }));
+            // The brush's dabs while painting: several a second.
+            o.AddPolicy("dab", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 1200, Window = TimeSpan.FromMinutes(1) }));
             // The terrain preview: the editor asks for one after generating and after each painted stroke.
             o.AddPolicy("terrain", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -167,11 +171,11 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The own terrain's preview mesh, built natively (the editor's WebAssembly core takes many times as long).
-        app.MapPost("/api/terrain", (ExportRequestDto request, ExportService service) =>
+        app.MapPost("/api/terrain", (ExportRequestDto request, string? key, ExportService service) =>
         {
             try
             {
-                return Results.Bytes(service.TerrainPreview(request), "application/octet-stream");
+                return Results.Bytes(service.TerrainPreview(request, key), "application/octet-stream");
             }
             catch (ExportRejectedException e)
             {
@@ -179,6 +183,22 @@ public static class ServerApp
             }
         })
         .RequireRateLimiting("terrain")
+        .DisableAntiforgery();
+
+        // The brush's dabs, built into the terrain last asked for under the key: only the chunks they reach come back.
+        app.MapPost("/api/terrain/dab", (ExportService.TerrainDabDto request, ExportService service) =>
+        {
+            try
+            {
+                var bytes = service.TerrainDab(request.Key ?? "", request.Dabs ?? [], request.Over);
+                return bytes is null ? Results.NotFound() : Results.Bytes(bytes, "application/octet-stream");
+            }
+            catch (ExportRejectedException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest, title: "Invalid dabs");
+            }
+        })
+        .RequireRateLimiting("dab")
         .DisableAntiforgery();
 
         MapCloud(app);

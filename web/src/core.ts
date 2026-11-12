@@ -91,14 +91,18 @@ export interface TerrainMesh { positions: Float32Array; normals: Float32Array; u
  * Builds the terrain preview: on the local server when it can (natively, many times faster than the WebAssembly core),
  * else in the worker.
  */
-export async function buildTerrain(map: TrackMap): Promise<TerrainMesh> {
+export async function buildTerrain(map: TrackMap): Promise<TerrainChunks> {
   try {
-    const response = await fetch("/api/terrain", {
+    const key = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const response = await fetch(`/api/terrain?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ track: map }),
     });
-    if (response.ok) return decodeTerrain(new Uint8Array(await response.arrayBuffer()));
+    if (response.ok) {
+      const chunks = decodeChunks(new Uint8Array(await response.arrayBuffer()));
+      if (chunks) return { chunks, key };
+    }
   } catch { /* no server: the worker builds it */ }
   await loadCore();
   const id = nextId++;
@@ -106,7 +110,47 @@ export async function buildTerrain(map: TrackMap): Promise<TerrainMesh> {
     pending.set(id, { resolve, reject });
     worker.postMessage({ type: "terrain", id, json: JSON.stringify(map) });
   });
-  return decodeTerrain(bytes);
+  return { chunks: [{ x: 0, z: 0, mesh: decodeTerrain(bytes) }], key: null };
+}
+
+/** The terrain in chunks (squares of land, each its own mesh); `key`: the server's name for it, for dabTerrain, or null. */
+export interface TerrainChunks { chunks: TerrainChunk[]; key: string | null }
+/** A chunk at its place in the land's grid of chunks; no triangles: nothing is left there. */
+export interface TerrainChunk { x: number; z: number; mesh: TerrainMesh }
+
+/**
+ * The brush's dabs (x, y, z, radius, amount each; `over`: not cut by the roads) built into the terrain last built under
+ * the key: the chunks they changed. Null when the server no longer has that terrain (ask for the whole again).
+ */
+export async function dabTerrain(key: string, dabs: number[], over: boolean): Promise<TerrainChunk[] | null> {
+  const response = await fetch("/api/terrain/dab", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, dabs, over }),
+  });
+  if (!response.ok) return null;
+  return decodeChunks(new Uint8Array(await response.arrayBuffer()));
+}
+
+/** The server's chunks ("CHNK", their number, then each: place, counts, arrays), or null when the bytes are something else. */
+function decodeChunks(bytes: Uint8Array): TerrainChunk[] | null {
+  const buffer = bytes.slice().buffer;
+  const view = new DataView(buffer);
+  if (bytes.length < 8 || view.getInt32(0, true) !== 0x4b4e4843) return null;
+  const count = view.getInt32(4, true);
+  const chunks: TerrainChunk[] = [];
+  let o = 8;
+  for (let k = 0; k < count; k++) {
+    const x = view.getInt32(o, true), z = view.getInt32(o + 4, true);
+    const vertexCount = view.getInt32(o + 8, true), triangleCount = view.getInt32(o + 12, true), rockTriangles = view.getInt32(o + 16, true);
+    o += 20;
+    const positions = new Float32Array(buffer, o, vertexCount * 3); o += vertexCount * 12;
+    const normals = new Float32Array(buffer, o, vertexCount * 3); o += vertexCount * 12;
+    const uvs = new Float32Array(buffer, o, vertexCount * 2); o += vertexCount * 8;
+    const indices = new Uint32Array(new Int32Array(buffer, o, triangleCount * 3)); o += triangleCount * 12;
+    chunks.push({ x, z, mesh: { positions, normals, uvs, indices, rockTriangles } });
+  }
+  return chunks;
 }
 
 function decodeTerrain(bytes: Uint8Array): TerrainMesh {

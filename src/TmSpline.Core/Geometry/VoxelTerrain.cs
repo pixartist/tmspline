@@ -56,10 +56,59 @@ public static class VoxelTerrain
         public int Vertex = -1;
     }
 
-    public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map)
+    /// <summary>What a build needs of the roads (their rooms, and how far each place is from them): the same until a road or the land's extent changes.</summary>
+    public sealed class Roads
+    {
+        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across)> Road) Rooms { get; init; }
+        internal float[] Away { get; init; } = [];
+        internal int Columns { get; init; }
+        internal int Rows { get; init; }
+    }
+
+    /// <summary>Plan squares of the distance to the roads, metres.</summary>
+    private const float Coarse = 8;
+
+    /// <summary>A part of the land is built with this much round it (cells there are as in the whole; beyond it they are left large), and its triangles' normals take in those up to half of it out; metres.</summary>
+    private const float Margin = 48;
+
+    public static Roads Prepare(TerrainGrid grid, TrackMap map)
+    {
+        var rooms = StitchedTerrain.Rooms(grid, map);
+        var roomFloor = rooms.Floor;
+        double width = (grid.Columns - 1) * grid.Cell, depth = (grid.Rows - 1) * grid.Cell;
+        int dc = (int)Math.Ceiling(width / Coarse) + 1, dr = (int)Math.Ceiling(depth / Coarse) + 1;
+        var away = new float[dc * dr];
+        for (var r = 0; r < dr; r++)
+            for (var c = 0; c < dc; c++)
+                away[r * dc + c] = float.IsPositiveInfinity(roomFloor((float)(grid.X0 + (c + 0.5) * Coarse), (float)(grid.Z0 + (r + 0.5) * Coarse))) ? 1e6f : 0;
+        {
+            float ax = Coarse, dg = Coarse * MathF.Sqrt(2);
+            void Relax(int i, int j, float cost) { if (away[j] + cost < away[i]) away[i] = away[j] + cost; }
+            for (var r = 0; r < dr; r++)
+                for (var c = 0; c < dc; c++)
+                {
+                    var i = r * dc + c;
+                    if (c > 0) Relax(i, i - 1, ax);
+                    if (r > 0) { Relax(i, i - dc, ax); if (c > 0) Relax(i, i - dc - 1, dg); if (c + 1 < dc) Relax(i, i - dc + 1, dg); }
+                }
+            for (var r = dr - 1; r >= 0; r--)
+                for (var c = dc - 1; c >= 0; c--)
+                {
+                    var i = r * dc + c;
+                    if (c + 1 < dc) Relax(i, i + 1, ax);
+                    if (r + 1 < dr) { Relax(i, i + dc, ax); if (c + 1 < dc) Relax(i, i + dc + 1, dg); if (c > 0) Relax(i, i + dc - 1, dg); }
+                }
+        }
+        return new Roads { Rooms = rooms, Away = away, Columns = dc, Rows = dr };
+    }
+
+    /// <param name="prepared">From <see cref="Prepare"/> for this land and these roads, or null.</param>
+    /// <param name="region">Only this part of the land (plan: x0, z0, x1, z1), with Margin/2 round it for the normals; null: all.</param>
+    public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map, Roads? roads = null, (float X0, float Z0, float X1, float Z1)? region = null)
     {
         var v = Voxel;
-        var (room, roomFloor, nearest, road) = StitchedTerrain.Rooms(grid, map);
+        var prepared = roads ?? Prepare(grid, map);
+        var (room, _, nearest, road) = prepared.Rooms;
         // The land's heights, also beyond its outline (each place without land takes its nearest land's: the octree
         // needs a height everywhere; what lies outside the outline is left out of the mesh at the end).
         var heights = (double[])grid.Heights.Clone();
@@ -109,30 +158,8 @@ public static class VoxelTerrain
         double width = (grid.Columns - 1) * grid.Cell, depth = (grid.Rows - 1) * grid.Cell;
 
         // How far each place is from the roads (plan, metres; on squares of Coarse metres, the rooms' own: 0).
-        const float Coarse = 8;
-        int dc = (int)Math.Ceiling(width / Coarse) + 1, dr = (int)Math.Ceiling(depth / Coarse) + 1;
-        var away = new float[dc * dr];
-        for (var r = 0; r < dr; r++)
-            for (var c = 0; c < dc; c++)
-                away[r * dc + c] = float.IsPositiveInfinity(roomFloor((float)(grid.X0 + (c + 0.5) * Coarse), (float)(grid.Z0 + (r + 0.5) * Coarse))) ? 1e6f : 0;
-        {
-            float ax = Coarse, dg = Coarse * MathF.Sqrt(2);
-            void Relax(int i, int j, float cost) { if (away[j] + cost < away[i]) away[i] = away[j] + cost; }
-            for (var r = 0; r < dr; r++)
-                for (var c = 0; c < dc; c++)
-                {
-                    var i = r * dc + c;
-                    if (c > 0) Relax(i, i - 1, ax);
-                    if (r > 0) { Relax(i, i - dc, ax); if (c > 0) Relax(i, i - dc - 1, dg); if (c + 1 < dc) Relax(i, i - dc + 1, dg); }
-                }
-            for (var r = dr - 1; r >= 0; r--)
-                for (var c = dc - 1; c >= 0; c--)
-                {
-                    var i = r * dc + c;
-                    if (c + 1 < dc) Relax(i, i + 1, ax);
-                    if (r + 1 < dr) { Relax(i, i + dc, ax); if (c + 1 < dc) Relax(i, i + dc + 1, dg); if (c > 0) Relax(i, i + dc - 1, dg); }
-                }
-        }
+        var away = prepared.Away;
+        int dc = prepared.Columns, dr = prepared.Rows;
         float Away(float x, float z)
         {
             int c = Math.Clamp((int)Math.Floor((x - grid.X0) / Coarse), 0, dc - 1), r = Math.Clamp((int)Math.Floor((z - grid.Z0) / Coarse), 0, dr - 1);
@@ -246,6 +273,12 @@ public static class VoxelTerrain
             var half = n.Size / 2;
             var c = World(n.X + half, n.Y + half, n.Z + half);
             var reach = n.Size * v * 0.866f;
+            // Outside the part asked for (and its margin): left as it is.
+            if (region is { } part)
+            {
+                var side = n.Size * v / 2;
+                if (c.X + side < part.X0 - Margin || c.X - side > part.X1 + Margin || c.Z + side < part.Z0 - Margin || c.Z - side > part.Z1 + Margin) return;
+            }
             // How far the cell is from the roads' edges at least (that is where the land has to meet the road; a vault's
             // top and the floor under the road's middle are further): exactly within a square of them, else by the squares.
             var from = MathF.Max(0, Away(c.X, c.Z) - reach - Coarse);
@@ -432,6 +465,7 @@ public static class VoxelTerrain
             Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
             var mid = (a + b + c) / 3;
             if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
+            if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             if (!KeepFloor && ua != default && ub != default && uc != default)
             {
