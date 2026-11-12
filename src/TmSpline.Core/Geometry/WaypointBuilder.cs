@@ -195,9 +195,19 @@ public static class WaypointBuilder
         // A plain frame, upright in the point's own frame whatever the road's sides do: a post straight up from each
         // foot and a beam across, `height` over the road's lowest place (and clear of the feet, on a road with high
         // sides). An arch following the surface folded up in a bowl's corners.
-        var (right, left) = (Foot(1), Foot(-1));
-        var lowest = Enumerable.Range(0, 33).Min(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 32).Y);
-        var top = Math.Max(lowest + height, Math.Max(right.Y, left.Y) + BeamWidth);
+        // The posts stand outside the road: beside its widest place (the curbs' outer sides with borders), from the
+        // underside of its edge up.
+        var samples = Enumerable.Range(0, 33).Select(i => RoadMeshBuilder.SurfaceSample(ring, -half + ring.Width * i / 32)).ToList();
+        var lowest = samples.Min(p => p.Y);
+        var beside = (borders ? settings.BorderThickness * ring.BorderScale : 0) + BeamWidth / 2 + 0.15;
+        (double X, double Y) Post(int side)
+        {
+            var edge = RoadMeshBuilder.SurfaceSample(ring, side * half);
+            var outer = edge.X >= 0 ? samples.Max(p => p.X) + beside : samples.Min(p => p.X) - beside;
+            return (outer, edge.Y - settings.Thickness);
+        }
+        var (right, left) = (Post(1), Post(-1));
+        var top = Math.Max(lowest + height, Math.Max(Foot(1).Y, Foot(-1).Y) + BeamWidth);
         points.Add(right);
         points.Add((right.X, top));
         points.Add((left.X, top));
