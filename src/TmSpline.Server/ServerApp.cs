@@ -171,15 +171,13 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The map as a 3D model (meshes only, no importer).
-        app.MapPost("/api/export/model", (ExportRequestDto request, ExportService service, HttpContext context) =>
+        app.MapPost("/api/export/model", (ExportRequestDto request, ExportService service, HttpContext _) =>
         {
             try
             {
                 var (data, fileName) = service.Model(request);
-                // How the download ends goes into the log: the file can be large.
-                var aborted = context.RequestAborted;
-                context.Response.OnCompleted(() => { service.ModelSent(fileName, data.Length, aborted.IsCancellationRequested); return Task.CompletedTask; });
-                return Results.File(data, "model/obj", fileName);
+                // The editor gets a ticket and fetches the file as a plain download (see ExportService.Keep).
+                return Results.Ok(new { ticket = service.Keep(data, fileName), fileName, bytes = data.Length });
             }
             catch (ExportRejectedException e)
             {
@@ -188,6 +186,16 @@ public static class ServerApp
         })
         .RequireRateLimiting("estimate")
         .DisableAntiforgery();
+
+        app.MapGet("/api/export/model/{ticket}", (string ticket, ExportService service, HttpContext context) =>
+        {
+            if (service.Kept(ticket) is not { } file) return Results.NotFound();
+            // How the download ends goes into the log: the file can be large.
+            var aborted = context.RequestAborted;
+            context.Response.OnCompleted(() => { service.ModelSent(file.FileName, file.Data.Length, aborted.IsCancellationRequested); return Task.CompletedTask; });
+            return Results.File(file.Data, "application/octet-stream", file.FileName);
+        })
+        .RequireRateLimiting("estimate");
 
         // A download that failed in the editor (it cannot write the log itself).
         app.MapPost("/api/export/failed", (ExportService.ClientFailureDto report, ExportService service) =>

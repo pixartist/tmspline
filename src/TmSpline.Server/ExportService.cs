@@ -122,6 +122,32 @@ public sealed partial class ExportService
         }
     }
 
+    /// <summary>
+    /// Keeps a built file for the editor to fetch as a plain download (a link the window follows), and gives its
+    /// ticket. Read into the page first, as the map is, a 16 MB model failed in a tester's window ("Failed to fetch"
+    /// while receiving, though the server had sent all of it): a download needs no room in the page. A few files at
+    /// most, each for ten minutes.
+    /// </summary>
+    public string Keep(byte[] data, string fileName)
+    {
+        var ticket = Guid.NewGuid().ToString("N");
+        lock (_kept)
+        {
+            foreach (var old in _kept.Where(k => k.Value.At < DateTime.UtcNow.AddMinutes(-10)).Select(k => k.Key).ToList()) _kept.Remove(old);
+            foreach (var old in _kept.OrderByDescending(k => k.Value.At).Skip(3).Select(k => k.Key).ToList()) _kept.Remove(old);
+            _kept[ticket] = (data, fileName, DateTime.UtcNow);
+        }
+        return ticket;
+    }
+
+    /// <summary>A kept file by its ticket (it stays until it is old: a download may be asked for twice), or null.</summary>
+    public (byte[] Data, string FileName)? Kept(string ticket)
+    {
+        lock (_kept) return _kept.TryGetValue(ticket, out var file) ? (file.Data, file.FileName) : null;
+    }
+
+    private readonly Dictionary<string, (byte[] Data, string FileName, DateTime At)> _kept = [];
+
     /// <summary>How a 3D model's download ended, for the log: sent in full, or the editor went away before.</summary>
     public void ModelSent(string fileName, long bytes, bool aborted)
     {

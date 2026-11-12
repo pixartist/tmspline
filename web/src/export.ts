@@ -145,8 +145,8 @@ export function showExportDialog(track: TrackMap): void {
       error.hidden = true;
       result.hidden = true;
       try {
-        const { name, bytes } = await download("/api/export/model", { track, quality: q }, "track.obj");
-        result.textContent = `Downloaded ${name}: ${mb(bytes)} at ${q} quality. In Blender: File > Import > Wavefront (.obj).`;
+        const { name, bytes } = await downloadModel(track, q);
+        result.textContent = `Downloading ${name}: ${mb(bytes)} at ${q} quality. In Blender: File > Import > Wavefront (.obj).`;
         result.classList.remove("over");
         result.hidden = false;
       } catch (err) {
@@ -287,6 +287,38 @@ async function estimate(track: TrackMap): Promise<Estimate[]> {
 
 function exportMap(track: TrackMap, author: Author, quality: Quality): Promise<{ name: string; bytes: number }> {
   return download("/api/export", { track, quality, authorLogin: author.login || null, authorNickname: author.nickname || null }, "track.Map.Gbx");
+}
+
+/**
+ * The 3D model: the server builds and keeps it, and the window fetches it as a plain download by its ticket. (Read into
+ * the page first, as the map is, a 16 MB model failed in a tester's window while receiving it.)
+ */
+async function downloadModel(track: TrackMap, quality: Quality): Promise<{ name: string; bytes: number }> {
+  const started = performance.now();
+  let stage = "sending the request";
+  let answered = false;
+  try {
+    const response = await fetch("/api/export/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ track, quality }) });
+    if (!response.ok) {
+      answered = true;
+      throw new Error(await problemMessage(response, "Export failed"));
+    }
+    stage = "reading the answer";
+    const built = (await response.json()) as { ticket: string; fileName: string; bytes: number };
+    stage = "starting the download";
+    const a = Object.assign(document.createElement("a"), { href: `/api/export/model/${built.ticket}`, download: built.fileName });
+    a.click();
+    return { name: built.fileName, bytes: built.bytes };
+  } catch (err) {
+    if (answered) throw err;
+    const message = (err as Error).message;
+    void fetch("/api/export/failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ what: "/api/export/model", stage, message, seconds: (performance.now() - started) / 1000, requestBytes: 0 }),
+    }).catch(() => {});
+    throw new Error(`${message} (while ${stage}, after ${((performance.now() - started) / 1000).toFixed(1)} s)`);
+  }
 }
 
 /**
