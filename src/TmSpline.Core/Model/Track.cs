@@ -257,6 +257,9 @@ public enum TrackObjectKind
     Gate,
 }
 
+/// <summary>How a gate object looks: our own gate, the game's flat gate block or the game's ring block.</summary>
+public enum GateLook { Custom, Flat, Ring }
+
 public enum ObjectShape
 {
     Round,
@@ -287,8 +290,11 @@ public sealed class TrackObject
     public ItemColor Color { get; set; }
     /// <summary>Gates: which (a key of GateObjects.Blocks).</summary>
     public string Gate { get; set; } = "Turbo";
-    /// <summary>Gates: the game's flat gate (GateObjects.Panel), not its ring (whose height is how high in it the road runs).</summary>
-    public bool Frame { get; set; }
+    /// <summary>
+    /// Gates: a gate of our own fitted to the road (the height is the gate's), or one of the game's blocks (the ring's
+    /// height is how high in it the road runs). See GateObjects.
+    /// </summary>
+    public GateLook Look { get; set; }
 }
 
 /// <summary>

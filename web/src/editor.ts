@@ -8,7 +8,7 @@ import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
-  add, appendPoint, GATES, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, GATES, gateLook, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, DEFAULT_GATE_HEIGHT, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
@@ -114,6 +114,12 @@ const OBJECT_BLOCKED = 0xff2020;
 
 const GATE_COLORS: Record<string, number> = {
   Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020,
+  // Effect and car gates of our own (Surfaces.EffectGate in the core).
+  Turbo: 0xf0d020, Turbo2: 0xe03020, TurboRoulette: 0xf08020, ReactorBoost: 0xf0b030, ReactorBoostOriented: 0xf0b030,
+  ReactorBoost2: 0xe04030, ReactorBoost2Oriented: 0xe04030, SlowMotion: 0x40a0f0, NoSteering: 0xc050e0, NoBrakes: 0xe06090,
+  FreeWheeling: 0x808890, Cruise: 0x30c0c0, Fragile: 0xf07030, Reset: 0x40d060,
+  CarStadium: 0xe0e0e0, CarSnow: 0xa0d8ff, CarRally: 0xc08040, CarDesert: 0xe0c060,
+  NoGrip: 0x70b0e0, ForceAcceleration: 0x60e060, Bumper: 0xe0a0c0, Bumper2: 0xe060a0,
 };
 
 const COLORS = {
@@ -790,7 +796,9 @@ export class Editor {
       if (placements.length !== t.objects.length) continue;
       t.objects.forEach((o, i) => {
         const gate = o.kind === "Gate" ? GATES[o.gate ?? "Turbo"] : undefined;
-        if (!gate) return;
+        const look = gate && gateLook(o);
+        // (A gate of our own is part of the road's preview mesh.)
+        if (!gate?.block || !look) return;
         const p = placements[i];
         const up = new THREE.Vector3(...p.normal).normalize();
         const tangent = new THREE.Vector3(...p.tangent);
@@ -805,7 +813,7 @@ export class Editor {
           blocks.push({ name, x: 0, y: 0, z: 0, dir: 0, free: true, position: [origin.x, origin.y, origin.z], yaw: angles.y * deg, pitch: angles.x * deg, roll: angles.z * deg });
         };
         const at = new THREE.Vector3(...p.position);
-        if (!o.frame) return put(gate.block, at, new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE));
+        if (look === "ring") return put(gate.block, at, new THREE.Vector3(GATE_MIDDLE, clamp(o.height, 0, 32), GATE_MIDDLE));
         // The game's flat gate (it stands in the middle of its block, its sill 1 m over the block's floor): the
         // placement is the road's lowest place in the middle of its width, and the road runs just over the sill.
         put(gatePanel(o.gate ?? "Turbo"), at, new THREE.Vector3(GATE_MIDDLE, 1.05, GATE_MIDDLE));
@@ -2887,8 +2895,9 @@ export class Editor {
     if (!m) {
       const [surface, effect] = name.split("_");
       // See-through plane inside checkpoint/finish gates.
-      if (surface === "GateCurtain" || surface === "GateCurtainFinish") {
-        const curtain = new THREE.MeshBasicMaterial({ color: surface === "GateCurtain" ? 0x9fd8ff : 0xff8080, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
+      if (surface === "GateCurtain" || surface === "GateCurtainFinish" || surface === "GateFx") {
+        // (An effect gate's plane, "GateFx_Turbo" ...: in its gate's colour.)
+        const curtain = new THREE.MeshBasicMaterial({ color: surface === "GateFx" ? GATE_COLORS[effect] ?? 0x9fd8ff : surface === "GateCurtain" ? 0x9fd8ff : 0xff8080, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
         this.roadMaterials.set(name, curtain);
         return curtain;
       }

@@ -3,24 +3,54 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// Gate objects (TrackObjectKind.Gate): the game's own gate blocks, placed freely round the road where the object
-/// sits. The effect or the other car comes from the block itself (a property of the game's block with its trigger);
-/// an item of ours has no such property, so the gates cannot be meshes of our own.
+/// Gate objects (TrackObjectKind.Gate): a gate round the road that gives an effect or another car, where the object
+/// sits. Three looks:
+/// <list type="bullet">
+/// <item>Custom: a gate of our own, fitted to the road like the checkpoint gates (WaypointBuilder.BuildEffectGate).
+/// The exported item is made a gate after the import (ItemExporter.MakeEffectGate): its trigger gets the effect.</item>
+/// <item>Flat, Ring: the game's own gate blocks, placed freely (they keep their size).</item>
+/// </list>
 /// </summary>
 public static class GateObjects
 {
-    /// <summary>The game's block for each gate (the keys are what the files keep; the editor's GATES mirrors them).</summary>
-    public static readonly IReadOnlyDictionary<string, string> Blocks = new Dictionary<string, string>
+    /// <summary>
+    /// The gates by the key the files keep (the editor's GATES mirrors them), each with the game's name for its effect
+    /// (a surface's gameplay id, as GBX.NET's CPlugSurface.GameplayId spells it; schadocalex's "Custom gates" tool
+    /// uses the same for its eleven) and, where the game has one, its ring block.
+    /// </summary>
+    private static readonly Dictionary<string, (string Gameplay, string? Block)> All = new()
     {
-        ["Turbo"] = "GateSpecialTurbo", ["Turbo2"] = "GateSpecialTurbo2", ["TurboRoulette"] = "GateSpecialTurboRoulette",
-        ["ReactorBoost"] = "GateSpecialBoost", ["ReactorBoost2"] = "GateSpecialBoost2",
-        ["ReactorBoostOriented"] = "GateSpecialBoostOriented", ["ReactorBoost2Oriented"] = "GateSpecialBoost2Oriented",
-        ["SlowMotion"] = "GateSpecialSlowMotion", ["NoSteering"] = "GateSpecialNoSteering", ["NoBrakes"] = "GateSpecialNoBrake",
-        ["FreeWheeling"] = "GateSpecialNoEngine", ["Cruise"] = "GateSpecialCruise", ["Fragile"] = "GateSpecialFragile",
-        ["Reset"] = "GateSpecialReset",
-        ["CarStadium"] = "GateGameplayStadium", ["CarSnow"] = "GateGameplaySnow", ["CarRally"] = "GateGameplayRally",
-        ["CarDesert"] = "GateGameplayDesert",
+        ["Turbo"] = ("Turbo", "GateSpecialTurbo"), ["Turbo2"] = ("Turbo2", "GateSpecialTurbo2"),
+        ["TurboRoulette"] = ("TurboRoulette", "GateSpecialTurboRoulette"),
+        ["ReactorBoost"] = ("ReactorBoost_Legacy", "GateSpecialBoost"), ["ReactorBoost2"] = ("ReactorBoost2_Legacy", "GateSpecialBoost2"),
+        ["ReactorBoostOriented"] = ("ReactorBoost_Oriented", "GateSpecialBoostOriented"),
+        ["ReactorBoost2Oriented"] = ("ReactorBoost2_Oriented", "GateSpecialBoost2Oriented"),
+        ["SlowMotion"] = ("SlowMotion", "GateSpecialSlowMotion"), ["NoSteering"] = ("NoSteering", "GateSpecialNoSteering"),
+        ["NoBrakes"] = ("NoBrakes", "GateSpecialNoBrake"), ["FreeWheeling"] = ("FreeWheeling", "GateSpecialNoEngine"),
+        ["Cruise"] = ("Cruise", "GateSpecialCruise"), ["Fragile"] = ("Fragile", "GateSpecialFragile"), ["Reset"] = ("Reset", "GateSpecialReset"),
+        ["CarStadium"] = ("VehicleTransform_Reset", "GateGameplayStadium"), ["CarSnow"] = ("VehicleTransform_CarSnow", "GateGameplaySnow"),
+        ["CarRally"] = ("VehicleTransform_CarRally", "GateGameplayRally"), ["CarDesert"] = ("VehicleTransform_CarDesert", "GateGameplayDesert"),
+        // The road effects the game has no gate block for: gates of our own only.
+        ["NoGrip"] = ("NoGrip", null), ["ForceAcceleration"] = ("ForceAcceleration", null),
+        ["Bumper"] = ("Bumper", null), ["Bumper2"] = ("Bumper2", null),
     };
+
+    public static bool Known(string gate) => All.ContainsKey(gate);
+
+    /// <summary>The game's name for a gate's effect (a surface's gameplay id).</summary>
+    public static string Gameplay(string gate) => All[gate].Gameplay;
+
+    /// <summary>The game's ring block for a gate, or null where it has none.</summary>
+    public static string? Ring(string gate) => All[gate].Block;
+
+    /// <summary>
+    /// The game's flat gate for a gate (GateExpandable...: a frame 32 m wide and 8 m high standing in the middle of
+    /// its block, with posts, a beam and a sill; freely placed it comes whole, as seen in game). It cannot be cut,
+    /// widened or made higher: a second one beside or over it is another whole gate.
+    /// </summary>
+    public static string? Flat(string gate) => All[gate].Block is not { } block ? null
+        : gate.StartsWith("Car", StringComparison.Ordinal) ? "GateExpandableGameplay" + gate[3..]
+        : "GateExpandable" + block["Gate".Length..].Replace("Oriented", "");
 
     /// <summary>
     /// A gate block is a ring 32 m across standing in the middle of its block (16 m from its sides), its opening
@@ -29,20 +59,14 @@ public static class GateObjects
     /// </summary>
     private const double Middle = 16;
 
-    /// <summary>
-    /// The game's flat gate for a gate (GateExpandable...: a frame 32 m wide and 8 m high standing in the middle of
-    /// its block, with posts, a beam and a sill; freely placed it comes whole, as seen in game). It cannot be cut,
-    /// widened or made higher: a second one beside or over it is another whole gate.
-    /// </summary>
-    public static string Panel(string gate) => gate.StartsWith("Car", StringComparison.Ordinal)
-        ? "GateExpandableGameplay" + gate[3..]
-        : "GateExpandable" + Blocks[gate]["Gate".Length..].Replace("Oriented", "");
-
     /// <summary>The flat gate's sill reaches 1 m over its block's floor (measured on the game's mesh): the road runs just over it.</summary>
-    private const double PanelSill = 1.05;
+    private const double FlatSill = 1.05;
 
     private static IEnumerable<TrackObject> Gates(Track track, double[] segmentStarts) =>
-        track.Objects.Where(o => o.Kind == TrackObjectKind.Gate && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1 && Blocks.ContainsKey(o.Gate));
+        track.Objects.Where(o => o.Kind == TrackObjectKind.Gate && o.Segment >= 0 && o.Segment < segmentStarts.Length - 1 && Known(o.Gate));
+
+    /// <summary>The look a gate gets: the game's blocks only where the game has one for its effect.</summary>
+    public static GateLook LookOf(TrackObject o) => Ring(o.Gate) is null ? GateLook.Custom : o.Look;
 
     /// <summary>
     /// Where a flat gate stands: over the road's lowest place in the middle of its width, with the ring's up and the
@@ -54,18 +78,32 @@ public static class GateObjects
         return (ring.Position + ring.Right * ((minX + maxX) / 2) + ring.Up * minY, ring.Up, ring.Tangent);
     }
 
+    /// <summary>The track's gates of our own as items (see WaypointBuilder.BuildEffectGate).</summary>
+    public static IEnumerable<MeshChunk> Custom(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts, Vec3d origin, RoadMeshSettings settings, string namePrefix)
+    {
+        var index = 0;
+        foreach (var o in Gates(track, segmentStarts))
+        {
+            index++;
+            if (LookOf(o) != GateLook.Custom) continue;
+            var ring = TrackObjects.RingAt(rings, TrackObjects.CenterDistance(o, segmentStarts));
+            yield return WaypointBuilder.BuildEffectGate(track, ring, o.Segment, o.Gate, o.Height, origin, settings, $"{namePrefix}_{index:D2}");
+        }
+    }
+
     /// <summary>
-    /// The track's gates as free blocks: the game's flat gate over the road, or its ring upright to the surface in
-    /// the road's middle, facing along the road. Turned by (yaw, pitch, roll) as free blocks are (Ry·Rx·Rz, the same
-    /// as PillarBuilder.UprightAngles gives).
+    /// The track's gates that are the game's blocks, freely placed: the flat gate over the road, or the ring upright
+    /// to the surface in the road's middle, facing along the road. Turned by (yaw, pitch, roll) as free blocks are
+    /// (Ry·Rx·Rz, the same as PillarBuilder.UprightAngles gives).
     /// </summary>
     public static IEnumerable<VanillaBlock> GameBlocks(Track track, IReadOnlyList<Ring> rings, double[] segmentStarts)
     {
         foreach (var o in Gates(track, segmentStarts))
         {
-            var block = Blocks[o.Gate];
+            var look = LookOf(o);
+            if (look == GateLook.Custom) continue;
             var ring = TrackObjects.RingAt(rings, TrackObjects.CenterDistance(o, segmentStarts));
-            if (o.Frame)
+            if (look == GateLook.Flat)
             {
                 var (foot, frameUp, along) = FlatAt(ring);
                 var ahead = (along - frameUp * Vec3d.Dot(along, frameUp)).Normalized();
@@ -73,7 +111,7 @@ public static class GateObjects
                 var angles = PillarBuilder.UprightAngles(ahead, frameUp);
                 yield return new VanillaBlock
                 {
-                    Name = Panel(o.Gate), Free = true, Position = foot - side * Middle - frameUp * PanelSill - ahead * Middle,
+                    Name = Flat(o.Gate)!, Free = true, Position = foot - side * Middle - frameUp * FlatSill - ahead * Middle,
                     Yaw = angles.Yaw, Pitch = angles.Pitch, Roll = angles.Roll,
                 };
                 continue;
@@ -84,7 +122,7 @@ public static class GateObjects
             var (yaw, pitch, roll) = PillarBuilder.UprightAngles(forward, up);
             yield return new VanillaBlock
             {
-                Name = block, Free = true, Position = point - right * Middle - up * Math.Clamp(o.Height, 0, 32) - forward * Middle,
+                Name = Ring(o.Gate)!, Free = true, Position = point - right * Middle - up * Math.Clamp(o.Height, 0, 32) - forward * Middle,
                 Yaw = yaw, Pitch = pitch, Roll = roll,
             };
         }

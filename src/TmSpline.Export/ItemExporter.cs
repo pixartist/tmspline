@@ -38,6 +38,8 @@ public static class ItemExporter
         {
             var item = FindImported(userDir, itemFolder, m.Name, output);
             UseGameMaterials(item.ItemGbxPath, m.AllMaterials, log);
+            if (m.TriggerGameplay is { } gameplay)
+                MakeEffectGate(item.ItemGbxPath, Enum.Parse<GBX.NET.Engines.Plug.CPlugSurface.GameplayId>(gameplay), log);
             return item with
             {
                 Offset = m.ItemOffset,
@@ -54,6 +56,41 @@ public static class ItemExporter
     /// link), as items built in the game's mesh modeller store them: only then does the collision use the PhysicsId
     /// the importer stored on them (magnet surfaces).
     /// </summary>
+    /// <summary>
+    /// Makes an imported item with a trigger (and no waypoint) a gate that gives an effect, the way schadocalex's
+    /// "Custom gates" tool does it (gbx-py, custom_gates.py; checked in game 2026-11-12 with Turbo): the item's model
+    /// becomes a prefab of two parts, its static object and a special trigger (NPlugTrigger_SSpecial) holding the
+    /// item's trigger shape; that shape's surface is made "not collidable" with the effect as its gameplay id (in the
+    /// list of the surface's material ids and on each of its triangles); and the item's flag that goes with a plain
+    /// static object is cleared. (An effect written into a material, or a material put on a checkpoint's trigger,
+    /// does nothing: the game reads that trigger only as a checkpoint.)
+    /// </summary>
+    private static void MakeEffectGate(string itemPath, GBX.NET.Engines.Plug.CPlugSurface.GameplayId effect, Action<string>? log)
+    {
+        var gbx = GBX.NET.Gbx.Parse<GBX.NET.Engines.GameData.CGameItemModel>(itemPath);
+        var item = gbx.Node;
+        if (item.EntityModel is not GBX.NET.Engines.GameData.CGameCommonItemEntityModel { StaticObject: { } model, TriggerShape: GBX.NET.Engines.Plug.CPlugSurface trigger })
+            throw new InvalidOperationException($"{itemPath}: not a static item with a trigger shape, cannot make it a gate");
+        const System.Reflection.BindingFlags any = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        byte physics = (byte)GBX.NET.Engines.Plug.CPlugSurface.MaterialId.NotCollidable, gameplay = (byte)effect;
+        trigger.Materials = [];
+        // (The surface's material ids: physics in the low byte, gameplay in the high one; the library has no name for them.)
+        var surface = trigger.Chunks.First(c => c.GetType().Name == "Chunk0900C003");
+        surface.GetType().GetField("U04", any)!.SetValue(surface, new[] { (ushort)(physics | gameplay << 8) });
+        if (trigger.Surf is GBX.NET.Engines.Plug.CPlugSurface.Mesh mesh && mesh.Triangles is { } triangles)
+            mesh.Triangles = triangles.Select(t => new GBX.NET.Engines.Plug.CPlugSurface.Mesh.Triangle(t.Indices, physics, gameplay, 0)).ToArray();
+
+        var special = new GBX.NET.Engines.Plug.NPlugTrigger_SSpecial { Version = 1, TriggerShape = trigger };
+        GBX.NET.Engines.Plug.CPlugPrefab.EntRef Part(GBX.NET.Engines.MwFoundations.CMwNod node) => new() { Model = node, Rotation = new GBX.NET.Quat(0, 0, 0, 1), Position = default, U01 = "" };
+        item.EntityModel = new GBX.NET.Engines.Plug.CPlugPrefab { Version = 11, FileWriteTime = DateTime.Now, Url = "", Ents = [Part(model), Part(special)] };
+        var flags = item.Chunks.First(c => c.GetType().Name == "Chunk2E00201F");
+        flags.GetType().GetField("U08", any)!.SetValue(flags, (byte?)0);
+
+        using (var file = File.Create(itemPath))
+            gbx.Save(file);
+        log?.Invoke($"{Path.GetFileName(itemPath)}: made a {effect} gate");
+    }
+
     private static void UseGameMaterials(string itemPath, IEnumerable<TmMaterial> materials, Action<string>? log)
     {
         var paths = materials.Where(m => m.GamePath is not null).ToDictionary(m => m.Name, m => m.GamePath!);

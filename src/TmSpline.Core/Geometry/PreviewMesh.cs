@@ -40,6 +40,8 @@ public static class PreviewMesh
         if (rings.Count >= 2)
         {
             chunks.AddRange(WaypointBuilder.Build(track, rings, Vec3d.Zero, settings));
+            // Effect and car gates of our own (the game's gate blocks are shown by the editor).
+            chunks.AddRange(GateObjects.Custom(track, rings, segmentStarts, Vec3d.Zero, settings, "EffectGate"));
             if (PillarBuilder.Build(track, rings, segmentStarts, Vec3d.Zero, settings) is { } pillars)
                 chunks.Add(pillars);
             // Stand-ins for the game's curve signs the export places.

@@ -107,6 +107,7 @@ public static class MeshQualities
         var settings = new RoadMeshSettings { MaxChunkLength = maxChunkLength, MaxColumnAngleDegrees = ColumnAngleDegrees(quality) };
         meshes.AddRange(RoadMeshBuilder.Build(track, rings, Vec3d.Zero, prefix + "Road", settings));
         meshes.AddRange(WaypointBuilder.Build(track, rings, Vec3d.Zero, settings, prefix + "Gate"));
+        meshes.AddRange(GateObjects.Custom(track, rings, TrackSampler.SegmentStarts(track), Vec3d.Zero, settings, prefix + "EffectGate"));
         // Pillars are the game's own items (see GamePillars), not part of the custom meshes.
         return (rings, meshes);
     }

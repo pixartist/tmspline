@@ -170,12 +170,18 @@ export const GATE_RING_HEIGHT = 16;
 /** The game's flat gate for a gate (mirrors GateObjects.Panel in the core). */
 export const gatePanel = (gate: string) => gate.startsWith("Car")
   ? `GateExpandableGameplay${gate.slice(3)}`
-  : `GateExpandable${GATES[gate].block.slice("Gate".length).replace("Oriented", "")}`;
+  : `GateExpandable${(GATES[gate].block ?? "").slice("Gate".length).replace("Oriented", "")}`;
+/** A gate of our own: its height over the road when new. */
+export const GATE_HEIGHT = 8;
+/** How a gate looks: a gate of our own fitted to the road (missing), or one of the game's blocks. */
+export type GateLook = "flat" | "ring";
+/** The look a gate gets: the game's blocks only where the game has one for its effect. */
+export const gateLook = (o: TrackObject): GateLook | undefined => (GATES[o.gate ?? "Turbo"]?.block ? o.look : undefined);
 /**
  * The gates a Gate object can be: the game's own gate blocks (their trigger gives the effect or the other car; an item
  * of ours cannot), by the key kept in the file. Mirrors GateObjects.Blocks in the core.
  */
-export const GATES: Record<string, { block: string; label: string }> = {
+export const GATES: Record<string, { block?: string; label: string }> = {
   Turbo: { block: "GateSpecialTurbo", label: "Turbo" },
   Turbo2: { block: "GateSpecialTurbo2", label: "Turbo (red)" },
   TurboRoulette: { block: "GateSpecialTurboRoulette", label: "Turbo roulette" },
@@ -194,6 +200,11 @@ export const GATES: Record<string, { block: string; label: string }> = {
   CarSnow: { block: "GateGameplaySnow", label: "Car: Snow" },
   CarRally: { block: "GateGameplayRally", label: "Car: Rally" },
   CarDesert: { block: "GateGameplayDesert", label: "Car: Desert" },
+  // The road effects the game has no gate block for: gates of our own only.
+  NoGrip: { label: "No grip" },
+  ForceAcceleration: { label: "Force acceleration" },
+  Bumper: { label: "Bumper" },
+  Bumper2: { label: "Bumper (red)" },
 };
 export type TrackObjectKind = (typeof OBJECT_KINDS)[number];
 export const OBJECT_SHAPES = ["Round", "Rect"] as const;
@@ -220,15 +231,18 @@ export interface TrackObject {
   height: number;
   /** Gates: which (a key of GATES). */
   gate?: string;
-  /** Gates: the game's flat gate (32 m wide, 8 m high), not its ring (whose height is how high in it the road runs). */
-  frame?: boolean;
+  /**
+   * Gates: missing, a gate of our own fitted to the road (the height is the gate's); "flat" or "ring", the game's own
+   * gate blocks (the ring's height is how high in it the road runs).
+   */
+  look?: GateLook;
   /** Pillars: the game item's colour (absent: Default). */
   color?: ItemColor;
 }
 
 export function newObject(kind: TrackObjectKind, segment: number, at: number, offset: number): TrackObject {
   if (kind === "Bump") return { kind, segment, at, offset, shape: "Round", length: 10, width: 8, height: 1 };
-  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: GATE_RING_HEIGHT, gate: "Turbo", frame: true };
+  if (kind === "Gate") return { kind, segment, at, offset: 0, shape: "Round", length: 1, width: 1, height: GATE_HEIGHT, gate: "Turbo" };
   const size = kind === "Pillar" ? 2 : kind === "Hole" ? 6 : 16;
   return { kind, segment, at, offset: kind === "Gap" ? 0 : offset, shape: "Round", length: size, width: kind === "Gap" ? 0 : size, height: 4 };
 }
@@ -729,6 +743,9 @@ function normalizeTrack(t: Track, label: string): Track {
   migrateWidths(t);
   for (const key of ["version", "name", "laps"]) delete (t as unknown as Record<string, unknown>)[key];
   t.objects = (t.objects ?? []).map((o) => ({ ...o, height: o.height ?? 4 }));
+  // (Gates from before they had three looks: `frame` was the game's flat gate, without it the ring.)
+  for (const o of t.objects as (TrackObject & { frame?: boolean })[])
+    if (o.kind === "Gate" && !o.look && "frame" in o) { if (o.frame) o.look = "flat"; delete o.frame; }
   // "Keep edges" was a per-track switch for a day: every point of such a track keeps its edges fully.
   const legacy = t as Track & { shapeAnchor?: string };
   const legacyAnchor = legacy.shapeAnchor === "Edges" ? 1 : 0;

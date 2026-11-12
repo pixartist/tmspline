@@ -53,7 +53,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
-  GATE_RING_HEIGHT, GATES, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
+  GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Waypoint,
 } from "./track";
 
 // `?session=name` keeps a separate autosaved track (e.g. for testing without touching the main one).
@@ -537,7 +537,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
-    + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${!!obj?.frame}:${editor.map.blocks.length}:${!!editor.library}`
+    + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}:${editor.map.environment ?? ""}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
@@ -963,14 +963,19 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         else x.color = v as ItemColor;
       }));
     } else if (obj.kind === "Gate") {
-      selectField(root, "Gate", Object.keys(GATES), () => o().gate ?? "Turbo", (v) => editor.edit((tr) => (tr.objects[s.index].gate = v)),
+      selectField(root, "Gate", Object.keys(GATES), () => o().gate ?? "Turbo", (v) => { editor.edit((tr) => (tr.objects[s.index].gate = v)); editor.onChange(); },
         false, Object.fromEntries(Object.entries(GATES).map(([k, g]) => [k, g.label])));
-      selectField(root, "Look", ["frame", "ring"], () => (o().frame ? "frame" : "ring"), (v) => { editor.edit((tr) => {
+      // The game's own gates only where the game has one for the effect.
+      const looks = GATES[obj.gate ?? "Turbo"]?.block ? ["custom", "flat", "ring"] : ["custom"];
+      selectField(root, "Look", looks, () => gateLook(o()) ?? "custom", (v) => { editor.edit((tr) => {
         const x = tr.objects[s.index];
-        if (v === "frame") x.frame = true;
-        else { delete x.frame; x.height = GATE_RING_HEIGHT; }
-      }); editor.onChange(); }, false, { frame: "Flat gate (32 m wide, 8 m high)", ring: "Ring (32 m across)" });
-      if (!obj.frame)
+        if (v === "custom") { delete x.look; x.height = GATE_HEIGHT; }
+        else { x.look = v as GateLook; if (v === "ring") x.height = GATE_RING_HEIGHT; }
+      }); editor.onChange(); }, false, { custom: "Our gate, fitted to the road", flat: "The game's flat gate (32 x 8 m)", ring: "The game's ring (32 m across)" });
+      const look = gateLook(obj);
+      if (!look)
+        rangeField(root, "Height m", 1, 100, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(1, Math.min(100, v)))), 100);
+      else if (look === "ring")
         rangeField(root, "Road at (m up the ring)", 0, 32, 0.5, () => o().height, (v) => set("Height", (x) => (x.height = Math.max(0.1, Math.min(32, v)))), 32);
     } else if (obj.kind !== "Gap") {
       selectField(root, "Shape", OBJECT_SHAPES, () => o().shape, (v) => editor.edit((tr) => (tr.objects[s.index].shape = v as ObjectShape)),
@@ -993,10 +998,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "always stays inside the driving surface. Length runs along the road, width across it.",
       Gap: "Drag the marker to move the gap along the road. The road is left out over its whole width, with closed ends, "
         + "so you can build jumps.",
-      Gate: "Drag the marker to move the gate along the road. Both looks are the game's own gate blocks, placed round the "
-        + "road (a mesh of ours cannot trigger an effect or a car switch), so they keep their size. The flat gate is a frame "
-        + "32 m wide and 8 m high; the road runs over its sill. The ring is 32 m across with an opening of 26 m; \"Road at\" "
-        + "sets how high in it the road runs (16 m is its middle, where a road 26 m wide just fits).",
+      Gate: "Drag the marker to move the gate along the road. Driving through it gives the effect or switches the car. "
+        + "Our gate is fitted to the road like the checkpoint gates, on any road shape, and exists for every effect. The "
+        + "game's own gates keep their size: the flat gate is a frame 32 m wide and 8 m high, the road runs over its sill; "
+        + "the ring is 32 m across with an opening of 26 m, and \"Road at\" sets how high in it the road runs (16 m is its "
+        + "middle, where a road 26 m wide just fits). The game has none for No grip, Force acceleration and the bumpers.",
       Bump: "Drag the marker to move the bump. A smooth hump in the driving surface (negative height: a dip), real "
         + "geometry the car drives over; it flattens out towards the road's edges. The surface is cut finer around it "
         + "(see the segment's bump detail).",

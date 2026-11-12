@@ -155,7 +155,7 @@ public static class TrackObjects
                     break;
             }
             var ring = RingAt(rings, d);
-            if (o.Kind == TrackObjectKind.Gate && o.Frame)
+            if (o.Kind == TrackObjectKind.Gate && GateObjects.Known(o.Gate) && GateObjects.LookOf(o) == GateLook.Flat)
             {
                 // A flat gate: where it stands (over the road's lowest place, the ring's up), for the editor to show it.
                 var (foot, up, along) = GateObjects.FlatAt(ring);

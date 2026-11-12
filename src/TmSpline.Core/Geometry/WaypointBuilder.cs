@@ -91,6 +91,44 @@ public static class WaypointBuilder
         return rings.FirstOrDefault(r => r.IsVertex && r.SegmentU == 0 && r.Segment == point);
     }
 
+    /// <summary>
+    /// A gate of our own for an effect or a car switch (GateObjects), at any place on the road: built like a
+    /// checkpoint's (the same outline round the road's cross-section, in the effect's colour, with the effect's
+    /// see-through plane and a trigger across the road), without a waypoint or a spawn point. Its trigger is what
+    /// gives the effect, once the exporter has made the item a gate (MeshChunk.TriggerGameplay).
+    /// </summary>
+    public static MeshChunk BuildEffectGate(Track track, Ring ring, int segment, string gate, double gateHeight, Vec3d origin, RoadMeshSettings settings, string name)
+    {
+        var frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(ring.Tangent, settings.Rotation);
+        var offset = settings.WorldSpace ? Vec3d.Zero : ring.Position - origin;
+        var itemOrigin = origin + offset;
+        segment = Math.Clamp(segment, 0, Math.Max(0, track.SegmentCount - 1));
+        var chunk = new MeshChunk { Name = name, ItemOffset = offset, Frame = frame, TriggerGameplay = GateObjects.Gameplay(gate) };
+
+        var (minX, maxX, minY, maxY) = RoadMeshBuilder.SurfaceExtents(ring);
+        var bottom = Math.Min(minY, 0) - settings.Thickness - 0.5;
+        var height = Math.Clamp(gateHeight, 1, 100);
+        var top = Math.Max(maxY, 0) + height;
+        var left = minX - settings.BorderThickness - 1.0 - PostSize / 2;
+        var right = maxX + settings.BorderThickness + 1.0 + PostSize / 2;
+
+        var outline = GateOutline(ring, track.Segments[segment], settings, height);
+        var beams = chunk.MaterialIndex(Surfaces.EffectGate(gate));
+        var place = new BoxPlacer(ring, itemOrigin, frame, outline.Count + 1);
+        for (var i = 0; i + 1 < outline.Count; i++)
+            place.Beam(chunk, beams, outline[i], outline[i + 1], segment);
+
+        var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
+        place.Curtain(plane, plane.MaterialIndex(Surfaces.EffectGatePlane(gate)), CurtainOutline(ring, settings, outline), outline.Count, segment, CurtainTiling, true);
+        chunk.NotCollidable.Add(plane);
+
+        var trigger = new MeshChunk { Name = $"{chunk.Name}_trigger" };
+        new BoxPlacer(ring, itemOrigin, frame, 1).Box(trigger, 0, new Vec3d((left + right) / 2, (bottom + top) / 2, 0),
+            new Vec3d(right - left - PostSize, top - bottom, TriggerDepth), segment);
+        chunk.Triggers.Add(trigger);
+        return chunk;
+    }
+
     private static MeshChunk BuildGate(Track track, Ring ring, int point, Waypoint type, Vec3d origin, RoadMeshSettings settings, string namePrefix)
     {
         var frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(ring.Tangent, settings.Rotation);
