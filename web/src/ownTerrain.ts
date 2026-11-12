@@ -40,6 +40,8 @@ export interface OwnTerrainOptions {
    * against the sky from the road). The bend takes twice this distance (at most half the width), so it ends at 45°.
    */
   edgeDrop?: number;
+  /** Which hills the noise makes: a whole number, each with its own (missing or 0: those maps had before there was a seed). */
+  seed?: number;
 }
 
 /** OwnTerrainOptions.edgeDrop when a map has none. */
@@ -249,10 +251,10 @@ function riseDistance(d: number, width: number): number {
   return h * width;
 }
 
-/** Value noise in -1..1 (smooth, about `size` metres per bump), seeded by position. */
-function noise2(x: number, z: number, size: number): number {
+/** Value noise in -1..1 (smooth, about `size` metres per bump), by position; another `seed` gives other bumps (0: those of maps without one). */
+function noise2(x: number, z: number, size: number, seed: number): number {
   const hash = (i: number, j: number) => {
-    let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263);
+    let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(seed, 0x9e3779b1);
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967295 * 2 - 1;
   };
@@ -264,8 +266,8 @@ function noise2(x: number, z: number, size: number): number {
 }
 
 /** Noise with detail: the bumps of `size`, smaller ones on them. */
-const fractal = (x: number, z: number, size: number) =>
-  0.6 * noise2(x, z, size) + 0.28 * noise2(x + 517, z - 211, size / 2.3) + 0.12 * noise2(x - 89, z + 733, size / 5.1);
+const fractal = (x: number, z: number, size: number, seed: number) =>
+  0.6 * noise2(x, z, size, seed) + 0.28 * noise2(x + 517, z - 211, size / 2.3, seed) + 0.12 * noise2(x - 89, z + 733, size / 5.1, seed);
 
 /** Box blur of a grid with gaps (null): each value the mean of the values within `radius` cells on one axis. */
 function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows: number, radius: number, alongX: boolean): Float64Array {
@@ -358,6 +360,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
 
+  const seed = Math.round(own.seed ?? 0) | 0;
   const drop = Math.max(0, own.edgeDrop ?? EDGE_DROP), bend = Math.min(2 * drop, width / 2);
   // Blend and noise (under the roads too: the roads cut their space out of the land when it is meshed).
   const heights: (number | null)[] = new Array(n).fill(null);
@@ -367,7 +370,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     const x = x0 + c * CELL, z = z0 + r * CELL;
     const w = smooth(distance[i] / BLEND);
     let h = extended[i] * (1 - w) + smoothed[i] * w;
-    h += own.noise * w * fractal(x, z, own.noiseSize);
+    h += own.noise * w * fractal(x, z, own.noiseSize, seed);
     // The bend down to the outer edge: a parabola over the last `bend` metres.
     if (drop > 0 && toLand[i] > width - bend) h -= drop * ((toLand[i] - (width - bend)) / bend) ** 2;
     h = Math.min(h, MAX_LAND);

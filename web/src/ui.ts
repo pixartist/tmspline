@@ -49,6 +49,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
   // Maps saved before this option get the default bend when generated again.
   t.edgeDrop = number(own.edgeDrop, 0, 256, EDGE_DROP);
+  t.seed = whole(own.seed, 0, 999999, 0);
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
@@ -607,6 +608,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, "Smoothing (m)", () => t.smoothing, (v) => (t.smoothing = int(v, 0, 256)), 8);
       numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(256, v))), 1);
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
+      numberField(root, "Noise seed (other hills for each number)", () => t.seed ?? 0, (v) => (t.seed = int(v, 0, 999999)), 1);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
       numberField(root, "Rise away from the track (%, 0 = off, negative = falls)", () => t.rise, (v) => { t.rise = Math.max(-100, Math.min(100, v)); }, 5);
       numberField(root, "Outer edge bends down by (m, 0 = off)", () => t.edgeDrop ?? EDGE_DROP, (v) => { t.edgeDrop = Math.max(0, Math.min(256, v)); }, 4);
