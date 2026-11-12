@@ -124,7 +124,7 @@ public static class WaypointBuilder
         {
             // Its own "_notcollidable_" object as the docs prescribe; pass-through really comes from the material itself.
             var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
-            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, outline), outline.Count, segment);
+            place.Curtain(plane, plane.MaterialIndex(curtain), CurtainOutline(ring, settings, outline), outline.Count, segment, curtain.GamePath is null ? CurtainTiling : 1);
             chunk.NotCollidable.Add(plane);
         }
 
@@ -292,7 +292,7 @@ public static class WaypointBuilder
 
         /// <summary>A double-sided strip between bottom/top point pairs in the ring plane (the see-through plane).</summary>
         /// <param name="row">Lightmap row reserved for it.</param>
-        public void Curtain(MeshChunk chunk, int material, List<((double X, double Y) Bottom, (double X, double Y) Top)> pairs, int row, int segment)
+        public void Curtain(MeshChunk chunk, int material, List<((double X, double Y) Bottom, (double X, double Y) Top)> pairs, int row, int segment, float tiling)
         {
             Vector3 Local((double X, double Y) p)
             {
@@ -313,7 +313,7 @@ public static class WaypointBuilder
                     {
                         chunk.Positions.Add(Local(p));
                         chunk.Normals.Add(normal);
-                        chunk.Uv0.Add(new Vector2(f, v) * CurtainTiling);
+                        chunk.Uv0.Add(new Vector2(f, v) * tiling);
                         // Each side gets half of the reserved lightmap row.
                         var u = (side > 0 ? 0.02f : 0.52f) + 0.46f * f;
                         chunk.Uv1.Add(new Vector2(u, (row + 0.1f + 0.8f * v) / _rows));

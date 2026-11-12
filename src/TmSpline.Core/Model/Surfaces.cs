@@ -91,7 +91,12 @@ public static class Surfaces
     /// frosted (WaypointBuilder). It must be a natively non-collidable material: the game ignores a
     /// PhysicsId="NotCollidable" override for collision.
     /// </summary>
-    public static readonly TmMaterial GateCurtain = new("GateCurtain", "GlassWaterWall", Color: "80C8FF");
+    /// <remarks>
+    /// On trial: in the item it is made the game's own checkpoint effect (RaceTriggerFXCheckpoint, the plane in the
+    /// game's checkpoint blocks). The importer's material list has no such material, so the item is imported with the
+    /// glass and the link is set afterwards (GamePath, as for the cliffs' rock).
+    /// </remarks>
+    public static readonly TmMaterial GateCurtain = new("GateCurtain", "GlassWaterWall", Color: "80C8FF", GamePath: @"Stadium\Media\Material\RaceTriggerFXCheckpoint");
 
     /// <summary>Visible gate of a race waypoint, colored like the samples (start green, finish red ...).</summary>
     public static TmMaterial Gate(Waypoint waypoint) => waypoint switch
