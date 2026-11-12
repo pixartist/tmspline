@@ -4,7 +4,7 @@ import { createCloudUi, type CloudUi } from "./cloudUi";
 import { bannerHost } from "./banners";
 import { DIRECTIONS, type BlockCatalogEntry } from "./vanilla";
 import { FORESTS, forestsOf, SCENERY_THEMES } from "./scenery";
-import { OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
+import { EDGE_DROP, OWN_TERRAIN_DEFAULTS } from "./ownTerrain";
 
 /** Scenery panel settings (kept while the page is open). */
 /** The terrain brush (Off: the mouse edits as usual). */
@@ -47,6 +47,8 @@ function restoreScenery(saved: Record<string, unknown>): void {
   // Maps saved before this option had no rise.
   t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
   t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
+  // Maps saved before this option get the default bend when generated again.
+  t.edgeDrop = number(own.edgeDrop, 0, 256, EDGE_DROP);
 }
 import {
   appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, WAYPOINTS, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
@@ -607,6 +609,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
       numberField(root, "Rise away from the track (%, 0 = off, negative = falls)", () => t.rise, (v) => { t.rise = Math.max(-100, Math.min(100, v)); }, 5);
+      numberField(root, "Outer edge bends down by (m, 0 = off)", () => t.edgeDrop ?? EDGE_DROP, (v) => { t.edgeDrop = Math.max(0, Math.min(256, v)); }, 4);
       // The mesh's fineness: the map's own (kept with its land), and changed at once, without generating again.
       selectField(root, "Mesh quality", TERRAIN_QUALITIES, () => editor.map.terrain?.quality ?? (editor.map.terrain ? "High" : t.quality ?? "High"), (v) => {
         t.quality = v as TerrainQuality;

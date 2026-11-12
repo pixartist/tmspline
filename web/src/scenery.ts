@@ -151,7 +151,7 @@ export interface SceneryLandOptions extends SceneryOptions {
   /** Nestle: how the pieces are fitted to the height map (see TerrainOptions.far). */
   far?: "steps" | "lower" | "fit";
   /** Own terrain: its width, smoothing and noise (see OwnTerrainOptions; defaults when missing). */
-  ownTerrain?: { width: number; smoothing: number; noise: number; noiseSize: number; rockAngle: number; rise: number; quality?: TerrainQuality };
+  ownTerrain?: { width: number; smoothing: number; noise: number; noiseSize: number; rockAngle: number; rise: number; quality?: TerrainQuality; edgeDrop?: number };
   /** Nestle: cells of land beyond the shoulder. */
   band: number;
   /** Hills: platform-base land and DecoHill slopes, up to just below the roads and rising away from them. */

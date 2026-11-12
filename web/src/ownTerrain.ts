@@ -35,7 +35,15 @@ export interface OwnTerrainOptions {
   rise: number;
   /** How fine the mesh is (see TerrainGrid.quality). */
   quality?: TerrainQuality;
+  /**
+   * The land bends down towards its outer edge and ends this far lower, metres (0: it ends level, and its edge shows
+   * against the sky from the road). The bend takes twice this distance (at most half the width), so it ends at 45°.
+   */
+  edgeDrop?: number;
 }
+
+/** OwnTerrainOptions.edgeDrop when a map has none. */
+export const EDGE_DROP = 24;
 
 export const OWN_TERRAIN_DEFAULTS: OwnTerrainOptions = { width: 128, smoothing: 48, noise: 6, noiseSize: 96, rockAngle: 50, rise: 0, quality: "High" };
 
@@ -350,6 +358,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
   for (let pass = 0; pass < 3; pass++)
     smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
 
+  const drop = Math.max(0, own.edgeDrop ?? EDGE_DROP), bend = Math.min(2 * drop, width / 2);
   // Blend and noise (under the roads too: the roads cut their space out of the land when it is meshed).
   const heights: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
@@ -359,6 +368,8 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     const w = smooth(distance[i] / BLEND);
     let h = extended[i] * (1 - w) + smoothed[i] * w;
     h += own.noise * w * fractal(x, z, own.noiseSize);
+    // The bend down to the outer edge: a parabola over the last `bend` metres.
+    if (drop > 0 && toLand[i] > width - bend) h -= drop * ((toLand[i] - (width - bend)) / bend) ** 2;
     h = Math.min(h, MAX_LAND);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land). Outside it there is no ground: land ends there.
