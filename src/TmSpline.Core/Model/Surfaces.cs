@@ -170,6 +170,12 @@ public static class Surfaces
         _ => effect.ToString(),
     };
 
+    /// <summary>
+    /// The white lines along the edges of the game's wooden road: a decal of the game's (as on its SnowRoad blocks),
+    /// which the importer knows. It takes its opacity from the mesh's vertex colours (MeshChunk.VertexShade).
+    /// </summary>
+    public static readonly TmMaterial RoadWoodLine = new("RoadWoodLine", "DecalMarksItems");
+
     public static TmMaterial Road(Surface surface) => surface switch
     {
         Surface.RoadTech => new("RoadTech", "RoadTech"),
@@ -182,6 +188,11 @@ public static class Surfaces
         Surface.PlatformIce => new("PlatformIce", "PlatformIce_PlatformTech"),
         Surface.PlatformPlastic => new("PlatformPlastic", "PlatformPlastic_PlatformTech", "Plastic"),
         Surface.Wood => new("Wood", "CustomRoughWood"),
+        // The game's wooden road (the material of the SnowRoad blocks' driving surface, read from a map with one such
+        // block). The importer's list has no such material: imported as the tech road (a road material, with the same
+        // texture layers; as rough wood, which has only a lightmap layer, it drew nothing), with wood physics, and made the
+        // game's material afterwards (GamePath, as the magnets and the cliffs' rock).
+        Surface.RoadWood => new("RoadWood", "RoadTech", "Wood", GamePath: @"Stadium\Media\Material\ThemeSnowRoad"),
         Surface.Snow => new("Snow", "CustomSnow"),
         Surface.Sand => new("Sand", "CustomSand"),
         Surface.Grass => new("Grass", "CustomGrass"),

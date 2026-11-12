@@ -327,6 +327,8 @@ public static class RoadMeshBuilder
 
     /// <summary>Height of the boost decal above the driving surface.</summary>
     private const double DecalLift = 0.02;
+    /// <summary>Width of the white lines along the edges of the wooden road (the game's: 14 cm).</summary>
+    private const double WoodLineWidth = 0.14;
 
     // Lightmap atlas: every edge key gets its own non-overlapping band in U.
     private static readonly (string Key, double Weight)[] LightmapBands =
@@ -334,7 +336,7 @@ public static class RoadMeshBuilder
         ("top", 6), ("bottom_b", 1.5), ("bottom_n", 1.5),
         ("rb_out", 0.5), ("rb_top", 0.5), ("rb_in", 0.5),
         ("lb_in", 0.5), ("lb_top", 0.5), ("lb_out", 0.5),
-        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("decal", 0.25),
+        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("decal", 0.25), ("mark_r", 0.1), ("mark_l", 0.1),
         ("cap", 0.5), ("hole", 0.5),
     };
 
@@ -583,8 +585,10 @@ public static class RoadMeshBuilder
     private static MeshChunk CreateChunk(Track track, IReadOnlyList<Ring> rings, int start, int end, Vec3d origin, string name, RoadMeshSettings settings)
     {
         var segment = track.Segments[rings[start].Segment];
+        // (A piece with wooden road has the white line decals, which need vertex colours to show.)
+        double? shade = Enumerable.Range(start, end - start + 1).Any(i => track.Segments[rings[Math.Min(i, rings.Count - 1)].Segment].Surface == Model.Surface.RoadWood) ? 1 : null;
         if (!segment.IsDirectional || !Surfaces.SupportsEffects(segment.Surface))
-            return new MeshChunk { Name = name, Color = segment.Color };
+            return new MeshChunk { Name = name, Color = segment.Color, VertexShade = shade };
 
         // Aim the piece with the road frame in its middle, turned by the effect yaw/pitch of the segment.
         var mid = rings[(start + end) / 2];
@@ -597,6 +601,7 @@ public static class RoadMeshBuilder
         return new MeshChunk
         {
             Name = name,
+            VertexShade = shade,
             ItemOffset = settings.WorldSpace ? Vec3d.Zero : rings[start].Position - origin,
             Frame = settings.WorldSpace ? ItemFrame.Identity : ItemFrame.Facing(dir, settings.Rotation),
             Effect = segment.Effect,
@@ -706,6 +711,12 @@ public static class RoadMeshBuilder
                 DecalYaw = segment.EffectYaw * Math.PI / 180, DecalStart = range.Start, DecalPadLength = length / pads,
             };
         }
+        if (segment.Surface == Model.Surface.RoadWood && half > 2 * WoodLineWidth)
+        {
+            // The wooden road's white lines: a strip of the game's line decal along each edge (as on its SnowRoad blocks).
+            yield return new Edge("mark_r", 0, 0, 0, 0, 1, Surfaces.RoadWoodLine) { Arc = SurfaceArc.For(ring, half, half - WoodLineWidth, DecalLift, 1, s) };
+            yield return new Edge("mark_l", 0, 0, 0, 0, 1, Surfaces.RoadWoodLine) { Arc = SurfaceArc.For(ring, -half + WoodLineWidth, -half, DecalLift, 1, s) };
+        }
         if (segment.Underside)
             yield return Surface(segment.Borders ? "bottom_b" : "bottom_n", -h, -1, Surfaces.Underside, -half, half);
 
@@ -764,7 +775,7 @@ public static class RoadMeshBuilder
             len = Math.Abs(arc.S1 - arc.S0);
             // Bumps lift the driving surface (and the boost decal on it) along its normal; the normal tilts with their
             // slope (finite differences along and across).
-            if (bumps is not null && edge.Key is "top" or "decal")
+            if (bumps is not null && edge.Key is "top" or "decal" or "mark_r" or "mark_l")
             {
                 var half = Math.Max(Math.Abs(arc.S0), Math.Abs(arc.S1));
                 double D(double d, double a) => bumps.At(segment, d, a, half);
@@ -805,6 +816,20 @@ public static class RoadMeshBuilder
         var acrossFraction = edge.Arc is not null && t1 != t0 ? (across - t0) / (t1 - t0) : f;
         var inset = edge.Material.Link.StartsWith("Road") ? s.RoadTextureInset : 0;
         var v0 = isRoad ? inset + acrossFraction * (1 - 2 * inset) : len * f / s.TextureScale;
+        if (isRoad && edge.Material.Name.StartsWith("RoadWood", StringComparison.Ordinal))
+        {
+            // The game's wooden road: its planks run along the road, the texture 16 m wide and long, its middle on the
+            // road's middle (as on the game's SnowRoad blocks: u = 1 + across / 16, v along / 16).
+            u0 = 1 + across / 16;
+            v0 = -ring.Distance / 16;
+        }
+        if (edge.Key is "mark_r" or "mark_l")
+        {
+            // The line decal as the game lays it: along the road once per 32 m, across from the texture's line (v 0.939
+            // at the road's edge to 0.998 inside).
+            u0 = -ring.Distance / 32;
+            v0 = edge.Key == "mark_r" ? 0.939 + 0.059 * f : 0.998 - 0.059 * f;
+        }
         if (edge.Key == "decal")
         {
             // Boost texture: one square per road width, chevrons along +V, U growing to the left of +V.

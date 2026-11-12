@@ -20,6 +20,8 @@ public enum Surface
     Magnet,
     MagnetAccel,
     SuperMagnet,
+    /// <summary>The game's wooden road (its snow car's: the SnowRoad blocks' planks), with wood physics.</summary>
+    RoadWood,
 }
 
 /// <summary>What the road borders (curbs) are made of.</summary>

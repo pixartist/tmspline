@@ -88,11 +88,11 @@ interface Drag {
 }
 
 const SURFACE_COLORS: Record<string, number> = {
-  RoadTech: 0x9a9ea6, RoadDirt: 0xc0703f, RoadBump: 0xb8bfcc, RoadIce: 0xa9dcf2,
+  RoadTech: 0x9a9ea6, RoadDirt: 0xc0703f, RoadBump: 0xb8bfcc, RoadIce: 0xa9dcf2, RoadWood: 0xb07a4a,
   PlatformTech: 0xd6d8dc, PlatformDirt: 0x9b6a45, PlatformGrass: 0x5a9e3c, PlatformIce: 0xc6ecfa,
   PlatformPlastic: 0xf0c040, Wood: 0x8a5a33, Snow: 0xf4f7fa, Sand: 0xd9c38c, Grass: 0x4f8f2f,
   Magnet: 0x10102a, MagnetAccel: 0x1a1640, SuperMagnet: 0x261436,
-  Border: 0x3a3d44, BorderPlastic: 0xe8b020, Underside: 0x1a1b1e, Pillar: 0x8c9096,
+  Border: 0x3a3d44, BorderPlastic: 0xe8b020, Underside: 0x1a1b1e, Pillar: 0x8c9096, RoadWoodLine: 0xf4f4f4,
 };
 
 /** Tint for boost surfaces, keyed by the material name suffix from the core (e.g. "RoadTech_Turbo"). */
@@ -2949,7 +2949,7 @@ const ROCK_MATERIALS: Record<TerrainSurface, string> = { Grass: "DecoCliff", Dir
 const GAME_MATERIALS: Record<string, string> = {
   RoadTech: "RoadTech", RoadDirt: "RoadDirt", RoadBump: "RoadBump", RoadIce: "RoadIce", PlatformTech: "PlatformTech",
   PlatformDirt: "PlatformDirt/PlatformTech", PlatformGrass: "PlatformGrass/PlatformTech", PlatformIce: "PlatformIce/PlatformTech",
-  PlatformPlastic: "PlatformPlastic/PlatformTech", Border: "TrackBorders",
+  PlatformPlastic: "PlatformPlastic/PlatformTech", Border: "TrackBorders", RoadWood: "ThemeSnowRoad",
 };
 
 /** Simplified look of the game's item colors (per segment) on the parts they tint. */

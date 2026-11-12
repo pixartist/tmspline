@@ -4,7 +4,7 @@
 export type Vec3 = [number, number, number];
 
 export const SURFACES = [
-  "RoadTech", "RoadDirt", "RoadBump", "RoadIce",
+  "RoadTech", "RoadDirt", "RoadBump", "RoadIce", "RoadWood",
   "PlatformTech", "PlatformDirt", "PlatformGrass", "PlatformIce", "PlatformPlastic",
   "Wood", "Snow", "Sand", "Grass",
   "Magnet", "MagnetAccel", "SuperMagnet",
