@@ -6,7 +6,8 @@ import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme }
  * Own terrain: instead of the game's land blocks, a mesh of our own round the tracks (exported as custom items with the
  * hill blocks' materials, see TerrainMeshBuilder). Here the land's height map, on a 4 m grid:
  *
- * 1. The roads' shape extended outwards: every vertex takes the top (curbs, or the surface's edge) of the nearest road.
+ * 1. The roads' shape extended outwards: every vertex takes the top (curbs, or the surface's edge) of the nearest road
+ *    square, of the highest road there.
  * 2. That surface smoothed (a wide blur), blending from the unsmoothed surface at the road into the smoothed one over
  *    the first 32 m, so the land meets the road.
  * 3. Height noise on top, faded in over the same 32 m.
@@ -14,13 +15,9 @@ import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme }
  * The optional rise with distance is part of what gets smoothed (2), so it fades in with the blend and has no crease
  * halfway between two roads.
  *
- * Only upright road (its driving surface facing up more than sideways, and not climbing too steeply, as in the
- * export's AdaptiveTerrainBuilder) shapes the land. Walls and upside-down road keep it out: below them, and below the space a car drives through on them (a few
- * metres off the driving surface, a square either side), the land stays lower.
- *
- * The export (and the preview, through the core) samples this grid at 0.5 m, pins the land to the roads' edges and
- * open ends, cuts it out between pinned edges and meshes it by error and fidelity (AdaptiveTerrainBuilder,
- * AdaptiveTerrainMesher), so the land meets the roads exactly.
+ * Only upright road (its driving surface facing up more than sideways, and not climbing too steeply) guides the land,
+ * and of roads over one another only the highest: walls, loops, tubes and whatever lies lower run through the land,
+ * which is meshed as a solid the roads cut their space out of (VoxelTerrain). So the land needs no shaping for them.
  */
 
 export interface OwnTerrainOptions {
@@ -51,8 +48,6 @@ const MAX_LAND = 1950;
 
 /** Off the driving surface (curbs), road counts for the land up to this much over the surface in its square, metres (not gates, signs). */
 const CURB_REACH = 3;
-/** Roads in one square further apart in height than this are separate (a bridge over a road), metres. */
-const LAYER_GAP = 4;
 /** Road facing up less than this (the normal's y) or climbing steeper than MAX_PITCH (sine) holds no land (walls, loops). */
 const UPRIGHT = 0.1;
 const MAX_PITCH = 0.55;
@@ -73,7 +68,7 @@ export interface TerrainRoad { mesh: THREE.Mesh; surface: Float32Array }
  * the land must stay under (walls and inverted road, and the room to drive on them). Closed road (a tube) has no say in
  * the land's shape, the land runs over it (AdaptiveTerrainBuilder buries it): only its squares, in `tunnels`.
  */
-function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Map<string, number>; caps: Map<string, number>; tunnels: Set<string> } {
+function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; caps: Map<string, number>; tunnels: Set<string> } {
   const tunnels = new Set<string>();
   // Upright road's heights per square; the land continues the lowest road in each (the top of its curbs).
   const heights = new Map<string, number[]>(), caps = new Map<string, number>();
@@ -209,17 +204,11 @@ function roadShape(roads: TerrainRoad[]): { tops: Map<string, number>; under: Ma
         else if (side < 0) cap(t, v.y);
       });
     });
-  // Per square the top of its lowest road (the heights up to the first gap of LAYER_GAP).
-  // Where that is a road under another (a bridge over it), also in `under`.
-  const lowest = new Map<string, number>(), under = new Map<string, number>();
-  for (const [k, list] of heights) {
-    list.sort((p, q) => p - q);
-    let i = 1, top = list[0];
-    for (; i < list.length && list[i] - top <= LAYER_GAP; i++) top = list[i];
-    lowest.set(k, top);
-    if (i < list.length) under.set(k, top);
-  }
-  return { tops: lowest, under, caps, tunnels };
+  // Per square the top of its highest road: that one guides the land. A road under it (a bridge over a road) has no say:
+  // the land lies over it, and it cuts its tunnel through (VoxelTerrain).
+  const highest = new Map<string, number>();
+  for (const [k, list] of heights) highest.set(k, Math.max(...list));
+  return { tops: highest, caps, tunnels };
 }
 
 export function terrainSurface(theme: SceneryTheme): TerrainSurface {
@@ -228,6 +217,25 @@ export function terrainSurface(theme: SceneryTheme): TerrainSurface {
 
 /** Smooth 0..1 ramp. */
 const smooth = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
+
+/**
+ * The rise across the land, as [share of the width from the road, share of the crest's height]: almost flat by the road,
+ * curving up into a steep climb, a rounded crest near the outer edge, falling off a little behind it.
+ */
+const RISE_PROFILE = [[0, 0], [0.21, 0.033], [0.41, 0.083], [0.51, 0.158], [0.61, 0.264], [0.656, 0.353], [0.74, 0.54], [0.787, 0.71],
+  [0.836, 0.833], [0.87, 0.936], [0.918, 0.986], [0.967, 1], [0.98, 0.97], [1, 0.897]];
+
+/** The distance the rise climbs over at `d` from the road: RISE_PROFILE as a smooth curve (cubic Hermite), its crest at the land's width. */
+function riseDistance(d: number, width: number): number {
+  const t = Math.min(1, Math.max(0, d / width)), p = RISE_PROFILE;
+  let i = 0;
+  while (i < p.length - 2 && t > p[i + 1][0]) i++;
+  const slope = (k: number) => (p[Math.min(p.length - 1, k + 1)][1] - p[Math.max(0, k - 1)][1]) / (p[Math.min(p.length - 1, k + 1)][0] - p[Math.max(0, k - 1)][0]);
+  const span = p[i + 1][0] - p[i][0], u = (t - p[i][0]) / span;
+  const h = (2 * u ** 3 - 3 * u ** 2 + 1) * p[i][1] + (u ** 3 - 2 * u ** 2 + u) * span * slope(i)
+    + (-2 * u ** 3 + 3 * u ** 2) * p[i + 1][1] + (u ** 3 - u ** 2) * span * slope(i + 1);
+  return h * width;
+}
 
 /** Value noise in -1..1 (smooth, about `size` metres per bump), seeded by position. */
 function noise2(x: number, z: number, size: number): number {
@@ -246,6 +254,24 @@ function noise2(x: number, z: number, size: number): number {
 /** Noise with detail: the bumps of `size`, smaller ones on them. */
 const fractal = (x: number, z: number, size: number) =>
   0.6 * noise2(x, z, size) + 0.28 * noise2(x + 517, z - 211, size / 2.3) + 0.12 * noise2(x - 89, z + 733, size / 5.1);
+
+/** Box blur of a grid with gaps (null): each value the mean of the values within `radius` cells on one axis. */
+function blurAxis(values: Float64Array, valid: Uint8Array, columns: number, rows: number, radius: number, alongX: boolean): Float64Array {
+  const out = new Float64Array(values.length);
+  const [n, lines] = alongX ? [columns, rows] : [rows, columns];
+  const index = (line: number, i: number) => (alongX ? line * columns + i : i * columns + line);
+  for (let line = 0; line < lines; line++) {
+    let sum = 0, count = 0;
+    // A sliding window over the line.
+    for (let i = -radius; i < n; i++) {
+      const add = i + radius, drop = i - radius - 1;
+      if (add < n && valid[index(line, add)]) { sum += values[index(line, add)]; count++; }
+      if (drop >= 0 && valid[index(line, drop)]) { sum -= values[index(line, drop)]; count--; }
+      if (i >= 0) out[index(line, i)] = count > 0 ? sum / count : values[index(line, i)];
+    }
+  }
+  return out;
+}
 
 /** The height map round the roads (world space); null without upright roads or when it would be too big. */
 export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptions, own: OwnTerrainOptions = OWN_TERRAIN_DEFAULTS): TerrainGrid | null {
@@ -313,16 +339,23 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     extended[i] = tops.get(key(srcX[i] + sx0, srcZ[i] + sz0))!;
     valid[i] = 1;
   }
-  let level = 0;
-  for (const top of tops.values()) level += top / tops.size;
+  // 2. Smoothed: three box blurs each way (close to a Gaussian of the smoothing's radius).
+  const slope = own.rise / 100;
+  let smoothed: Float64Array = slope > 0 ? extended.map((h, i) => h + slope * riseDistance(distance[i], width)) : extended;
+  const radius = Math.max(1, Math.round(own.smoothing / CELL / 1.7));
+  for (let pass = 0; pass < 3; pass++)
+    smoothed = blurAxis(blurAxis(smoothed, valid, columns, rows, radius, true), valid, columns, rows, radius, false);
+
+  // Blend and noise (under the roads too: the roads cut their space out of the land when it is meshed).
   const heights: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     if (!valid[i] || toLand[i] > width) continue;
     const c = i % columns, r = Math.floor(i / columns);
     const x = x0 + c * CELL, z = z0 + r * CELL;
-    // A landscape of its own, as if there were no road: hills (the noise) round the roads' mean height. The roads cut
-    // their way through it when it is meshed (VoxelTerrain); only where there is land comes from them.
-    const h = Math.min(level + own.noise * fractal(x, z, own.noiseSize), MAX_LAND);
+    const w = smooth(distance[i] / BLEND);
+    let h = extended[i] * (1 - w) + smoothed[i] * w;
+    h += own.noise * w * fractal(x, z, own.noiseSize);
+    h = Math.min(h, MAX_LAND);
     // On the stadium's grid the ground is there: land at its height would flicker with it, so land that low sinks under
     // it (no hole in the land). Outside it there is no ground: land ends there.
     if (Math.abs(x) < MAP_HALF_EXTENT && Math.abs(z) < MAP_HALF_EXTENT) heights[i] = h < 0.5 ? SUNK : h;

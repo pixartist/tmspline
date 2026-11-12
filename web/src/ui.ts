@@ -596,9 +596,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (own) {
       const t = scenery.ownTerrain;
       numberField(root, "Width (m)", () => t.width, (v) => (t.width = int(v, 32, 1024)), 16);
+      numberField(root, "Smoothing (m)", () => t.smoothing, (v) => (t.smoothing = int(v, 0, 256)), 8);
       numberField(root, "Noise height (m)", () => t.noise, (v) => (t.noise = Math.max(0, Math.min(256, v))), 1);
       numberField(root, "Noise size (m)", () => t.noiseSize, (v) => (t.noiseSize = int(v, 16, 512)), 16);
       numberField(root, "Rock from (°, 90 = none)", () => t.rockAngle, (v) => (t.rockAngle = int(v, 0, 90)), 5);
+      numberField(root, "Rise away from the track (%, 0 = off)", () => t.rise, (v) => { t.rise = Math.max(0, Math.min(100, v)); }, 5);
     }
     if (!banded) checkbox(root, "Hills", () => scenery.hills, (v) => { scenery.hills = v; relayout(); });
     if (!own) numberField(root, "Shoulder (cells)", () => scenery.gap, (v) => (scenery.gap = int(v, 0, 8)), 1);
