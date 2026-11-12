@@ -47,13 +47,13 @@ public static class MapExporter
     /// world height 0 (a cell's row is height / 8 + this). Stadium: its ground, 8 rows. The others (from maps saved by
     /// the game, 2026-11-12): their water's blocks start at world height 0 (rows 5, 4, 14, 14), and the lowest land
     /// on them (shores, with the game's vegetation) lies at 1.6 to 2 m; the editor's 0 is the water's surface,
-    /// at -0.5 m (set by the owner from how it looked in game).
+    /// at -0.75 m (set by the owner from how it looked in game).
     /// </summary>
     public static (double GroundY, int RowsBelow) Heights(MapEnvironment environment) => environment switch
     {
-        MapEnvironment.BlueBay => (-0.5, 5),
-        MapEnvironment.GreenCoast => (-0.5, 4),
-        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (-0.5, 14),
+        MapEnvironment.BlueBay => (-0.75, 5),
+        MapEnvironment.GreenCoast => (-0.75, 4),
+        MapEnvironment.RedIsland or MapEnvironment.WhiteShore => (-0.75, 14),
         _ => (GroundY, 8),
     };
 
