@@ -112,23 +112,6 @@ public static class Surfaces
         _ => "E0E0E0",
     });
 
-    /// <summary>
-    /// The see-through plane in a gate of our own: the game's effect plane of that effect, which the importer knows
-    /// (Turbo_TriggerFX ...: no collision). Where the game has none for an effect (the cars, and the road effects
-    /// without a gate of the game's), the checkpoints' plane.
-    /// </summary>
-    public static TmMaterial EffectGatePlane(string gate)
-    {
-        var folder = gate switch
-        {
-            "Turbo" or "Turbo2" or "TurboRoulette" or "SlowMotion" or "NoSteering" or "Cruise" or "Fragile" or "Reset" => gate,
-            "ReactorBoost" or "ReactorBoostOriented" => "Boost", "ReactorBoost2" or "ReactorBoost2Oriented" => "Boost2",
-            "NoBrakes" => "NoBrake", "FreeWheeling" => "NoEngine",
-            _ => null,
-        };
-        return folder is null ? GateCurtain with { Name = $"GateFx_{gate}" } : new($"GateFx_{gate}", $"{folder}_TriggerFX");
-    }
-
     /// <summary>Visible gate of a race waypoint, colored like the samples (start green, finish red ...).</summary>
     public static TmMaterial Gate(Waypoint waypoint) => waypoint switch
     {

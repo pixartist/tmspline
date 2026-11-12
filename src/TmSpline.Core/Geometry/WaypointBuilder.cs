@@ -93,8 +93,8 @@ public static class WaypointBuilder
 
     /// <summary>
     /// A gate of our own for an effect or a car switch (GateObjects), at any place on the road: built like a
-    /// checkpoint's (the same outline round the road's cross-section, in the effect's colour, with the effect's
-    /// see-through plane and a trigger across the road), without a waypoint or a spawn point. Its trigger is what
+    /// checkpoint's (the same outline round the road's cross-section, in the effect's colour, and a trigger
+    /// across the road; no see-through plane yet), without a waypoint or a spawn point. Its trigger is what
     /// gives the effect, once the exporter has made the item a gate (MeshChunk.TriggerGameplay).
     /// </summary>
     public static MeshChunk BuildEffectGate(Track track, Ring ring, int segment, string gate, double gateHeight, Vec3d origin, RoadMeshSettings settings, string name)
@@ -118,9 +118,10 @@ public static class WaypointBuilder
         for (var i = 0; i + 1 < outline.Count; i++)
             place.Beam(chunk, beams, outline[i], outline[i + 1], segment);
 
-        var plane = new MeshChunk { Name = $"{chunk.Name}_curtain" };
-        place.Curtain(plane, plane.MaterialIndex(Surfaces.EffectGatePlane(gate)), CurtainOutline(ring, settings, outline), outline.Count, segment, CurtainTiling, true);
-        chunk.NotCollidable.Add(plane);
+        // No see-through plane for now: the game's effect planes did not show on our items (2026-11-12: the importer's
+        // Turbo_TriggerFX ... and the files' names on disk came out as the game's red "no such material"; the path
+        // schadocalex's tool sets, Stadium\Media\Modifier\[effect]\TriggerFX, is found but draws nothing, with white
+        // vertex colours too). The gate is its frame in the effect's colour.
 
         var trigger = new MeshChunk { Name = $"{chunk.Name}_trigger" };
         new BoxPlacer(ring, itemOrigin, frame, 1).Box(trigger, 0, new Vec3d((left + right) / 2, (bottom + top) / 2, 0),
