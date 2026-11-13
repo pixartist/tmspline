@@ -204,6 +204,10 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   button("Frame", "Show the whole map (F)", () => editor.frameTrack());
   const toggleAxis = () => editor.setAxisGizmo(!editor.axisGizmoEnabled);
   const axisButton = button("Axis gizmo", "Show arrows for precise moves along one axis (G)", toggleAxis);
+  const wireButton = button("Mesh", "Show the triangles of the roads and the land (mesh debug view)", () => {
+    editor.setWire(!editor.wireEnabled);
+    wireButton.classList.toggle("active", editor.wireEnabled);
+  });
 
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || document.querySelector("dialog[open]")) return;

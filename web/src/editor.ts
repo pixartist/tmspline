@@ -218,6 +218,26 @@ export class Editor {
   }
   /** Optional axis-arrow gizmo for precise moves (toggled with G). */
   axisGizmoEnabled = false;
+  /** Mesh debug view: the triangles of the roads and the land drawn as lines over them. */
+  wireEnabled = false;
+  private readonly wireMaterial = new THREE.LineBasicMaterial({ color: 0x0b0e12, transparent: true, opacity: 0.6 });
+
+  setWire(on: boolean): void {
+    this.wireEnabled = on;
+    this.terrainMesh?.children.forEach((o) => this.wireOf(o as THREE.Mesh));
+    for (const v of this.views.values()) if (v.road) this.wireOf(v.road);
+  }
+
+  /** A mesh's triangles as lines on it (its "wire" child), there while the debug view is on. */
+  private wireOf(mesh: THREE.Mesh): void {
+    const old = mesh.getObjectByName("wire") as THREE.LineSegments | undefined;
+    if (old) { mesh.remove(old); old.geometry.dispose(); }
+    if (!this.wireEnabled || !(mesh as THREE.Mesh).isMesh) return;
+    const lines = new THREE.LineSegments(new THREE.WireframeGeometry(mesh.geometry), this.wireMaterial);
+    lines.name = "wire";
+    lines.raycast = () => {};
+    mesh.add(lines);
+  }
   /** Insert mode: hovering the road previews where a click inserts a point. */
   insertMode = false;
   /** Place mode: the next click on the road places an object of this kind there. */
@@ -943,6 +963,7 @@ export class Editor {
       geo.addGroup(land * 3, mesh.rockTriangles * 3, 1);
       const m = new THREE.Mesh(geo, materials);
       m.name = `${chunk.x},${chunk.z}`;
+      this.wireOf(m);
       m.receiveShadow = true;
       m.castShadow = true;
       return m;
@@ -2843,10 +2864,12 @@ export class Editor {
 
     const v = this.viewOf(track);
     if (v.road) {
+      (v.road.getObjectByName("wire") as THREE.LineSegments | undefined)?.geometry.dispose();
       v.road.geometry.dispose();
       this.scene.remove(v.road);
     }
     v.road = new THREE.Mesh(geo, materials);
+    this.wireOf(v.road);
     v.road.userData.materials = mesh.materials;
     this.scene.add(v.road);
     v.roadSegments = segments;
