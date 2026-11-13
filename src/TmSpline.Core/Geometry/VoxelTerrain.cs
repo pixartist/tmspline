@@ -148,7 +148,7 @@ public static class VoxelTerrain
     /// <summary>What a build needs of the roads (their rooms, and how far each place is from them): the same until a road or the land's extent changes.</summary>
     public sealed class Roads
     {
-        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, float> Surface) Rooms { get; init; }
+        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point)> Surface) Rooms { get; init; }
         internal float[] Away { get; init; } = [];
         internal int Columns { get; init; }
         internal int Rows { get; init; }
@@ -698,7 +698,7 @@ public static class VoxelTerrain
         {
             // The smooth field: how far from the road's surface (its edges included, past an open end its end), less
             // the gap, and inside a road's room how deep in it (negative); no jumps, so the cut's line is clean.
-            if (SeamSmooth) return MathF.Min(surface(p) - SeamGap, room(p));
+            if (SeamSmooth) return MathF.Min(surface(p).Distance - SeamGap, room(p));
             return SeamRules(p);
         }
         float SeamRules(Vector3 p)
@@ -778,7 +778,7 @@ public static class VoxelTerrain
             // The zipper: the gap closed with strips from the land's rim to the road edges (TMSPLINE_ZIP=off: left open).
             if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "off")
             {
-                var strips = SeamZipper.Zip(kept, map, surface, SeamGap);
+                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap);
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  zipped {strips} strip triangles");
             }
         }
