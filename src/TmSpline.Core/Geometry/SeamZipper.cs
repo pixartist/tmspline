@@ -141,6 +141,7 @@ public static class SeamZipper
         int snaps = 0, targets = 0;
         var farthest = 0f;
         var made = 0;
+        SplitLongRims(mesh, gap);
         foreach (var loop in RimLoops(mesh))
         {
             var n = loop.Count;
@@ -238,6 +239,22 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
+        if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+        {
+            // Orientation: an edge two triangles run the same way (one of them turned over), and edges of three or more.
+            var runs = new Dictionary<(int, int), int>();
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+                for (var k = 0; k < 3; k++)
+                {
+                    var key = (mesh.Indices[t + k], mesh.Indices[t + (k + 1) % 3]);
+                    runs[key] = runs.GetValueOrDefault(key) + 1;
+                }
+            var same = runs.Where(kv => kv.Value > 1 || (kv.Key.Item1 != kv.Key.Item2 && false)).ToList();
+            var undirected = new Dictionary<(int, int), int>();
+            foreach (var (key, c) in runs) { var u = key.Item1 < key.Item2 ? key : (key.Item2, key.Item1); undirected[u] = undirected.GetValueOrDefault(u) + c; }
+            Console.WriteLine($"  edges run the same way by two triangles: {same.Count}; edges of three or more triangles: {undirected.Count(kv => kv.Value > 2)}");
+            foreach (var kv in same.Where(kv => Near(mesh.Positions[kv.Key.Item1])).Take(12)) Console.WriteLine($"    same way: {mesh.Positions[kv.Key.Item1]} to {mesh.Positions[kv.Key.Item2]}");
+        }
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
         return made;
     }
@@ -260,6 +277,53 @@ public static class SeamZipper
         return true;
     }
 
+    /// <summary>
+    /// Rim edges longer than the gap split (their triangle with them, the land's shape unchanged), again until none is:
+    /// each piece of a long rim gets its own road point (a long one between a helix's turns otherwise reached from one
+    /// turn to the other, and was left open).
+    /// </summary>
+    private static void SplitLongRims(AdaptiveMesh mesh, float gap)
+    {
+        for (var round = 0; round < 6; round++)
+        {
+            var count = new Dictionary<(int, int), int>();
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+                for (var k = 0; k < 3; k++)
+                {
+                    int a = mesh.Indices[t + k], b = mesh.Indices[t + (k + 1) % 3];
+                    var key = a < b ? (a, b) : (b, a);
+                    count[key] = count.GetValueOrDefault(key) + 1;
+                }
+            var split = 0;
+            var triangles = mesh.Indices.Count;
+            for (var t = 0; t + 2 < triangles; t += 3)
+            {
+                // The triangle's longest rim edge, if longer than the gap.
+                var best = -1;
+                var length = gap;
+                for (var k = 0; k < 3; k++)
+                {
+                    int a = mesh.Indices[t + k], b = mesh.Indices[t + (k + 1) % 3];
+                    if (count[a < b ? (a, b) : (b, a)] != 1) continue;
+                    var l = Vector3.Distance(mesh.Positions[a], mesh.Positions[b]);
+                    if (l > length) { length = l; best = k; }
+                }
+                if (best < 0) continue;
+                int p = mesh.Indices[t + best], q = mesh.Indices[t + (best + 1) % 3], r = mesh.Indices[t + (best + 2) % 3];
+                var m = mesh.Positions.Count;
+                mesh.Positions.Add((mesh.Positions[p] + mesh.Positions[q]) / 2);
+                mesh.Pinned.Add(false);
+                // (p, q, r) becomes (p, m, r) and (m, q, r).
+                mesh.Indices[t] = p;
+                mesh.Indices[t + 1] = m;
+                mesh.Indices[t + 2] = r;
+                mesh.Indices.AddRange([m, q, r]);
+                split++;
+            }
+            if (split == 0) break;
+        }
+    }
+
     /// <summary>The rim: boundary edges (used by one triangle), each from a to b as the triangle winds, chained into loops.</summary>
     private static List<List<int>> RimLoops(AdaptiveMesh mesh)
     {
@@ -271,27 +335,33 @@ public static class SeamZipper
                 var key = a < b ? (a, b) : (b, a);
                 count[key] = count.GetValueOrDefault(key) + 1;
             }
-        var next = new Dictionary<int, int>();
+        // Walked edge by edge, each boundary edge once: where rims touch (a vertex with two ways out) every walk still
+        // closes, since each vertex has as many rim edges in as out (a loop may pass such a vertex twice).
+        var outgoing = new Dictionary<int, List<int>>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
             for (var k = 0; k < 3; k++)
             {
                 int a = mesh.Indices[t + k], b = mesh.Indices[t + (k + 1) % 3];
-                if (count[a < b ? (a, b) : (b, a)] == 1) next.TryAdd(a, b);
+                if (count[a < b ? (a, b) : (b, a)] != 1) continue;
+                if (!outgoing.TryGetValue(a, out var list)) outgoing[a] = list = [];
+                list.Add(b);
             }
         var loops = new List<List<int>>();
-        var seen = new HashSet<int>();
-        foreach (var start in next.Keys)
-        {
-            if (seen.Contains(start)) continue;
-            var loop = new List<int>();
-            var v = start;
-            while (seen.Add(v))
+        foreach (var start in outgoing.Keys.ToList())
+            while (outgoing[start].Count > 0)
             {
-                loop.Add(v);
-                if (!next.TryGetValue(v, out v)) break;
+                var loop = new List<int>();
+                var v = start;
+                while (outgoing.TryGetValue(v, out var ways) && ways.Count > 0)
+                {
+                    loop.Add(v);
+                    var w = ways[^1];
+                    ways.RemoveAt(ways.Count - 1);
+                    v = w;
+                    if (v == start) break;
+                }
+                if (loop.Count >= 3 && v == start) loops.Add(loop);
             }
-            if (loop.Count >= 3) loops.Add(loop);
-        }
         return loops;
     }
 
