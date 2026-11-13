@@ -150,7 +150,7 @@ public static class VoxelTerrain
     /// <summary>What a build needs of the roads (their rooms, and how far each place is from them): the same until a road or the land's extent changes.</summary>
     public sealed class Roads
     {
-        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point)> Surface) Rooms { get; init; }
+        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> Surface) Rooms { get; init; }
         internal float[] Away { get; init; } = [];
         internal int Columns { get; init; }
         internal int Rows { get; init; }

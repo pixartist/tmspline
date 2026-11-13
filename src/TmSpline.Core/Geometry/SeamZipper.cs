@@ -46,11 +46,34 @@ public static class SeamZipper
     /// end), the strip running between the rim and those points. Beside a road that is its edge; under it, or round a
     /// tube, its underside: there the seam leaves the edge and runs along the road's body (the owner's sketch). A rim
     /// vertex whose line to that point passes through a road's room (over a tunnel's mouth) is not joined: that rim is
-    /// an opening.
+    /// an opening. Except at an open road's end: there the land round the end leaves a window the shape of the road's
+    /// vault, which nothing drives through; it is closed with a fan.
     /// </summary>
-    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point)> surface, Func<Vector3, float> room, float gap)
+    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> surface, Func<Vector3, float> room, float gap)
     {
         if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") == "rail") return ZipEdges(mesh, map, p => surface(p).Distance, room, gap);
+        // Diagnostics: what is left unjoined within a radius of a plan point (TMSPLINE_ZIP_NEAR="x;z;radius").
+        var near = Environment.GetEnvironmentVariable("TMSPLINE_ZIP_NEAR")?.Split(';').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        bool Near(Vector3 p) => near is { Length: 3 } && MathF.Sqrt((p.X - near[0]) * (p.X - near[0]) + (p.Z - near[1]) * (p.Z - near[1])) < near[2];
+        // The open roads' ends: the first and last cross-sections, facing out.
+        var ends = new List<(Vector3 P, Vector3 Out, Vector3 Right, Vector3 Up, float Width)>();
+        foreach (var track in map.Tracks)
+        {
+            if (track.Closed) continue;
+            track.SyncSegments();
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(MeshQuality.Normal));
+            if (rings.Count < 2) continue;
+            static Vector3 V(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
+            foreach (var (r, sign) in new[] { (rings[0], -1f), (rings[^1], 1f) })
+                ends.Add((V(r.Position), V(r.Tangent) * sign, V(r.Right), V(r.Up), (float)r.Width));
+        }
+        // Whether a place lies in a road's end: within the gap of its cross-section, across no wider than the road and
+        // the gap, and no higher over it than the road is wide (its vault).
+        bool AtEnd(Vector3 p) => ends.Any(e =>
+        {
+            var d = p - e.P;
+            return MathF.Abs(Vector3.Dot(d, e.Out)) < gap && MathF.Abs(Vector3.Dot(d, e.Right)) < e.Width / 2 + gap && MathF.Abs(Vector3.Dot(d, e.Up)) < e.Width;
+        });
         var made = 0;
         foreach (var loop in RimLoops(mesh))
         {
@@ -60,8 +83,18 @@ public static class SeamZipper
             {
                 target[i] = -1;
                 var p = mesh.Positions[loop[i]];
-                var (distance, point) = surface(p);
-                if (distance >= 1.5f * gap || !Clear(room, p, point)) continue;
+                var (distance, nearest, left, right) = surface(p);
+                // The nearest point on the road if the line to it stays out of the rooms, else the nearer of that
+                // section's edges that it reaches (land between a helix's turns, over the lower one's deck: its edge).
+                Vector3? reached = null;
+                if (distance < 1.5f * gap)
+                    foreach (var candidate in new[] { nearest, left, right }.OrderBy(c => Vector3.DistanceSquared(p, c)))
+                        if (Vector3.Distance(p, candidate) < 2.5f * gap && Clear(room, p, candidate)) { reached = candidate; break; }
+                if (reached is not { } point)
+                {
+                    if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: road surface {distance:0.0} m away at {nearest}, {(distance >= 1.5f * gap ? "too far" : "no line out of the rooms")}");
+                    continue;
+                }
                 target[i] = mesh.Positions.Count;
                 mesh.Positions.Add(point);
                 mesh.Pinned.Add(false);
@@ -72,7 +105,11 @@ public static class SeamZipper
                 if (target[i] < 0 || target[j] < 0) continue;
                 Vector3 pi = mesh.Positions[target[i]], pj = mesh.Positions[target[j]];
                 // (Not across from one road or side to another: the points far apart.)
-                if (Vector3.Distance(pi, pj) > 3 * gap) continue;
+                if (Vector3.Distance(pi, pj) > 3 * gap)
+                {
+                    if (Near(mesh.Positions[loop[i]])) Console.WriteLine($"  rim {mesh.Positions[loop[i]]} to {mesh.Positions[loop[j]]} not joined: their road points {Vector3.Distance(pi, pj):0.0} m apart ({pi}, {pj})");
+                    continue;
+                }
                 mesh.Indices.AddRange([loop[j], loop[i], target[i]]);
                 made++;
                 if (Vector3.DistanceSquared(pi, pj) > 1e-4f)
@@ -80,6 +117,36 @@ public static class SeamZipper
                     mesh.Indices.AddRange([loop[j], target[i], target[j]]);
                     made++;
                 }
+            }
+            // An open road's end: a run of unjoined rim vertices, all at the end, between two joined ones: the window
+            // over the end's deck, closed by a fan from its middle (in the rim's order back, then along the road).
+            for (var i = 0; i < n; i++)
+            {
+                var j = (i + 1) % n;
+                if (target[i] < 0 || target[j] >= 0) continue;
+                var run = new List<int>();
+                var k = j;
+                while (target[k] < 0 && run.Count < n) { run.Add(k); k = (k + 1) % n; }
+                if (run.Count == n || run.Count > 24) continue;
+                if (!run.All(r => AtEnd(mesh.Positions[loop[r]]))) continue;
+                // The window: from the joined vertex after the run, back along the rim to the one before it, then
+                // its road point and the other's.
+                var window = new List<int> { loop[k] };
+                for (var r = run.Count - 1; r >= 0; r--) window.Add(loop[run[r]]);
+                window.Add(loop[i]);
+                window.Add(target[i]);
+                if (Vector3.DistanceSquared(mesh.Positions[target[i]], mesh.Positions[target[k]]) > 1e-4f) window.Add(target[k]);
+                var middle = window.Aggregate(Vector3.Zero, (sum, v) => sum + mesh.Positions[v]) / window.Count;
+                if (window.Any(v => Vector3.Distance(middle, mesh.Positions[v]) > 6 * gap)) continue;
+                var centre = mesh.Positions.Count;
+                mesh.Positions.Add(middle);
+                mesh.Pinned.Add(false);
+                for (var w = 0; w < window.Count; w++)
+                {
+                    mesh.Indices.AddRange([window[w], window[(w + 1) % window.Count], centre]);
+                    made++;
+                }
+                if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
         return made;
@@ -97,7 +164,8 @@ public static class SeamZipper
         for (var k = 1; k < steps; k++)
         {
             if (length * (1 - k / (float)steps) < 1.5f) break;
-            if (room(Vector3.Lerp(from, to, k / (float)steps)) < -0.5f) return false;
+            // (Deeper than a curved vault's sag over a line along its wall: through the room, not along it.)
+            if (room(Vector3.Lerp(from, to, k / (float)steps)) < -2f) return false;
         }
         return true;
     }

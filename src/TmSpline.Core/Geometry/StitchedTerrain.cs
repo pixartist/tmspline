@@ -170,12 +170,12 @@ public static class StitchedTerrain
     public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
     /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero); the distance to the nearest road edge with the height over that road's edge line.</summary>
-    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point)> Surface) Rooms(TerrainGrid grid, TrackMap map)
+    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> Surface) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
-        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across, out var beyond), over, across, beyond), p => (b.SurfaceDistance(p, out var point), point));
+        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across, out var beyond), over, across, beyond), p => (b.SurfaceDistance(p, out var point, out var left, out var right), point, left, right));
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -792,10 +792,12 @@ public static class StitchedTerrain
         /// distance with no jumps in it, for the seam (`far` where no road is within about a bucket).
         /// </summary>
         /// <param name="point">The nearest point on that line (p itself where no road is near).</param>
-        public float SurfaceDistance(Vector3 p, out Vector3 point, float far = 1e3f)
+        /// <param name="left">That section's left edge (p itself where no road is near).</param>
+        /// <param name="right">And its right edge.</param>
+        public float SurfaceDistance(Vector3 p, out Vector3 point, out Vector3 left, out Vector3 right, float far = 1e3f)
         {
             var best = far;
-            point = p;
+            point = left = right = p;
             int bx = (int)Math.Floor(p.X / Bucket), bz = (int)Math.Floor(p.Z / Bucket);
             for (var ox = -1; ox <= 1; ox++)
                 for (var oz = -1; oz <= 1; oz++)
@@ -838,6 +840,9 @@ public static class StitchedTerrain
                         {
                             best = dist;
                             point = P + R * at.X + U * at.Y;
+                            Vector2 l = Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s), r = Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s);
+                            left = P + R * l.X + U * l.Y;
+                            right = P + R * r.X + U * r.Y;
                         }
                     }
                 }
