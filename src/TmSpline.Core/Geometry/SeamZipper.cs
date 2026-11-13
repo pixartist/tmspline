@@ -14,7 +14,7 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class SeamZipper
 {
-    /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 road edges near land nothing meets, 2 the close-road holes (the loops found, filled or not).</summary>
+    /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 the seam on the road (where the land meets it), 2 the close-road holes (the loops found, filled or not).</summary>
     public static float[] LastOpen { get; private set; } = [];
 
     private sealed class Rail
@@ -1471,20 +1471,13 @@ public static class SeamZipper
                 if (MathF.Min(surface(pa).Distance, surface(pb).Distance) > reachDebug) continue;
                 debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 0]);
             }
-            for (var rb = 0; rb < ribbons.Count; rb++)
+            // The seam on the road: where the land meets it (the open edges with both ends on the road, a grid node or an
+            // edge's foot), along its edges and, where the seam leaves them, across its underside.
+            foreach (var ((a, b), n) in uses)
             {
-                var count = ribbons[rb].Cross.Count;
-                void Piece(int k0, int j0, int k1, int j1)
-                {
-                    Vector3 pa = ribbons[rb].Cross[k0][j0], pb = ribbons[rb].Cross[k1][j1];
-                    if (nodeVertex.TryGetValue((rb, k0, j0), out var a) && nodeVertex.TryGetValue((rb, k1, j1), out var b) && uses.ContainsKey(a < b ? (a, b) : (b, a))) return;
-                    if (!NearLand((pa + pb) / 2)) return;
-                    debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 1]);
-                }
-                foreach (var j in new[] { 0, Across })
-                    for (var k = 0; k + 1 < count; k++) Piece(k, j, k + 1, j);
-                foreach (var k in new[] { 0, count - 1 })
-                    for (var j = 0; j < Across; j++) Piece(k, j, k, j + 1);
+                if (n != 1 || LandVertex(a) || LandVertex(b)) continue;
+                Vector3 pa = mesh.Positions[a], pb = mesh.Positions[b];
+                debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 1]);
             }
             LastOpen = debug.ToArray();
         }

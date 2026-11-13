@@ -242,8 +242,8 @@ export class Editor {
   /** Seam debug: the dev server's seam front left open (red), with the mesh debug view. */
   private seamDebug: THREE.Group | null = null;
   /**
-   * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), road edges near
-   * land nothing meets (yellow), the close-road holes (magenta).
+   * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), the seam on
+   * the road, where land attaches (yellow), the close-road holes (magenta).
    */
   private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
 
