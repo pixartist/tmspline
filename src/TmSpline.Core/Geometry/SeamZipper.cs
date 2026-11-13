@@ -798,6 +798,11 @@ public static class SeamZipper
                 {
                     int k2 = k + dk, j2 = j + dj;
                     if (k2 < 0 || k2 >= count || j2 < 0 || j2 > Across) continue;
+                    // (Along the edges, or across a road's end, or from under the road out to its nearer edge; not across its
+                    // underside from edge to edge: a plug's loop wrapped round the
+                    // road then and had no filling off it.)
+                    if (dk != 0 && j != 0 && j != Across) continue;
+                    if (dj != 0 && k != 0 && k != count - 1 && Math.Min(j2, Across - j2) >= Math.Min(j, Across - j)) continue;
                     // (Along a ring between rings only at the edges, the ends or underneath: grid lines all lie on the
                     // road; a grid line the land already meets is no hole's side.)
                     var other = Place((rb, k2, j2));
@@ -863,10 +868,38 @@ public static class SeamZipper
                     var remaining = Enumerable.Range(0, cycle.Count).ToList();
                     var triangles = new List<(int, int, int)>();
                     static float Cross2(Vector2 o, Vector2 p, Vector2 q) => (p.X - o.X) * (q.Y - o.Y) - (p.Y - o.Y) * (q.X - o.X);
+                    // An ear off the roads in space too (flat in the loop's plane it may still cut across a road's deck
+                    // where the loop bends round it): no point inside it, away from its corners, on a road or in its room.
+                    int inRoom = 0, onDeck = 0;
+                    bool OffRoad(Vector3 x, Vector3 y, Vector3 z) => Touching(x, y, z) == 0;
+                    int Touching(Vector3 x, Vector3 y, Vector3 z)
+                    {
+                        var bad = 0;
+                        for (var u = 1; u < 5; u++)
+                            for (var v = 1; u + v < 5; v++)
+                            {
+                                var q = x + (y - x) * (u / 5f) + (z - x) * (v / 5f);
+                                if (MathF.Min(Vector3.Distance(q, x), MathF.Min(Vector3.Distance(q, y), Vector3.Distance(q, z))) < 0.75f) continue;
+                                if (room(q) < -0.5f) { inRoom++; bad++; continue; }
+                                // (On the deck, between its edges: not just beside an edge it runs along.)
+                                var (d, _, l, r) = surface(q);
+                                var lr = r - l;
+                                if (d < 0.25f && lr.LengthSquared() > 1e-4f)
+                                {
+                                    var across = Vector3.Dot(q - l, lr) / lr.LengthSquared();
+                                    if (across > 0.05f && across < 0.95f) { onDeck++; bad++; }
+                                }
+                            }
+                        return bad;
+                    }
                     var guard = 0;
+                    // (Each step the ear touching the roads least: none if it can, as little as the loop's shape allows
+                    // where two roads' edges cross over each other.)
+                    var touching = 0;
                     while (remaining.Count > 3 && guard++ < 1000)
                     {
-                        var clipped = false;
+                        var best = -1;
+                        var bestBad = int.MaxValue;
                         for (var i = 0; i < remaining.Count; i++)
                         {
                             int i0 = remaining[(i - 1 + remaining.Count) % remaining.Count], i1 = remaining[i], i2 = remaining[(i + 1) % remaining.Count];
@@ -878,23 +911,58 @@ public static class SeamZipper
                                 if (Cross2(flat[i0], flat[i1], flat[o]) >= 0 && Cross2(flat[i1], flat[i2], flat[o]) >= 0 && Cross2(flat[i2], flat[i0], flat[o]) >= 0) { inside = true; break; }
                             }
                             if (inside) continue;
-                            triangles.Add((i0, i1, i2));
-                            remaining.RemoveAt(i);
-                            clipped = true;
-                            break;
+                            var bad = Touching(polygon[i0], polygon[i1], polygon[i2]);
+                            if (bad < bestBad) { bestBad = bad; best = i; if (bad == 0) break; }
                         }
-                        if (!clipped) break;
+                        if (best < 0) break;
+                        int b0 = remaining[(best - 1 + remaining.Count) % remaining.Count], b1 = remaining[best], b2 = remaining[(best + 1) % remaining.Count];
+                        triangles.Add((b0, b1, b2));
+                        touching += bestBad;
+                        remaining.RemoveAt(best);
                     }
-                    if (remaining.Count != 3) continue;
-                    triangles.Add((remaining[0], remaining[1], remaining[2]));
+                    // A polygon round a road's edge in space has no flat triangulation off the road: then a fan, from its
+                    // middle or from one of its corners, the first whose triangles all stay off the roads.
+                    var apex = -1;
+                    if (remaining.Count == 3)
+                    {
+                        touching += Touching(polygon[remaining[0]], polygon[remaining[1]], polygon[remaining[2]]);
+                        triangles.Add((remaining[0], remaining[1], remaining[2]));
+                        if (touching > 0 && Near(PosOf(a))) Console.WriteLine($"  hole of {cycle.Count} corners at {PosOf(a)}: filled touching a road at {touching} sample points");
+                    }
+                    else
+                    {
+                        triangles.Clear();
+                        var middle = polygon.Aggregate(Vector3.Zero, (sum, q) => sum + q) / polygon.Count;
+                        var n = polygon.Count;
+                        if (Enumerable.Range(0, n).All(i => OffRoad(polygon[i], polygon[(i + 1) % n], middle)))
+                            apex = n;
+                        else
+                            for (var c = 0; c < n && apex < 0; c++)
+                                if (Enumerable.Range(0, n).Where(i => i != c && (i + 1) % n != c).All(i => OffRoad(polygon[c], polygon[i], polygon[(i + 1) % n])))
+                                    apex = c;
+                        if (apex < 0)
+                        {
+                            if (Near(PosOf(a)) && cycle.Count > 6) Console.WriteLine($"  hole of {cycle.Count} corners at {PosOf(a)} not filled: no triangulation off the roads (ears in a room {inRoom}, on a deck {onDeck})");
+                            continue;
+                        }
+                        if (apex == n) { cycle.Add(int.MinValue); polygon.Add(middle); }
+                        for (var i = 0; i < n; i++)
+                            if (i != apex && (i + 1) % n != apex) triangles.Add((i, (i + 1) % n, apex));
+                    }
                     // Not through a road's room.
                     if (triangles.Any(tr => room((polygon[tr.Item1] + polygon[tr.Item2] + polygon[tr.Item3]) / 3) < -1)) continue;
+                    var centreId = -1;
+                    int CentreVertex(Vector3 q)
+                    {
+                        if (centreId < 0) { centreId = mesh.Positions.Count; mesh.Positions.Add(q); mesh.Pinned.Add(false); }
+                        return centreId;
+                    }
                     // Wound against the edge a-b's own triangle: if that runs a to b, the fill runs b to a.
                     var reverse = runs.ContainsKey((a, b));
                     foreach (var (x, y, z) in triangles)
                     {
                         int vx = cycle[x], vy = cycle[y], vz = cycle[z];
-                        var ids = new[] { vx, vy, vz }.Select(pl => pl >= 0 ? pl : Node(virtualNodes[-1 - pl].Ribbon, virtualNodes[-1 - pl].K, virtualNodes[-1 - pl].J)).ToArray();
+                        var ids = new[] { vx, vy, vz }.Select(pl => pl >= 0 ? pl : pl == int.MinValue ? CentreVertex(polygon[^1]) : Node(virtualNodes[-1 - pl].Ribbon, virtualNodes[-1 - pl].K, virtualNodes[-1 - pl].J)).ToArray();
                         // (The polygon goes a, then the way back: a's next is the way back's first, so the loop runs a->path->b->a:
                         // its edge b->a; the fill's order as clipped runs the loop's way.)
                         if (reverse) mesh.Indices.AddRange([ids[0], ids[2], ids[1]]);
