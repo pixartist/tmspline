@@ -208,6 +208,10 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     editor.setWire(!editor.wireEnabled);
     wireButton.classList.toggle("active", editor.wireEnabled);
   });
+  const gapsButton = button("Gaps", "Show the seam's gaps (dev server): land edges meeting no road (cyan), road edges no land meets (yellow), close-road holes (magenta)", () => {
+    editor.setGaps(!editor.gapsEnabled);
+    gapsButton.classList.toggle("active", editor.gapsEnabled);
+  });
 
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || document.querySelector("dialog[open]")) return;

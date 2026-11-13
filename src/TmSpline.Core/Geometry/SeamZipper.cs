@@ -14,7 +14,7 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class SeamZipper
 {
-    /// <summary>Debug: the last build's rim edges the strips failed at (x, y, z, x, y, z, 0), for the editor's mesh view.</summary>
+    /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 road edges near land nothing meets, 2 the close-road holes (the loops found, filled or not).</summary>
     public static float[] LastOpen { get; private set; } = [];
 
     private sealed class Rail
@@ -952,10 +952,10 @@ public static class SeamZipper
                                 && (Math.Min(g0.J, g1.J) == 0 && Math.Max(g0.J, g1.J) == 1 || Math.Min(g0.J, g1.J) == Across - 1 && Math.Max(g0.J, g1.J) == Across))
                             {
                                 var foot = g0.J + g1.J < Across ? ribbonFeet[g0.Ribbon][g0.K].Left : ribbonFeet[g0.Ribbon][g0.K].Right;
-                                loopOutline.AddRange([p0.X, p0.Y, p0.Z, foot.X, foot.Y, foot.Z, 1, foot.X, foot.Y, foot.Z, p1.X, p1.Y, p1.Z, 1]);
+                                loopOutline.AddRange([p0.X, p0.Y, p0.Z, foot.X, foot.Y, foot.Z, 2, foot.X, foot.Y, foot.Z, p1.X, p1.Y, p1.Z, 2]);
                             }
                             else
-                            loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, GridOf(cycle[i]) is not null && GridOf(cycle[(i + 1) % cycle.Count]) is not null ? 1 : 0]);
+                            loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, 2]);
                             int u = cycle[i], v = cycle[(i + 1) % cycle.Count];
                             if (u >= 0 && v >= 0) tried.Add(u < v ? (u, v) : (v, u));
                         }
@@ -977,10 +977,12 @@ public static class SeamZipper
                     }
                     void DrawLoop()
                     {
-                        for (var i = 0; i < cycle.Count; i++)
+                        // (The loop's own corners: not a fan's centre added to it.)
+                        var corners = cycle.Where(v => v != int.MinValue).ToList();
+                        for (var i = 0; i < corners.Count; i++)
                         {
-                            Vector3 p0 = PosOf(cycle[i]), p1 = PosOf(cycle[(i + 1) % cycle.Count]);
-                            loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, 0]);
+                            Vector3 p0 = PosOf(corners[i]), p1 = PosOf(corners[(i + 1) % corners.Count]);
+                            loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, 2]);
                         }
                     }
                     var polygon = cycle.Select(PosOf).ToList();
@@ -1102,6 +1104,7 @@ public static class SeamZipper
                         made++;
                     }
                     loopFills++;
+                    DrawLoop();
                     if (Near(PosOf(a))) Console.WriteLine($"  hole of {cycle.Count} corners ({first + dist[a]:0} m round) filled at {PosOf(a)}");
                     // (The open edges changed: start again from them.)
                     progress = true;
@@ -1427,7 +1430,66 @@ public static class SeamZipper
         }
         if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {ribbons.Count} roads, {Across} across; {breaks} breaks between runs");
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
-        LastOpen = drawLoops || fillLoops ? loopOutline.ToArray() : stitch ? gapOutline.ToArray() : failedEdges.ToArray();
+        if (grid)
+        {
+            var debug = new List<float>(loopOutline);
+            var uses = new Dictionary<(int, int), int>();
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+                for (var k = 0; k < 3; k++)
+                {
+                    int a = mesh.Indices[t + k], b = mesh.Indices[t + (k + 1) % 3];
+                    var key = a < b ? (a, b) : (b, a);
+                    uses[key] = uses.GetValueOrDefault(key) + 1;
+                }
+            bool LandVertex(int v) => !roadNodeOf.ContainsKey(v) && !footIds.Contains(v);
+            // The land's vertices in 8 m cells, for "near land".
+            const float DebugCell = 8;
+            var landCells = new Dictionary<(int, int, int), List<Vector3>>();
+            foreach (var ((a, b), n) in uses)
+                foreach (var v in new[] { a, b })
+                {
+                    if (!LandVertex(v)) continue;
+                    var q = mesh.Positions[v];
+                    var key = ((int)MathF.Floor(q.X / DebugCell), (int)MathF.Floor(q.Y / DebugCell), (int)MathF.Floor(q.Z / DebugCell));
+                    if (!landCells.TryGetValue(key, out var list)) landCells[key] = list = [];
+                    list.Add(q);
+                }
+            var reachDebug = 2.5f * gap;
+            bool NearLand(Vector3 q)
+            {
+                int cx = (int)MathF.Floor(q.X / DebugCell), cy = (int)MathF.Floor(q.Y / DebugCell), cz = (int)MathF.Floor(q.Z / DebugCell), r = (int)MathF.Ceiling(reachDebug / DebugCell);
+                for (var x = cx - r; x <= cx + r; x++)
+                    for (var y = cy - r; y <= cy + r; y++)
+                        for (var z = cz - r; z <= cz + r; z++)
+                            if (landCells.TryGetValue((x, y, z), out var list) && list.Any(l => Vector3.DistanceSquared(l, q) < reachDebug * reachDebug)) return true;
+                return false;
+            }
+            foreach (var ((a, b), n) in uses)
+            {
+                if (n != 1 || (!LandVertex(a) && !LandVertex(b))) continue;
+                Vector3 pa = mesh.Positions[a], pb = mesh.Positions[b];
+                if (MathF.Min(surface(pa).Distance, surface(pb).Distance) > reachDebug) continue;
+                debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 0]);
+            }
+            for (var rb = 0; rb < ribbons.Count; rb++)
+            {
+                var count = ribbons[rb].Cross.Count;
+                void Piece(int k0, int j0, int k1, int j1)
+                {
+                    Vector3 pa = ribbons[rb].Cross[k0][j0], pb = ribbons[rb].Cross[k1][j1];
+                    if (nodeVertex.TryGetValue((rb, k0, j0), out var a) && nodeVertex.TryGetValue((rb, k1, j1), out var b) && uses.ContainsKey(a < b ? (a, b) : (b, a))) return;
+                    if (!NearLand((pa + pb) / 2)) return;
+                    debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 1]);
+                }
+                foreach (var j in new[] { 0, Across })
+                    for (var k = 0; k + 1 < count; k++) Piece(k, j, k + 1, j);
+                foreach (var k in new[] { 0, count - 1 })
+                    for (var j = 0; j < Across; j++) Piece(k, j, k, j + 1);
+            }
+            LastOpen = debug.ToArray();
+        }
+        else
+            LastOpen = failedEdges.ToArray();
         return made;
     }
 

@@ -229,13 +229,23 @@ export class Editor {
     this.wireEnabled = on;
     this.terrainMesh?.children.forEach((o) => this.wireOf(o as THREE.Mesh));
     for (const v of this.views.values()) if (v.road) this.wireOf(v.road);
+  }
+
+  /** Gap debug view: the seam's gaps as the dev server's last build saw them. */
+  gapsEnabled = false;
+
+  setGaps(on: boolean): void {
+    this.gapsEnabled = on;
     this.updateSeamDebug();
   }
 
   /** Seam debug: the dev server's seam front left open (red), with the mesh debug view. */
-  private seamDebug: LineSegments2 | null = null;
-  /** 2 px wide (WebGL's own lines are always 1 px). */
-  private readonly seamDebugMaterial = new LineMaterial({ color: 0xff2020, linewidth: 2, depthTest: false });
+  private seamDebug: THREE.Group | null = null;
+  /**
+   * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), road edges near
+   * land nothing meets (yellow), the close-road holes (magenta).
+   */
+  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -246,24 +256,31 @@ export class Editor {
   private updateSeamDebug(): void {
     if (this.seamDebug) {
       this.scene.remove(this.seamDebug);
-      this.seamDebug.geometry.dispose();
+      for (const c of this.seamDebug.children) (c as LineSegments2).geometry.dispose();
       this.seamDebug = null;
     }
     const group = this.terrainMesh;
-    if (!this.wireEnabled || !group) return;
+    if (!this.gapsEnabled || !group) return;
     // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
     void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
-      if (!data || !this.wireEnabled || this.terrainMesh !== group) return;
-      const points: number[] = [];
-      for (let i = 0; i + 6 < data.length + 1; i += 7) points.push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
-      if (this.seamDebug) { this.scene.remove(this.seamDebug); this.seamDebug.geometry.dispose(); }
-      const geo = new LineSegmentsGeometry();
-      geo.setPositions(points);
-      this.seamDebugMaterial.resolution.set(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
-      this.seamDebug = new LineSegments2(geo, this.seamDebugMaterial);
-      this.seamDebug.renderOrder = 999;
-      this.seamDebug.raycast = () => {};
-      this.scene.add(this.seamDebug);
+      if (!data || !this.gapsEnabled || this.terrainMesh !== group) return;
+      const points: number[][] = [[], [], []];
+      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(2, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      if (this.seamDebug) { this.scene.remove(this.seamDebug); for (const c of this.seamDebug.children) (c as LineSegments2).geometry.dispose(); }
+      const lines = new THREE.Group();
+      points.forEach((list, kind) => {
+        if (!list.length) return;
+        const geo = new LineSegmentsGeometry();
+        geo.setPositions(list);
+        const material = this.seamDebugMaterials[kind];
+        material.resolution.set(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+        const segments = new LineSegments2(geo, material);
+        segments.renderOrder = 999 + kind;
+        segments.raycast = () => {};
+        lines.add(segments);
+      });
+      this.seamDebug = lines;
+      this.scene.add(lines);
     }).catch(() => {});
   }
 
