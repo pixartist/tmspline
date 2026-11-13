@@ -1085,7 +1085,8 @@ public static class SeamZipper
             for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) AddCells(t);
             // Road pieces: an edge's or an end's segment between two grid nodes (on the road; no triangle on its road side).
             var roadPiece = new HashSet<(int, int)>();
-            bool Piece(int a, int b) => roadPiece.Contains(a < b ? (a, b) : (b, a));
+            // (Two neighbouring grid nodes of one road: on it, whether or not the list below has it yet.)
+            bool Piece(int a, int b) => roadPiece.Contains(a < b ? (a, b) : (b, a)) || roadNodeOf.TryGetValue(a, out var na) && roadNodeOf.TryGetValue(b, out var nb) && na.Ribbon == nb.Ribbon && Math.Abs(na.K - nb.K) + Math.Abs(na.J - nb.J) == 1;
             // Terrain vertices in cells, to find road pieces land is near.
             var landCells = new Dictionary<(int, int, int), List<int>>();
             for (var t = 0; t < mesh.Indices.Count; t++)
@@ -1144,6 +1145,7 @@ public static class SeamZipper
             {
                 if (a > b && front.Contains((b, a))) continue;
                 gapOutline.AddRange([P(a).X, P(a).Y, P(a).Z, P(b).X, P(b).Y, P(b).Z, Piece(a, b) ? 1 : 0]);
+                if (Environment.GetEnvironmentVariable("TMSPLINE_GAP_DIAG") == "on" && Near(P(a))) Console.WriteLine($"  outline {(Piece(a, b) ? "road" : "land")} {P(a)} to {P(b)}: uses {edgeUses.GetValueOrDefault(a < b ? (a, b) : (b, a))}, nodes {(roadNodeOf.TryGetValue(a, out var ra) ? ra.ToString() : "-")} {(roadNodeOf.TryGetValue(b, out var rbn) ? rbn.ToString() : "-")}, triangles at a {mesh.Indices.Count(x => x == a)}");
             }
             // Front vertices in cells.
             var frontCells = new Dictionary<(int, int, int), HashSet<int>>();
