@@ -226,6 +226,94 @@ export class Editor {
     this.wireEnabled = on;
     this.terrainMesh?.children.forEach((o) => this.wireOf(o as THREE.Mesh));
     for (const v of this.views.values()) if (v.road) this.wireOf(v.road);
+    this.updateSeamDebug();
+  }
+
+  /** Seam debug: the stretches of road edge with no rim of the land near them (red), with the mesh debug view. */
+  private seamDebug: THREE.LineSegments | null = null;
+  private readonly seamDebugMaterial = new THREE.LineBasicMaterial({ color: 0xff2020, depthTest: false });
+
+  /**
+   * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
+   * The rim is the land's open boundary: the edges of its triangles that only one triangle has (the chunks' own
+   * borders cancel out, their corners lie in the same places). The road's edges are its driving surface's outermost
+   * vertices every 2 m along it.
+   */
+  private updateSeamDebug(): void {
+    if (this.seamDebug) {
+      this.scene.remove(this.seamDebug);
+      this.seamDebug.geometry.dispose();
+      this.seamDebug = null;
+    }
+    const group = this.terrainMesh;
+    if (!this.wireEnabled || !group) return;
+    const SEAM_REACH = 12, CELL = 4;
+    const key = (x: number, y: number, z: number) => `${Math.round(x * 50)},${Math.round(y * 50)},${Math.round(z * 50)}`;
+    const edges = new Map<string, { n: number; a: THREE.Vector3; b: THREE.Vector3 }>();
+    for (const child of group.children) {
+      const mesh = child as THREE.Mesh;
+      const pos = mesh.geometry?.getAttribute("position") as THREE.BufferAttribute | undefined;
+      if (!pos) continue;
+      for (let t = 0; t + 2 < pos.count; t += 3)
+        for (let k = 0; k < 3; k++) {
+          const a = new THREE.Vector3().fromBufferAttribute(pos, t + k), b = new THREE.Vector3().fromBufferAttribute(pos, t + (k + 1) % 3);
+          const ka = key(a.x, a.y, a.z), kb = key(b.x, b.y, b.z);
+          const id = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+          const e = edges.get(id);
+          if (e) e.n++;
+          else edges.set(id, { n: 1, a, b });
+        }
+    }
+    // The rim's points in a grid of squares, for looking up what is near.
+    const rim = new Map<string, THREE.Vector3[]>();
+    for (const e of edges.values()) {
+      if (e.n !== 1) continue;
+      for (const p of [e.a, e.b, e.a.clone().lerp(e.b, 0.5)]) {
+        const cell = `${Math.floor(p.x / CELL)},${Math.floor(p.z / CELL)}`;
+        (rim.get(cell) ?? rim.set(cell, []).get(cell)!).push(p);
+      }
+    }
+    const near = (p: THREE.Vector3) => {
+      const r = Math.ceil(SEAM_REACH / CELL), cx = Math.floor(p.x / CELL), cz = Math.floor(p.z / CELL);
+      for (let x = cx - r; x <= cx + r; x++)
+        for (let z = cz - r; z <= cz + r; z++)
+          for (const q of rim.get(`${x},${z}`) ?? []) if (q.distanceToSquared(p) < SEAM_REACH * SEAM_REACH) return true;
+      return false;
+    };
+    const lines: number[] = [];
+    for (const v of this.views.values()) {
+      if (!v.road) continue;
+      const pos = v.road.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const sc = v.surfaceCoords;
+      // Per 2 m along the road: its outermost surface vertices left and right.
+      const sides = new Map<number, { l?: [number, THREE.Vector3]; r?: [number, THREE.Vector3] }>();
+      for (let i = 0; i < pos.count && i * 2 + 1 < sc.length; i++) {
+        const d = sc[i * 2], across = sc[i * 2 + 1];
+        if (!Number.isFinite(d) || !Number.isFinite(across)) continue;
+        const slot = Math.round(d / 2);
+        const s = sides.get(slot) ?? sides.set(slot, {}).get(slot)!;
+        const p = new THREE.Vector3().fromBufferAttribute(pos, i);
+        if (across < 0 && (!s.l || across < s.l[0])) s.l = [across, p];
+        if (across > 0 && (!s.r || across > s.r[0])) s.r = [across, p];
+      }
+      const slots = [...sides.keys()].sort((a, b) => a - b);
+      for (const side of ["l", "r"] as const) {
+        let previous: THREE.Vector3 | null = null;
+        for (const slot of slots) {
+          const p = sides.get(slot)![side]?.[1];
+          if (!p) { previous = null; continue; }
+          const missing = !near(p);
+          if (missing && previous) lines.push(previous.x, previous.y + 0.4, previous.z, p.x, p.y + 0.4, p.z);
+          previous = missing ? p : null;
+        }
+      }
+    }
+    if (lines.length === 0) return;
+    const geo = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
+    this.seamDebug = new THREE.LineSegments(geo, this.seamDebugMaterial);
+    this.seamDebug.renderOrder = 20;
+    this.seamDebug.raycast = () => {};
+    this.scene.add(this.seamDebug);
   }
 
   /** A mesh's triangles as lines on it (its "wire" child), there while the debug view is on. */
@@ -913,6 +1001,7 @@ export class Editor {
       const group = new THREE.Group();
       for (const chunk of chunks) if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, materials));
       this.setTerrainMesh(group, materials);
+      this.updateSeamDebug();
       this.terrainKey = key ? { key, tracks } : null;
       this.terrainTriangles = new Map(chunks.map((c) => [`${c.x},${c.z}`, c.mesh.indices.length / 3]));
       this.onTerrainSize();
