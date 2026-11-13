@@ -154,7 +154,10 @@ public static class SeamZipper
         var grid = Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "project";
         // The advancing front (the default with the grid; TMSPLINE_STITCH=off: the earlier bridges, close-road strips,
         // end windows and hole fills): what the strips along runs leave open, closed triangle by triangle.
-        var stitch = grid && Environment.GetEnvironmentVariable("TMSPLINE_STITCH") != "off";
+        // TMSPLINE_STITCH: loops (the default: the gaps filled as loops), none (only drawn), front (the advancing
+        // front), off (the earlier bridges, close-road strips, end windows and hole fills).
+        var stitchMode = Environment.GetEnvironmentVariable("TMSPLINE_STITCH") is { Length: > 0 } sm ? sm : "loops";
+        var stitch = grid && stitchMode != "off";
         const int Across = 16;
         var ribbons = new List<(List<Vector3[]> Cross, List<float> Along)>();
         // Each node's side of the driving surface: the way it faces (into the room).
@@ -295,6 +298,18 @@ public static class SeamZipper
                     }
                 }
             return true;
+        }
+        var footVertex = new Dictionary<(int, int, int), int>();
+        int FootVertex(int rb, int k, int side)
+        {
+            if (!footVertex.TryGetValue((rb, k, side), out var id))
+            {
+                id = mesh.Positions.Count;
+                mesh.Positions.Add(side < 0 ? ribbonFeet[rb][k].Left : ribbonFeet[rb][k].Right);
+                mesh.Pinned.Add(false);
+                footVertex[(rb, k, side)] = id;
+            }
+            return id;
         }
         var breaks = 0;
         // Debug: the rim edges the strips fail at (a break, or an end unjoined), for the editor's mesh view.
@@ -793,11 +808,12 @@ public static class SeamZipper
         // filled as one polygon, unless the fill would pass through a road's room (a tunnel's mouth stays open).
         var loopFills = 0;
         // (With the front only, TMSPLINE_STITCH=none: the loops drawn, not filled.)
-        var drawLoops = stitch && Environment.GetEnvironmentVariable("TMSPLINE_STITCH") == "none";
+        var drawLoops = stitch && stitchMode == "none";
+        var fillLoops = stitch && stitchMode == "loops";
         var loopOutline = new List<float>();
-        if (grid && (!stitch || drawLoops) && Environment.GetEnvironmentVariable("TMSPLINE_HOLES") != "off")
+        if (grid && (!stitch || drawLoops || fillLoops) && Environment.GetEnvironmentVariable("TMSPLINE_HOLES") != "off")
         {
-            var MaxHole = drawLoops ? 150f : 80f;
+            var MaxHole = drawLoops || fillLoops ? 150f : 80f;
             var roadNode = nodeVertex.ToDictionary(kv => kv.Value, kv => (Ribbon: kv.Key.Item1, K: kv.Key.Item2, J: kv.Key.Item3));
             var tried = new HashSet<(int, int)>();
             for (var pass = 0; pass < 200; pass++)
@@ -938,6 +954,26 @@ public static class SeamZipper
                         if (Near(PosOf(a))) Console.WriteLine($"  gap loop of {cycle.Count} corners ({first + dist[a]:0} m round) at {PosOf(a)}");
                         continue;
                     }
+                    // The road's outline round its edges: between an edge and its neighbour under the road, the edge's foot.
+                    {
+                        var withFeet = new List<int>();
+                        for (var i = 0; i < cycle.Count; i++)
+                        {
+                            withFeet.Add(cycle[i]);
+                            if (GridOf(cycle[i]) is { } g0 && GridOf(cycle[(i + 1) % cycle.Count]) is { } g1 && g0.Ribbon == g1.Ribbon && g0.K == g1.K
+                                && (Math.Min(g0.J, g1.J) == 0 && Math.Max(g0.J, g1.J) == 1 || Math.Min(g0.J, g1.J) == Across - 1 && Math.Max(g0.J, g1.J) == Across))
+                                withFeet.Add(FootVertex(g0.Ribbon, g0.K, g0.J + g1.J < Across ? -1 : 1));
+                        }
+                        cycle = withFeet;
+                    }
+                    void DrawLoop()
+                    {
+                        for (var i = 0; i < cycle.Count; i++)
+                        {
+                            Vector3 p0 = PosOf(cycle[i]), p1 = PosOf(cycle[(i + 1) % cycle.Count]);
+                            loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, 0]);
+                        }
+                    }
                     var polygon = cycle.Select(PosOf).ToList();
                     // Ear clipping in the loop's best-fit plane (Newell's normal).
                     var normal = Vector3.Zero;
@@ -946,7 +982,7 @@ public static class SeamZipper
                         Vector3 u = polygon[i], v = polygon[(i + 1) % polygon.Count];
                         normal += new Vector3((u.Y - v.Y) * (u.Z + v.Z), (u.Z - v.Z) * (u.X + v.X), (u.X - v.X) * (u.Y + v.Y));
                     }
-                    if (normal.LengthSquared() < 1e-8f) continue;
+                    if (normal.LengthSquared() < 1e-8f) { DrawLoop(); continue; }
                     normal = Vector3.Normalize(normal);
                     var axisU = Vector3.Normalize(Vector3.Cross(MathF.Abs(normal.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX, normal));
                     var axisV = Vector3.Cross(normal, axisU);
@@ -1029,6 +1065,7 @@ public static class SeamZipper
                         if (apex < 0)
                         {
                             if (Near(PosOf(a)) && cycle.Count > 6) Console.WriteLine($"  hole of {cycle.Count} corners at {PosOf(a)} not filled: no triangulation off the roads (ears in a room {inRoom}, on a deck {onDeck})");
+                            DrawLoop();
                             continue;
                         }
                         if (apex == n) { cycle.Add(int.MinValue); polygon.Add(middle); }
@@ -1036,7 +1073,7 @@ public static class SeamZipper
                             if (i != apex && (i + 1) % n != apex) triangles.Add((i, (i + 1) % n, apex));
                     }
                     // Not through a road's room.
-                    if (triangles.Any(tr => room((polygon[tr.Item1] + polygon[tr.Item2] + polygon[tr.Item3]) / 3) < -1)) continue;
+                    if (triangles.Any(tr => room((polygon[tr.Item1] + polygon[tr.Item2] + polygon[tr.Item3]) / 3) < -1)) { DrawLoop(); continue; }
                     var centreId = -1;
                     int CentreVertex(Vector3 q)
                     {
@@ -1087,7 +1124,7 @@ public static class SeamZipper
         // well shaped). A triangle only where it enters no road's room and crosses no deck, intersects none there is,
         // does not fold back over the triangle it grows from, has no edge longer than the reach nor a sliver's angle;
         // between road vertices only where the land would be. Until none is left that may be made.
-        if (stitch)
+        if (stitch && stitchMode == "front")
         {
             var reachStitch = 2.5f * gap;
             var used = new HashSet<(int, int)>();
@@ -1381,7 +1418,7 @@ public static class SeamZipper
         }
         if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {ribbons.Count} roads, {Across} across; {breaks} breaks between runs");
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
-        LastOpen = drawLoops ? loopOutline.ToArray() : stitch ? gapOutline.ToArray() : failedEdges.ToArray();
+        LastOpen = drawLoops || fillLoops ? loopOutline.ToArray() : stitch ? gapOutline.ToArray() : failedEdges.ToArray();
         return made;
     }
 
