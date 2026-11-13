@@ -14,7 +14,7 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class SeamZipper
 {
-    /// <summary>Debug: the last build's front edges left open (x, y, z, x, y, z, 1 for a road piece), for the editor's mesh view.</summary>
+    /// <summary>Debug: the last build's rim edges the strips failed at (x, y, z, x, y, z, 0), for the editor's mesh view.</summary>
     public static float[] LastOpen { get; private set; } = [];
 
     private sealed class Rail
@@ -292,6 +292,9 @@ public static class SeamZipper
             return true;
         }
         var breaks = 0;
+        // Debug: the rim edges the strips fail at (a break, or an end unjoined), for the editor's mesh view.
+        var failedEdges = new List<float>();
+        void Failed(int a, int b) { Vector3 p = mesh.Positions[a], q = mesh.Positions[b]; failedEdges.AddRange([p.X, p.Y, p.Z, q.X, q.Y, q.Z, 0]); }
         // Switches from one road to another along a rim (bridged): from one node to the other.
         var bridges = new List<((int Ribbon, int K, int J) From, (int Ribbon, int K, int J) To)>();
         int snaps = 0, targets = 0;
@@ -479,7 +482,12 @@ public static class SeamZipper
             for (var i = 0; grid && i < n; i++)
             {
                 var j = (i + 1) % n;
-                if (target[i] < 0 || target[j] < 0) continue;
+                if (target[i] < 0 || target[j] < 0)
+                {
+                    // (Debug: a rim edge the strip fails at, near a road: an end of it unjoined.)
+                    if (surface(mesh.Positions[loop[i]]).Distance < 2.5f * gap) Failed(loop[i], loop[j]);
+                    continue;
+                }
                 var (ri, ki, ji) = node[i];
                 var (rj, kj, jj) = node[j];
                 // A break: from one road to another, or far along it (a run ends there). Bridged, where the piece of
@@ -513,6 +521,7 @@ public static class SeamZipper
                         continue;
                     }
                     breaks++;
+                    Failed(loop[i], loop[j]);
                     if (Near(mesh.Positions[loop[i]])) Console.WriteLine($"  break between rim {mesh.Positions[loop[i]]} (road {ri} ring {ki}) and {mesh.Positions[loop[j]]} (road {rj} ring {kj})");
                     continue;
                 }
@@ -1253,7 +1262,9 @@ public static class SeamZipper
             }
             foreach (var edge in front.ToList()) Propose(edge);
             var stitched = 0;
-            while (queue.TryDequeue(out var cand, out _) && stitched < 20000)
+            // (TMSPLINE_STITCH=none: the front only, nothing made: what is open, drawn in the editor.)
+            var onlyFront = Environment.GetEnvironmentVariable("TMSPLINE_STITCH") == "none";
+            while (!onlyFront && queue.TryDequeue(out var cand, out _) && stitched < 20000)
             {
                 var (u, v, c) = cand;
                 if (!front.Contains((u, v))) continue;
@@ -1276,7 +1287,7 @@ public static class SeamZipper
                 }
             }
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  front: {stitched} triangles, {front.Count} front edges left open");
-            LastOpen = front.SelectMany(e => new[] { P(e.Item1).X, P(e.Item1).Y, P(e.Item1).Z, P(e.Item2).X, P(e.Item2).Y, P(e.Item2).Z, Piece(e.Item1, e.Item2) ? 1f : 0f }).ToArray();
+
             if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
                 foreach (var (a, b) in front.Where(e => Near(P(e.Item1))).Take(30))
                     Console.WriteLine($"    open: {P(a)} to {P(b)}{(Piece(a, b) ? " (road)" : "")}");
@@ -1318,6 +1329,7 @@ public static class SeamZipper
         }
         if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {ribbons.Count} roads, {Across} across; {breaks} breaks between runs");
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
+        LastOpen = failedEdges.ToArray();
         return made;
     }
 

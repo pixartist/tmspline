@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { buildPreview, buildTerrain, dabTerrain, type ObjectPlacement, type PreviewMesh, type PreviewQuality, type TerrainChunk, type TerrainMesh } from "./core";
 import { BlockLayer, blockMatrix, blockSize, freeRotation, GROUND_ADAPTER_FLAG, occupiedCells, pillarColumns, SHADOW_Y, VanillaLibrary } from "./vanilla";
 import { generateScenery, landPieces, roadColumns, roadFootprint, type SceneryLandOptions } from "./scenery";
@@ -230,8 +233,9 @@ export class Editor {
   }
 
   /** Seam debug: the dev server's seam front left open (red), with the mesh debug view. */
-  private seamDebug: THREE.LineSegments | null = null;
-  private readonly seamDebugMaterial = new THREE.LineBasicMaterial({ color: 0xff2020, depthTest: false });
+  private seamDebug: LineSegments2 | null = null;
+  /** 2 px wide (WebGL's own lines are always 1 px). */
+  private readonly seamDebugMaterial = new LineMaterial({ color: 0xff2020, linewidth: 2, depthTest: false });
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -253,9 +257,10 @@ export class Editor {
       const points: number[] = [];
       for (let i = 0; i + 6 < data.length + 1; i += 7) points.push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
       if (this.seamDebug) { this.scene.remove(this.seamDebug); this.seamDebug.geometry.dispose(); }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-      this.seamDebug = new THREE.LineSegments(geo, this.seamDebugMaterial);
+      const geo = new LineSegmentsGeometry();
+      geo.setPositions(points);
+      this.seamDebugMaterial.resolution.set(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+      this.seamDebug = new LineSegments2(geo, this.seamDebugMaterial);
       this.seamDebug.renderOrder = 999;
       this.seamDebug.raycast = () => {};
       this.scene.add(this.seamDebug);
