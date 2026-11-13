@@ -20,6 +20,17 @@ static class SeamLoops
         VoxelTerrain.OpenSeam = true;
         var mesh = VoxelTerrain.Build(grid, map);
         Console.WriteLine($"{Path.GetFileName(mapFile)}: cells {VoxelTerrain.Voxel} m, {mesh.Indices.Count / 3} triangles with the enclosed land left out");
+        // How thin the triangles are: how many have a smallest angle under 10 and under 20 degrees.
+        int thin10 = 0, thin20 = 0;
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+        {
+            Vector3 p0 = mesh.Positions[mesh.Indices[t]], p1 = mesh.Positions[mesh.Indices[t + 1]], p2 = mesh.Positions[mesh.Indices[t + 2]];
+            static float Angle(Vector3 p, Vector3 q, Vector3 r) { Vector3 u = q - p, v = r - p; var d = u.Length() * v.Length(); return d < 1e-12f ? 0 : MathF.Acos(Math.Clamp(Vector3.Dot(u, v) / d, -1, 1)) * 180 / MathF.PI; }
+            var min = MathF.Min(Angle(p0, p1, p2), MathF.Min(Angle(p1, p2, p0), Angle(p2, p0, p1)));
+            if (min < 10) thin10++;
+            if (min < 20) thin20++;
+        }
+        Console.WriteLine($"thin triangles: {thin10} with an angle under 10 degrees, {thin20} under 20");
 
         // The road edges: per track and side, points every ring (world space) with their distance along the track.
         var rails = new List<Rail>();

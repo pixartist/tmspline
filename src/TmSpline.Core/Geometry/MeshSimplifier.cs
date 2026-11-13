@@ -16,6 +16,8 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class MeshSimplifier
 {
+    /// <summary>A merge is refused where a triangle round it would be thinner than this (twice its area over its longest side squared: 0.87 equilateral) (TMSPLINE_SQUASH).</summary>
+    public static float Squash { get; set; } = float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_SQUASH"), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0.1f;
     /// <param name="targetTriangles">Stop at this many triangles.</param>
     /// <param name="maxError">Stop when the next merge would move the surface further than this, metres (root of the quadric error).</param>
     /// <param name="maxEdge">The longest an edge may become at a place, metres (null: no limit).</param>
@@ -127,7 +129,7 @@ public static class MeshSimplifier
                         var la = after.Length();
                         // Squashed: thinner than a tenth of its longest side's height for an equilateral triangle.
                         var longestSide = MathF.Max((q1 - q0).LengthSquared(), MathF.Max((q2 - q1).LengthSquared(), (q0 - q2).LengthSquared()));
-                        if (la < 0.1f * longestSide || Vector3.Dot(before, after) < 0.25f * before.Length() * la) { ok = false; break; }
+                        if (la < Squash * longestSide || Vector3.Dot(before, after) < 0.25f * before.Length() * la) { ok = false; break; }
                     }
             if (!ok) continue;
 
@@ -170,6 +172,79 @@ public static class MeshSimplifier
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Thin triangles made fatter by flipping edges (as a Delaunay triangulation would have them): the edge two
+    /// triangles share is swapped for the other diagonal of the quad they make, where that raises the smaller of the
+    /// two triangles' smallest angles, the two lie nearly in one plane (so the land's shape does not change) and the quad
+    /// is convex there. Vertices do not move and the open borders stay as they are.
+    /// </summary>
+    /// <param name="flatDegrees">The most the two triangles may be bent against each other, degrees.</param>
+    public static void ImproveByFlips(AdaptiveMesh mesh, float flatDegrees = 12, int passes = 6)
+    {
+        var pos = mesh.Positions;
+        var faces = new List<int[]>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) faces.Add([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
+        var flat = MathF.Cos(flatDegrees * MathF.PI / 180);
+        Vector3 Normal(int[] f) => Vector3.Cross(pos[f[1]] - pos[f[0]], pos[f[2]] - pos[f[0]]);
+        float MinAngle(int a, int b, int c)
+        {
+            float Angle(Vector3 p, Vector3 q, Vector3 r)
+            {
+                Vector3 u = q - p, v = r - p;
+                var d = u.Length() * v.Length();
+                return d < 1e-12f ? 0 : MathF.Acos(Math.Clamp(Vector3.Dot(u, v) / d, -1, 1));
+            }
+            return MathF.Min(Angle(pos[a], pos[b], pos[c]), MathF.Min(Angle(pos[b], pos[c], pos[a]), Angle(pos[c], pos[a], pos[b])));
+        }
+        long Key(int a, int b) => a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+        for (var pass = 0; pass < passes; pass++)
+        {
+            // Each edge's triangles (the edges of exactly two can flip).
+            var edges = new Dictionary<long, List<int>>();
+            for (var f = 0; f < faces.Count; f++)
+                for (var k = 0; k < 3; k++)
+                {
+                    var key = Key(faces[f][k], faces[f][(k + 1) % 3]);
+                    if (!edges.TryGetValue(key, out var list)) edges[key] = list = [];
+                    list.Add(f);
+                }
+            var touched = new HashSet<int>();
+            var flips = 0;
+            foreach (var (key, list) in edges)
+            {
+                if (list.Count != 2 || touched.Contains(list[0]) || touched.Contains(list[1])) continue;
+                int[] f1 = faces[list[0]], f2 = faces[list[1]];
+                int a = (int)(key >> 32), b = (int)(key & 0xffffffff);
+                // Wound so that f1 runs a to b, f2 b to a; c and d their third corners.
+                var i1 = Array.IndexOf(f1, a);
+                if (f1[(i1 + 1) % 3] != b) (a, b) = (b, a);
+                i1 = Array.IndexOf(f1, a);
+                if (f1[(i1 + 1) % 3] != b) continue;
+                var c = f1[(i1 + 2) % 3];
+                var i2 = Array.IndexOf(f2, b);
+                if (i2 < 0 || f2[(i2 + 1) % 3] != a) continue;
+                var d = f2[(i2 + 2) % 3];
+                if (c == d || edges.ContainsKey(Key(c, d))) continue;
+                Vector3 n1 = Normal(f1), n2 = Normal(f2);
+                if (Vector3.Dot(n1, n2) < flat * n1.Length() * n2.Length()) continue;
+                int[] g1 = [a, d, c], g2 = [d, b, c];
+                Vector3 m1 = Normal(g1), m2 = Normal(g2), mean = n1 + n2;
+                if (Vector3.Dot(m1, mean) <= 0 || Vector3.Dot(m2, mean) <= 0) continue;
+                var before = MathF.Min(MinAngle(a, b, c), MinAngle(b, a, d));
+                var after = MathF.Min(MinAngle(a, d, c), MinAngle(d, b, c));
+                if (after < before + 0.02f) continue;
+                faces[list[0]] = g1;
+                faces[list[1]] = g2;
+                touched.Add(list[0]);
+                touched.Add(list[1]);
+                flips++;
+            }
+            if (flips == 0) break;
+        }
+        mesh.Indices.Clear();
+        foreach (var f in faces) mesh.Indices.AddRange(f);
     }
 
     /// <summary>A symmetric 4x4 quadric (the ten distinct entries), summing squared distances to planes.</summary>

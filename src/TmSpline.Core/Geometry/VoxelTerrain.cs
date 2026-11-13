@@ -682,12 +682,14 @@ public static class VoxelTerrain
             kept = MeshSimplifier.Simplify(kept, SimplifyTo, SimplifyError,
                 p => road(p).Edge < 3 * SeamGap ? SeamGap : float.MaxValue,
                 p => room(p) > 0.2f);
+            if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                 Console.WriteLine($"  simplified {before} triangles to {kept.Indices.Count / 3}");
         }
         if (OpenSeam)
         {
             kept = CutSeam(kept, SeamField);
+            if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
             DropIslands(kept);
         }
         return kept;
