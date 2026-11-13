@@ -77,6 +77,8 @@ public static class StitchedTerrain
         public Vector3 P, Right, Up, T;
         /// <summary>The section round the room, ring-local (right, up): rail L, deck L..R, rail R, arch R..L.</summary>
         public Vector2[] Poly = [];
+        /// <summary>The road's own surface across the section, untucked: left edge's contact (a curb's, or the bare edge), the surface, the right edge's (as Poly's first RailRight + 1 points).</summary>
+        public Vector2[] Contact = [];
         public Vector3[] W = [];
         /// <summary>The driving surface's normal at the deck points (W[1 + k]).</summary>
         public Vector3[] DeckNormal = [];
@@ -506,8 +508,13 @@ public static class StitchedTerrain
             nb = nb.LengthSquared() > 1e-4f ? Vector2.Normalize(nb) : Vector2.UnitY;
             var mid = deck.Aggregate((a, b) => a + b) / deck.Length;
             Vector2 TuckIn(Vector2 rail) { var d = mid - rail; return d.LengthSquared() > 1e-6f ? rail + Vector2.Normalize(d) * Tuck : rail; }
-            var railL = TuckIn(Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, -1))));
-            var railR = TuckIn(Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, 1))));
+            Vector2 contactL = Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, -1))), contactR = Loc(V(RoadMeshBuilder.EdgeContact(r, st.Seg, 1)));
+            var railL = TuckIn(contactL);
+            var railR = TuckIn(contactR);
+            st.Contact = new Vector2[RailRight + 1];
+            st.Contact[0] = contactL;
+            for (var k = 0; k <= DeckN; k++) st.Contact[1 + k] = deck[k] + (st.DeckNormal[k] == default ? Vector2.Zero : new Vector2(Vector3.Dot(st.DeckNormal[k], st.Right), Vector3.Dot(st.DeckNormal[k], st.Up))) * DeckTuck;
+            st.Contact[RailRight] = contactR;
             st.Chord = (railR - railL).Length();
             // A pipe's opening faces from its middle to its slot: the mean of its normals is no direction once the slot is
             // narrow (they cancel out, and it pointed down as often as up).
@@ -824,6 +831,7 @@ public static class StitchedTerrain
                         var near = float.MaxValue;
                         var at = Vector2.Zero;
                         var a = Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s);
+                        var contact = iv.A.Contact.Length > RailRight && iv.B.Contact.Length > RailRight;
                         for (var i = 1; i <= RailRight; i++)
                         {
                             var b = Vector2.Lerp(iv.A.Poly[i], iv.B.Poly[i], s);
@@ -832,7 +840,12 @@ public static class StitchedTerrain
                             var l2 = e.LengthSquared();
                             var h = l2 > 1e-12f ? Math.Clamp(Vector2.Dot(w, e) / l2, 0, 1) : 0;
                             var e2 = (w - e * h).LengthSquared();
-                            if (e2 < near) { near = e2; at = a + e * h; }
+                            if (e2 < near)
+                            {
+                                near = e2;
+                                // (The point on the road's own surface, untucked, at the same place along the section.)
+                                at = contact ? Vector2.Lerp(Vector2.Lerp(iv.A.Contact[i - 1], iv.B.Contact[i - 1], s), Vector2.Lerp(iv.A.Contact[i], iv.B.Contact[i], s), h) : a + e * h;
+                            }
                             a = b;
                         }
                         var dist = MathF.Sqrt(near + along * along);
@@ -840,7 +853,8 @@ public static class StitchedTerrain
                         {
                             best = dist;
                             point = P + R * at.X + U * at.Y;
-                            Vector2 l = Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s), r = Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s);
+                            Vector2 l = contact ? Vector2.Lerp(iv.A.Contact[0], iv.B.Contact[0], s) : Vector2.Lerp(iv.A.Poly[0], iv.B.Poly[0], s);
+                            Vector2 r = contact ? Vector2.Lerp(iv.A.Contact[RailRight], iv.B.Contact[RailRight], s) : Vector2.Lerp(iv.A.Poly[RailRight], iv.B.Poly[RailRight], s);
                             left = P + R * l.X + U * l.Y;
                             right = P + R * r.X + U * r.Y;
                         }
