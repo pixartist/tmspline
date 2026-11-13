@@ -163,6 +163,7 @@ public static class SeamZipper
                     if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: road surface {distance:0.0} m away at {nearest}, {(distance >= 1.5f * gap ? "too far" : "no line out of the rooms")}");
                     continue;
                 }
+                if (Near(p)) Console.WriteLine($"  rim vertex {p} (loop of {n}, #{i}) joined to {point}{(OnEdge(point) is { } oe ? $" on edge {oe.Edge} at {oe.At:0.0}" : " (not on an edge)")}");
                 targets++;
                 // On an edge: the road mesh's own edge vertex nearest it (the land's side of the seam has no vertices
                 // of its own along an edge, only the road's).
@@ -239,6 +240,25 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
+        // What is left open and small (a rim shorter than four gaps: no road's opening is) is filled, with a fan from
+        // its middle: the patterns the strips do not cover (where the land between a helix's turns meets a road's start).
+        var filled = 0;
+        foreach (var hole in RimLoops(mesh))
+        {
+            var perimeter = 0f;
+            for (var k = 0; k < hole.Count; k++) perimeter += Vector3.Distance(mesh.Positions[hole[k]], mesh.Positions[hole[(k + 1) % hole.Count]]);
+            if (hole.Any(v => Near(mesh.Positions[v])) && perimeter < 400) Console.WriteLine($"  open rim of {hole.Count} vertices, {perimeter:0} m round, through: {string.Join(" ", hole.Where((_, k) => k % Math.Max(1, hole.Count / 16) == 0).Select(v => $"({mesh.Positions[v].X:0},{mesh.Positions[v].Y:0},{mesh.Positions[v].Z:0})"))}");
+            if (perimeter >= 4 * gap) continue;
+            var middle = hole.Aggregate(Vector3.Zero, (sum, v) => sum + mesh.Positions[v]) / hole.Count;
+            var centre = mesh.Positions.Count;
+            mesh.Positions.Add(middle);
+            mesh.Pinned.Add(false);
+            for (var k = 0; k < hole.Count; k++) mesh.Indices.AddRange([hole[(k + 1) % hole.Count], hole[k], centre]);
+            made += hole.Count;
+            filled++;
+            if (Near(middle)) Console.WriteLine($"  hole of {hole.Count} rim vertices ({perimeter:0.0} m round) filled at {middle}");
+        }
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {filled} small holes filled");
         if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
         {
             // Orientation: an edge two triangles run the same way (one of them turned over), and edges of three or more.
