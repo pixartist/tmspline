@@ -110,6 +110,8 @@ public static class VoxelTerrain
 
     /// <summary>The land is cut back this far from a road's body (its edges, the back of its surface): the band the seam's strip will fill; metres (TMSPLINE_SEAM_GAP).</summary>
     public static float SeamGap { get; set; } = Setting("TMSPLINE_SEAM_GAP", 6);
+    /// <summary>Under a road (between its edges) the land is cut back only this far from it, metres (TMSPLINE_UNDER_GAP; off by default: land beside and under a road then both meet its edge, which the strips do not handle yet).</summary>
+    public static float UnderGap { get; set; } = Setting("TMSPLINE_UNDER_GAP", 99);
 
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
     public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
@@ -700,7 +702,22 @@ public static class VoxelTerrain
         {
             // The smooth field: how far from the road's surface (its edges included, past an open end its end), less
             // the gap, and inside a road's room how deep in it (negative); no jumps, so the cut's line is clean.
-            if (SeamSmooth) return MathF.Min(surface(p).Distance - SeamGap, room(p));
+            if (SeamSmooth)
+            {
+                // Under a road (between its edges, as seen across it) the gap narrows to UnderGap: nobody sees the seam
+                // there, and land under a road low over it (a loop's climb from the ground) stays right under it instead
+                // of going altogether. Full at the edges, the narrower one from a sixth of the width in (no jump in it).
+                var (distance, _, left, right) = surface(p);
+                var gapHere = SeamGap;
+                var lr = right - left;
+                if (UnderGap < SeamGap && lr.LengthSquared() > 1e-4f)
+                {
+                    var across = Vector3.Dot(p - left, lr) / lr.LengthSquared();
+                    var inside = Math.Clamp(MathF.Min(across, 1 - across) * 6, 0, 1);
+                    gapHere = SeamGap + (UnderGap - SeamGap) * inside;
+                }
+                return MathF.Min(distance - gapHere, room(p));
+            }
             return SeamRules(p);
         }
         float SeamRules(Vector3 p)
