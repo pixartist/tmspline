@@ -38,6 +38,8 @@ public static class VoxelTerrain
     private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
     private const float FloorCover = 2f;
+    /// <summary>Seam experiment: land between a road's edges up to this far over the line between them (under a road bent downwards) belongs to the road, metres.</summary>
+    private const float CrownMax = 4;
     /// <summary>Simplification experiment: the land simplified to this many triangles (TMSPLINE_SIMPLIFY; 0: not), and no further than this changes it, metres (TMSPLINE_SIMPLIFY_ERROR).</summary>
     /// <summary>Seam experiment: vertices close to the cut line are moved onto it (TMSPLINE_SEAM_SNAP=off: not).</summary>
     public static bool SeamSnap { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_SNAP") != "off";
@@ -666,10 +668,14 @@ public static class VoxelTerrain
         // and the back of its driving surface (under an open road, round a closed tube).
         float SeamField(Vector3 p)
         {
-            var (toEdge, _, across, beyond) = road(p);
+            var (toEdge, over, across, beyond) = road(p);
             var (toRoom, deck) = nearest(p);
             var body = across >= 1 ? toEdge : float.MaxValue;
             body = MathF.Min(body, beyond);
+            // Between the edges, outside the road's room: under the line between the edges, how far under it; over it
+            // (under a road bent downwards, whose middle stands over its edges) nothing, the road's own space. Land
+            // higher than that over the line (a tunnel's roof) does not count.
+            if (toEdge < 100 && across < 1 && toRoom > 0 && over < CrownMax) body = MathF.Min(body, MathF.Max(0, -over));
             if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
             return body - SeamGap;
         }
