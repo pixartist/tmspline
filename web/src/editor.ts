@@ -115,8 +115,8 @@ const OBJECT_BLOCKED = 0xff2020;
 const GATE_COLORS: Record<string, number> = {
   Start: 0x20d040, Checkpoint: 0x2080ff, Finish: 0xe02020, StartFinish: 0xf0c020,
   // Effect and car gates of our own (Surfaces.EffectGate in the core).
-  Turbo: 0xf0d020, Turbo2: 0xe03020, TurboRoulette: 0xf08020, ReactorBoost: 0xf0b030, ReactorBoostOriented: 0xf0b030,
-  ReactorBoost2: 0xe04030, ReactorBoost2Oriented: 0xe04030, SlowMotion: 0x40a0f0, NoSteering: 0xc050e0, NoBrakes: 0xe06090,
+  Turbo: 0xf0d020, Turbo2: 0xe03020, TurboRoulette: 0xf08020, ReactorBoost: 0xf0b030, ReactorBoostDown: 0xf0b030,
+  ReactorBoost2: 0xe04030, ReactorBoost2Down: 0xe04030, SlowMotion: 0x40a0f0, NoSteering: 0xc050e0, NoBrakes: 0xe06090,
   FreeWheeling: 0x808890, Cruise: 0x30c0c0, Fragile: 0xf07030, Reset: 0x40d060,
   CarStadium: 0xe0e0e0, CarSnow: 0xa0d8ff, CarRally: 0xc08040, CarDesert: 0xe0c060,
   NoGrip: 0x70b0e0, ForceAcceleration: 0x60e060, Bumper: 0xe0a0c0, Bumper2: 0xe060a0,
@@ -802,7 +802,8 @@ export class Editor {
         const p = placements[i];
         const up = new THREE.Vector3(...p.normal).normalize();
         const tangent = new THREE.Vector3(...p.tangent);
-        const forward = tangent.addScaledVector(up, -tangent.dot(up)).normalize();
+        // (A gate that faces backwards: the reactor boosts that press the car down.)
+        const forward = tangent.addScaledVector(up, -tangent.dot(up)).normalize().multiplyScalar(gate?.back ? -1 : 1);
         const right = new THREE.Vector3().crossVectors(up, forward);
         const turn = new THREE.Matrix4().makeBasis(right, up, forward);
         const angles = new THREE.Euler().setFromRotationMatrix(turn, "YXZ");

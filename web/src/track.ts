@@ -182,7 +182,7 @@ export const gateLook = (o: TrackObject): GateLook | undefined => (GATES[o.gate 
  * 0.7.0 those stood on the spline's points), then the effects and the cars (with the game's gate block where it has
  * one). Mirrors WaypointBuilder.RaceGate and GateObjects in the core.
  */
-export const GATES: Record<string, { block?: string; label: string; race?: true }> = {
+export const GATES: Record<string, { block?: string; label: string; race?: true; back?: true }> = {
   Start: { label: "Start", race: true },
   Checkpoint: { label: "Checkpoint", race: true },
   Finish: { label: "Finish", race: true },
@@ -190,10 +190,11 @@ export const GATES: Record<string, { block?: string; label: string; race?: true 
   Turbo: { block: "GateSpecialTurbo", label: "Turbo" },
   Turbo2: { block: "GateSpecialTurbo2", label: "Turbo (red)" },
   TurboRoulette: { block: "GateSpecialTurboRoulette", label: "Turbo roulette" },
-  ReactorBoost: { block: "GateSpecialBoost", label: "Reactor boost" },
-  ReactorBoost2: { block: "GateSpecialBoost2", label: "Reactor boost (red)" },
-  ReactorBoostOriented: { block: "GateSpecialBoostOriented", label: "Reactor boost, along the gate" },
-  ReactorBoost2Oriented: { block: "GateSpecialBoost2Oriented", label: "Reactor boost (red), along the gate" },
+  // Up and down, as in the game: the same directed boost, facing along the road (up) or against it (down).
+  ReactorBoost: { block: "GateSpecialBoostOriented", label: "Reactor boost up" },
+  ReactorBoostDown: { block: "GateSpecialBoostOriented", label: "Reactor boost down", back: true },
+  ReactorBoost2: { block: "GateSpecialBoost2Oriented", label: "Reactor boost up (red)" },
+  ReactorBoost2Down: { block: "GateSpecialBoost2Oriented", label: "Reactor boost down (red)", back: true },
   SlowMotion: { block: "GateSpecialSlowMotion", label: "Slow motion" },
   NoSteering: { block: "GateSpecialNoSteering", label: "No steering" },
   NoBrakes: { block: "GateSpecialNoBrake", label: "No brakes" },
@@ -803,6 +804,9 @@ function normalizeTrack(t: Track, label: string): Track {
   // (Gates from before they had three looks: `frame` was the game's flat gate, without it the ring.)
   for (const o of t.objects as (TrackObject & { frame?: boolean })[])
     if (o.kind === "Gate" && !o.look && "frame" in o) { if (o.frame) o.look = "flat"; delete o.frame; }
+  // (Reactor boost gates were "plain" or "along the gate" until 0.7.4: both lifted the car, as "up" does now.)
+  for (const o of t.objects)
+    if (o.kind === "Gate" && (o.gate === "ReactorBoostOriented" || o.gate === "ReactorBoost2Oriented")) o.gate = o.gate.replace("Oriented", "");
   // "Keep edges" was a per-track switch for a day: every point of such a track keeps its edges fully.
   const legacy = t as Track & { shapeAnchor?: string };
   const legacyAnchor = legacy.shapeAnchor === "Edges" ? 1 : 0;

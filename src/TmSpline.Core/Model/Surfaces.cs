@@ -101,7 +101,7 @@ public static class Surfaces
     public static readonly TmMaterial GateCurtain = new("GateCurtain", "GlassWaterWall", Color: "80C8FF", GamePath: @"Stadium\Media\Material\RaceTriggerFXCheckpoint");
 
     /// <summary>The frame of an effect or car gate of our own (GateObjects), in its effect's colour (the editor's GATE_COLORS mirrors them).</summary>
-    public static TmMaterial EffectGate(string gate) => new($"Gate_{gate}", "CustomConcrete", Color: gate switch
+    public static TmMaterial EffectGate(string gate) => new($"Gate_{gate}", "CustomConcrete", Color: Family(gate) switch
     {
         "Turbo" => "F0D020", "Turbo2" => "E03020", "TurboRoulette" => "F08020",
         "ReactorBoost" or "ReactorBoostOriented" => "F0B030", "ReactorBoost2" or "ReactorBoost2Oriented" => "E04030",
@@ -120,9 +120,13 @@ public static class Surfaces
     /// has no plane of its own for an effect (the cars, and the road effects without a gate of the game's), the
     /// checkpoints' plane.
     /// </summary>
+    /// <summary>A gate's effect without its direction: every reactor boost as ReactorBoost or ReactorBoost2.</summary>
+    private static string Family(string gate) =>
+        gate.StartsWith("ReactorBoost2", StringComparison.Ordinal) ? "ReactorBoost2" : gate.StartsWith("ReactorBoost", StringComparison.Ordinal) ? "ReactorBoost" : gate;
+
     public static TmMaterial EffectGatePlane(string gate)
     {
-        var folder = gate switch
+        var folder = Family(gate) switch
         {
             "Turbo2" or "TurboRoulette" or "SlowMotion" or "NoSteering" or "Cruise" or "Fragile" or "Reset" => gate,
             "ReactorBoost" or "ReactorBoostOriented" => "Boost", "ReactorBoost2" or "ReactorBoost2Oriented" => "Boost2",

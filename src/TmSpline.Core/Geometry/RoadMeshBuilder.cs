@@ -31,6 +31,11 @@ public sealed class MeshChunk
     /// </summary>
     public string? TriggerGameplay { get; init; }
     /// <summary>
+    /// For a gate of our own with a directed effect (the reactor boosts): which way the effect points, in the item's
+    /// own frame (the trigger surface's GameplayMainDir). Null: as the importer leaves it (the item's +Z).
+    /// </summary>
+    public Vector3? TriggerDirection { get; init; }
+    /// <summary>
     /// The mesh is exported with vertex colours of this grey (0 black to 1 white): the game's effect planes
     /// (TriggerFX materials) take their opacity from them, white fully there, and show nothing without (black).
     /// </summary>

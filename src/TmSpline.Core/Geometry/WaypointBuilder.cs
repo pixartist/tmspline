@@ -131,7 +131,14 @@ public static class WaypointBuilder
         var offset = settings.WorldSpace ? Vec3d.Zero : ring.Position - origin;
         var itemOrigin = origin + offset;
         segment = Math.Clamp(segment, 0, Math.Max(0, track.SegmentCount - 1));
-        var chunk = new MeshChunk { Name = name, ItemOffset = offset, Frame = frame, TriggerGameplay = GateObjects.Gameplay(gate) };
+        // A directed effect's direction, from the ring's frame into the item's.
+        Vector3? direction = null;
+        if (GateObjects.Direction(gate) is { } d)
+        {
+            var local = frame.ToLocal(ring.Right * d.Right + ring.Up * d.Up + ring.Tangent * d.Along);
+            direction = Vector3.Normalize(new Vector3((float)local.X, (float)local.Y, (float)local.Z));
+        }
+        var chunk = new MeshChunk { Name = name, ItemOffset = offset, Frame = frame, TriggerGameplay = GateObjects.Gameplay(gate), TriggerDirection = direction };
 
         var (minX, maxX, minY, maxY) = RoadMeshBuilder.SurfaceExtents(ring);
         var bottom = Math.Min(minY, 0) - settings.Thickness - 0.5;

@@ -39,7 +39,7 @@ public static class ItemExporter
             var item = FindImported(userDir, itemFolder, m.Name, output);
             UseGameMaterials(item.ItemGbxPath, m.AllMaterials, log);
             if (m.TriggerGameplay is { } gameplay)
-                MakeEffectGate(item.ItemGbxPath, Enum.Parse<GBX.NET.Engines.Plug.CPlugSurface.GameplayId>(gameplay), log);
+                MakeEffectGate(item.ItemGbxPath, Enum.Parse<GBX.NET.Engines.Plug.CPlugSurface.GameplayId>(gameplay), m.TriggerDirection, log);
             return item with
             {
                 Offset = m.ItemOffset,
@@ -65,7 +65,7 @@ public static class ItemExporter
     /// static object is cleared. (An effect written into a material, or a material put on a checkpoint's trigger,
     /// does nothing: the game reads that trigger only as a checkpoint.)
     /// </summary>
-    private static void MakeEffectGate(string itemPath, GBX.NET.Engines.Plug.CPlugSurface.GameplayId effect, Action<string>? log)
+    private static void MakeEffectGate(string itemPath, GBX.NET.Engines.Plug.CPlugSurface.GameplayId effect, System.Numerics.Vector3? direction, Action<string>? log)
     {
         var gbx = GBX.NET.Gbx.Parse<GBX.NET.Engines.GameData.CGameItemModel>(itemPath);
         var item = gbx.Node;
@@ -78,7 +78,11 @@ public static class ItemExporter
         var surface = trigger.Chunks.First(c => c.GetType().Name == "Chunk0900C003");
         surface.GetType().GetField("U04", any)!.SetValue(surface, new[] { (ushort)(physics | gameplay << 8) });
         if (trigger.Surf is GBX.NET.Engines.Plug.CPlugSurface.Mesh mesh && mesh.Triangles is { } triangles)
+        {
             mesh.Triangles = triangles.Select(t => new GBX.NET.Engines.Plug.CPlugSurface.Mesh.Triangle(t.Indices, physics, gameplay, 0)).ToArray();
+            // A directed effect's direction (the importer leaves the item's +Z).
+            if (direction is { } d) mesh.GameplayMainDir = new GBX.NET.Vec3(d.X, d.Y, d.Z);
+        }
 
         var special = new GBX.NET.Engines.Plug.NPlugTrigger_SSpecial { Version = 1, TriggerShape = trigger };
         GBX.NET.Engines.Plug.CPlugPrefab.EntRef Part(GBX.NET.Engines.MwFoundations.CMwNod node) => new() { Model = node, Rotation = new GBX.NET.Quat(0, 0, 0, 1), Position = default, U01 = "" };
@@ -88,7 +92,7 @@ public static class ItemExporter
 
         using (var file = File.Create(itemPath))
             gbx.Save(file);
-        log?.Invoke($"{Path.GetFileName(itemPath)}: made a {effect} gate");
+        log?.Invoke($"{Path.GetFileName(itemPath)}: made a {effect} gate{(direction is { } to ? $", pointing {to}" : "")}");
     }
 
     private static void UseGameMaterials(string itemPath, IEnumerable<TmMaterial> materials, Action<string>? log)

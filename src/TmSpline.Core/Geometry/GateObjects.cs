@@ -22,7 +22,13 @@ public static class GateObjects
     {
         ["Turbo"] = ("Turbo", "GateSpecialTurbo"), ["Turbo2"] = ("Turbo2", "GateSpecialTurbo2"),
         ["TurboRoulette"] = ("TurboRoulette", "GateSpecialTurboRoulette"),
-        ["ReactorBoost"] = ("ReactorBoost_Legacy", "GateSpecialBoost"), ["ReactorBoost2"] = ("ReactorBoost2_Legacy", "GateSpecialBoost2"),
+        // The reactor boosts: up and down, as in the game. Both are the game's directed boost: its direction along
+        // the road as the car drives lifts the car, any other presses it down (tried in game 2026-11-13 with the
+        // direction along the road: up; straight up, straight down and backwards: all down). So "down" is the same
+        // gate facing backwards, and a gate driven through the other way round does the opposite.
+        ["ReactorBoost"] = ("ReactorBoost_Oriented", "GateSpecialBoostOriented"), ["ReactorBoostDown"] = ("ReactorBoost_Oriented", "GateSpecialBoostOriented"),
+        ["ReactorBoost2"] = ("ReactorBoost2_Oriented", "GateSpecialBoost2Oriented"), ["ReactorBoost2Down"] = ("ReactorBoost2_Oriented", "GateSpecialBoost2Oriented"),
+        // (Names from 0.7.0 to 0.7.4, when the choice was "plain" or "along the gate": both lifted.)
         ["ReactorBoostOriented"] = ("ReactorBoost_Oriented", "GateSpecialBoostOriented"),
         ["ReactorBoost2Oriented"] = ("ReactorBoost2_Oriented", "GateSpecialBoost2Oriented"),
         ["SlowMotion"] = ("SlowMotion", "GateSpecialSlowMotion"), ["NoSteering"] = ("NoSteering", "GateSpecialNoSteering"),
@@ -36,6 +42,15 @@ public static class GateObjects
     };
 
     public static bool Known(string gate) => All.ContainsKey(gate);
+
+    /// <summary>Whether a gate faces backwards along the road (the reactor boosts that press the car down).</summary>
+    public static bool Backwards(string gate) => gate.EndsWith("Down", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Which way a gate's directed effect points, in the ring's frame (right, up, along the road), or null: left as
+    /// the importer has it (along the road).
+    /// </summary>
+    public static (double Right, double Up, double Along)? Direction(string gate) => Backwards(gate) ? (0, 0, -1) : null;
 
     /// <summary>The game's name for a gate's effect (a surface's gameplay id).</summary>
     public static string Gameplay(string gate) => All[gate].Gameplay;
@@ -106,7 +121,7 @@ public static class GateObjects
             if (look == GateLook.Flat)
             {
                 var (foot, frameUp, along) = FlatAt(ring);
-                var ahead = (along - frameUp * Vec3d.Dot(along, frameUp)).Normalized();
+                var ahead = (along - frameUp * Vec3d.Dot(along, frameUp)).Normalized() * (Backwards(o.Gate) ? -1 : 1);
                 var side = Vec3d.Cross(frameUp, ahead);
                 var angles = PillarBuilder.UprightAngles(ahead, frameUp);
                 yield return new VanillaBlock
@@ -117,7 +132,7 @@ public static class GateObjects
                 continue;
             }
             var (point, up) = TrackObjects.SurfacePoint(ring, 0);
-            var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized();
+            var forward = (ring.Tangent - up * Vec3d.Dot(ring.Tangent, up)).Normalized() * (Backwards(o.Gate) ? -1 : 1);
             var right = Vec3d.Cross(up, forward);
             var (yaw, pitch, roll) = PillarBuilder.UprightAngles(forward, up);
             yield return new VanillaBlock
