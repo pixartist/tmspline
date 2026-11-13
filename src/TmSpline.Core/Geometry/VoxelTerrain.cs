@@ -40,6 +40,37 @@ public static class VoxelTerrain
     private const float FloorCover = 2f;
     /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
     public static bool OpenSeam { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
+    /// <summary>
+    /// Seam experiment: pieces of land the cut left on their own (fewer than this many triangles, not joined to the
+    /// rest by a shared corner) are left out: bits of land the distance to the road's body did not quite reach, which
+    /// stood in the gap as islands.
+    /// </summary>
+    private const int SeamIsland = 64;
+
+    private static void DropIslands(AdaptiveMesh mesh)
+    {
+        var parent = Enumerable.Range(0, mesh.Positions.Count).ToArray();
+        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+        {
+            int a = Find(mesh.Indices[t]), b = Find(mesh.Indices[t + 1]), c = Find(mesh.Indices[t + 2]);
+            parent[b] = a;
+            parent[Find(c)] = a;
+        }
+        var size = new Dictionary<int, int>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+        {
+            var root = Find(mesh.Indices[t]);
+            size[root] = size.GetValueOrDefault(root) + 1;
+        }
+        var kept = new List<int>(mesh.Indices.Count);
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+            if (size[Find(mesh.Indices[t])] >= SeamIsland)
+                kept.AddRange([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
+        mesh.Indices.Clear();
+        mesh.Indices.AddRange(kept);
+    }
+
     /// <summary>The land is cut back this far from a road's body (its edges, the back of its surface): the band the seam's strip will fill; metres (TMSPLINE_SEAM_GAP).</summary>
     public static float SeamGap { get; set; } = Setting("TMSPLINE_SEAM_GAP", 6);
 
@@ -637,6 +668,7 @@ public static class VoxelTerrain
             }
             for (var k = 0; k < 3; k++) kept.Indices.Add(Kept(mesh.Indices[t + k]));
         }
+        if (seam is not null) DropIslands(kept);
         return kept;
 
         int Kept(int i)
