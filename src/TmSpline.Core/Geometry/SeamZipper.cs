@@ -162,18 +162,20 @@ public static class SeamZipper
                     if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: road surface {distance:0.0} m away at {nearest}, {(distance >= 1.5f * gap ? "too far" : "no line out of the rooms")}");
                     continue;
                 }
-                // On an edge: exactly on the road mesh's edge line.
-                var snapped = point;
+                targets++;
+                // On an edge: the road mesh's own edge vertex nearest it (the land's side of the seam has no vertices
+                // of its own along an edge, only the road's).
                 if (OnEdge(point) is { } edge)
                 {
-                    snapped = edge.Point;
+                    var vertex = Math.Clamp((int)MathF.Round(edge.At), 0, edges[edge.Edge].Count - 1);
                     snaps++;
-                    farthest = MathF.Max(farthest, Vector3.Distance(point, edge.Point));
-                    onEdge[i] = (edge.Edge, edge.At);
+                    farthest = MathF.Max(farthest, Vector3.Distance(point, edges[edge.Edge][vertex]));
+                    onEdge[i] = (edge.Edge, vertex);
+                    target[i] = RoadVertex(edge.Edge, vertex);
+                    continue;
                 }
-                targets++;
                 target[i] = mesh.Positions.Count;
-                mesh.Positions.Add(snapped);
+                mesh.Positions.Add(point);
                 mesh.Pinned.Add(false);
             }
             for (var i = 0; i < n; i++)
@@ -236,7 +238,7 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
-        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them onto an edge of the road's mesh (moved up to {farthest:0.00} m), {edges.Count} edges at {roadQuality}");
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
         return made;
     }
 
