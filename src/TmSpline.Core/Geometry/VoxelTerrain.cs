@@ -685,6 +685,30 @@ public static class VoxelTerrain
             if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                 Console.WriteLine($"  simplified {before} triangles to {kept.Indices.Count / 3}");
+            // Remeshing experiment (TMSPLINE_REMESH=on): the simplified land's triangles made even (MeshRemesher), its
+            // vertices put back onto the land's surface (the field's zero, down its slope).
+            if (Environment.GetEnvironmentVariable("TMSPLINE_REMESH") == "on")
+            {
+                Vector3 Project(Vector3 p)
+                {
+                    const float h = 0.2f;
+                    for (var step = 0; step < 3; step++)
+                    {
+                        var f = Field(p);
+                        if (MathF.Abs(f) < 0.02f) break;
+                        var g = new Vector3(Field(p + Vector3.UnitX * h) - Field(p - Vector3.UnitX * h), Field(p + Vector3.UnitY * h) - Field(p - Vector3.UnitY * h),
+                            Field(p + Vector3.UnitZ * h) - Field(p - Vector3.UnitZ * h)) / (2 * h);
+                        if (g.LengthSquared() < 0.01f) break;
+                        var move = g * (f / g.LengthSquared());
+                        if (move.Length() > 2) break;
+                        p -= move;
+                    }
+                    return p;
+                }
+                kept = MeshRemesher.Remesh(kept, Project);
+                if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
+                    Console.WriteLine($"  remeshed to {kept.Indices.Count / 3} triangles");
+            }
         }
         if (OpenSeam)
         {
