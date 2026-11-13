@@ -70,11 +70,16 @@ public static class SeamZipper
         }
         // Whether a place lies in a road's end: within the gap of its cross-section, across no wider than the road and
         // the gap, and no higher over it than the road is wide (its vault).
-        bool AtEnd(Vector3 p) => ends.Any(e =>
+        bool AtEnd(Vector3 p) => EndOf(p) is not null;
+        (Vector3 P, Vector3 Out, Vector3 Right, Vector3 Up, float Width)? EndOf(Vector3 p)
         {
-            var d = p - e.P;
-            return MathF.Abs(Vector3.Dot(d, e.Out)) < gap && MathF.Abs(Vector3.Dot(d, e.Right)) < e.Width / 2 + gap && MathF.Abs(Vector3.Dot(d, e.Up)) < e.Width;
-        });
+            foreach (var e in ends)
+            {
+                var d = p - e.P;
+                if (MathF.Abs(Vector3.Dot(d, e.Out)) < gap && MathF.Abs(Vector3.Dot(d, e.Right)) < e.Width / 2 + gap && Vector3.Dot(d, e.Up) > 0.5f && Vector3.Dot(d, e.Up) < e.Width) return e;
+            }
+            return null;
+        }
         // The road edges exactly as the road's mesh has them: each ring's edge contact (a curb's, or the bare edge),
         // straight between rings.
         var edges = new List<List<Vector3>>();
@@ -142,6 +147,20 @@ public static class SeamZipper
         var farthest = 0f;
         var made = 0;
         SplitLongRims(mesh, gap);
+        // Each edge's triangle's third corner (as the triangle winds the edge): a rim edge's land lies towards it.
+        var third = new Dictionary<(int, int), int>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+            for (var k = 0; k < 3; k++)
+                third[(mesh.Indices[t + k], mesh.Indices[t + (k + 1) % 3])] = mesh.Indices[t + (k + 2) % 3];
+        // Away from the land across a rim edge, along the land's surface.
+        Vector3 Outward(int a, int b)
+        {
+            if (!third.TryGetValue((a, b), out var c)) return Vector3.Zero;
+            Vector3 pa = mesh.Positions[a], pb = mesh.Positions[b], e = pb - pa;
+            var o = (pa + pb) / 2 - mesh.Positions[c];
+            o -= e * (Vector3.Dot(o, e) / MathF.Max(e.LengthSquared(), 1e-9f));
+            return o.LengthSquared() > 1e-9f ? Vector3.Normalize(o) : Vector3.Zero;
+        }
         foreach (var loop in RimLoops(mesh))
         {
             var n = loop.Count;
@@ -152,12 +171,40 @@ public static class SeamZipper
                 target[i] = -1;
                 var p = mesh.Positions[loop[i]];
                 var (distance, nearest, left, right) = surface(p);
-                // The nearest point on the road if the line to it stays out of the rooms, else the nearer of that
-                // section's edges that it reaches (land between a helix's turns, over the lower one's deck: its edge).
+                // Where the land would go on past its rim: away from it along its surface. The road points it may
+                // join: the nearest road's (its nearest point, that section's edges) and those of the road nearest a
+                // step out that way (the land under a helix's upper turn, just over the lower one: the lower one).
+                var outward = Outward(loop[(i - 1 + n) % n], loop[i]) + Outward(loop[i], loop[(i + 1) % n]);
+                outward = outward.LengthSquared() > 1e-9f ? Vector3.Normalize(outward) : Vector3.Zero;
+                var (_, outNearest, outLeft, outRight) = surface(p + outward * gap);
+                var list = new List<Vector3> { nearest, left, right, outNearest, outLeft, outRight };
+                // And staying on the road the previous rim vertex joined: that point, and the road's points halfway
+                // to it (round the tip of the land between a helix's turns, back to the lower one's start, not up
+                // to the upper turn and back down, which left the lower one's corner open).
+                Vector3? previous = i > 0 && target[i - 1] >= 0 ? mesh.Positions[target[i - 1]] : null;
+                if (previous is { } prev)
+                {
+                    var (_, halfNearest, halfLeft, halfRight) = surface((p + prev) / 2);
+                    list.AddRange([prev, halfNearest, halfLeft, halfRight]);
+                }
+                // In a road end's window (over its deck's end): only points at that deck's level (not another road
+                // over it); none, and the window is closed with a fan below.
+                var end = EndOf(p);
+                var candidates = list.Where(c => Vector3.Distance(p, c) < 2.5f * gap)
+                    .Where(c => end is not { } e || MathF.Abs(Vector3.Dot(c - e.P, e.Up)) < 2)
+                    .OrderBy(c => previous is { } prev2 && Vector3.Distance(c, prev2) < 2 * gap ? 0 : 1)
+                    .ThenBy(c => Vector3.DistanceSquared(p, c)).ToList();
+                // The first one out from the land (not back through it) that it reaches without crossing a room;
+                // failing that, the first it reaches at all.
                 Vector3? reached = null;
-                if (distance < 1.5f * gap)
-                    foreach (var candidate in new[] { nearest, left, right }.OrderBy(c => Vector3.DistanceSquared(p, c)))
-                        if (Vector3.Distance(p, candidate) < 2.5f * gap && Clear(room, p, candidate)) { reached = candidate; break; }
+                if (distance < 2.5f * gap)
+                {
+                    foreach (var candidate in candidates)
+                        if (Vector3.Dot(candidate - p, outward) > 0 && Clear(room, p, candidate)) { reached = candidate; break; }
+                    if (reached is null)
+                        foreach (var candidate in candidates)
+                            if (Clear(room, p, candidate)) { reached = candidate; break; }
+                }
                 if (reached is not { } point)
                 {
                     if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: road surface {distance:0.0} m away at {nearest}, {(distance >= 1.5f * gap ? "too far" : "no line out of the rooms")}");
@@ -185,8 +232,21 @@ public static class SeamZipper
                 var j = (i + 1) % n;
                 if (target[i] < 0 || target[j] < 0) continue;
                 Vector3 pi = mesh.Positions[target[i]], pj = mesh.Positions[target[j]];
-                // (Not across from one road or side to another: the points far apart.)
-                if (Vector3.Distance(pi, pj) > 3 * gap)
+                // Far apart (from one road to another: where the land between a helix's turns goes from the lower one's
+                // edge to the upper one's underside): only if the piece of land it makes stays out of the rooms (not
+                // across a road), and not farther than six gaps.
+                bool Bridge()
+                {
+                    if (Vector3.Distance(pi, pj) > 6 * gap) return false;
+                    Vector3 ri = mesh.Positions[loop[i]], rj = mesh.Positions[loop[j]];
+                    foreach (var (u, v) in new[] { (0.33f, 0.33f), (0.5f, 0.25f), (0.25f, 0.5f), (0.5f, 0.5f) })
+                    {
+                        if (room(ri + (rj - ri) * u + (pi - ri) * v) < -3) return false;
+                        if (room(rj + (pi - rj) * u + (pj - rj) * v) < -3) return false;
+                    }
+                    return true;
+                }
+                if (Vector3.Distance(pi, pj) > 3 * gap && !Bridge())
                 {
                     if (Near(mesh.Positions[loop[i]])) Console.WriteLine($"  rim {mesh.Positions[loop[i]]} to {mesh.Positions[loop[j]]} not joined: their road points {Vector3.Distance(pi, pj):0.0} m apart ({pi}, {pj})");
                     continue;
