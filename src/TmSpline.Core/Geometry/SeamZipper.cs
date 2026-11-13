@@ -450,6 +450,18 @@ public static class SeamZipper
                     var stays = Vector3.Distance(ni, nj) <= 6 * gap;
                     foreach (var (u, v) in new[] { (0.33f, 0.33f), (0.5f, 0.25f), (0.25f, 0.5f), (0.5f, 0.5f) })
                         if (stays && (room(li + (lj - li) * u + (ni - li) * v) < -3 || room(lj + (ni - lj) * u + (nj - lj) * v) < -3)) stays = false;
+                    // Nor through a road's deck: no point inside its two triangles (away from their corners) on a road's
+                    // surface (at a loop's foot a bridge from the entry's edge to the exit's reached through the road).
+                    for (var a = 1; stays && a < 6; a++)
+                        for (var b = 1; stays && a + b < 6; b++)
+                        {
+                            float u = a / 6f, v = b / 6f;
+                            foreach (var q in new[] { li + (lj - li) * u + (ni - li) * v, lj + (ni - lj) * u + (nj - lj) * v })
+                            {
+                                var nearCorner = MathF.Min(MathF.Min(Vector3.Distance(q, ni), Vector3.Distance(q, nj)), MathF.Min(Vector3.Distance(q, li), Vector3.Distance(q, lj))) < 1.5f;
+                                if (!nearCorner && surface(q).Distance < 0.3f) { stays = false; break; }
+                            }
+                        }
                     if (stays)
                     {
                         mesh.Indices.AddRange([loop[j], loop[i], target[i]]);
@@ -470,12 +482,18 @@ public static class SeamZipper
                     for (var c = ji; c != jj;) { c += Math.Sign(jj - ji); chain.Add(Node(ri, ki, c)); }
                 else
                 {
+                    // Along the grid's lines only (across a ring, then on to the next): a diagonal between nodes on a
+                    // curved deck (a loop's climb) cut under its surface and came out through it.
                     var dir = Math.Sign(kj - ki);
-                    for (var k = ki + dir; ; k += dir)
+                    var at = ji;
+                    for (var k = ki; ; k += dir)
                     {
-                        var c = (int)MathF.Round(ji + (jj - ji) * (k - ki) / (float)(kj - ki));
-                        chain.Add(Node(ri, k, c));
+                        var want = (int)MathF.Round(ji + (jj - ji) * (k + dir - ki) / (float)(kj - ki));
+                        if (k == kj) want = jj;
+                        while (at != want) { at += Math.Sign(want - at); chain.Add(Node(ri, k, at)); }
                         if (k == kj) break;
+                        chain.Add(Node(ri, k + dir, at));
+                        if (k + dir == kj && at == jj) break;
                     }
                 }
                 mesh.Indices.AddRange([loop[j], loop[i], chain[0]]);
