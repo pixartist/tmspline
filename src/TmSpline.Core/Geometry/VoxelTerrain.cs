@@ -807,7 +807,7 @@ public static class VoxelTerrain
             // The zipper: the gap closed with strips from the land's rim to the road edges (TMSPLINE_ZIP=off: left open).
             if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "off")
             {
-                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap, roadQuality);
+                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap, roadQuality, p => p.Y <= LandAt(p.X, p.Z) + 2.5f);
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  zipped {strips} strip triangles");
             }
         }

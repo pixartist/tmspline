@@ -50,7 +50,7 @@ public static class SeamZipper
     /// vault, which nothing drives through; it is closed with a fan.
     /// </summary>
     /// <param name="roadQuality">The quality the roads are built at: the strips meet their edges' own vertices.</param>
-    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> surface, Func<Vector3, float> room, float gap, MeshQuality roadQuality = MeshQuality.Low)
+    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> surface, Func<Vector3, float> room, float gap, MeshQuality roadQuality = MeshQuality.Low, Func<Vector3, bool>? underLand = null)
     {
         if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") == "rail") return ZipEdges(mesh, map, p => surface(p).Distance, room, gap);
         // Diagnostics: what is left unjoined within a radius of a plan point (TMSPLINE_ZIP_NEAR="x;z;radius").
@@ -578,6 +578,140 @@ public static class SeamZipper
                 }
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
+        }
+        // Close roads (no land left between them, the gap cut it all away: a loop's entry and exit side by side): edges
+        // no strip uses, each node joined to the nearest free edge node of another road (or of the same road far along
+        // it) that it faces, within two gaps and a bit, where the line between them stays out of the rooms and off the
+        // decks and the land would be there (its middle not over the land); runs of such pairs zipped edge to edge.
+        var closeStrips = 0;
+        if (grid)
+        {
+            var reachClose = 2 * gap + 2;
+            // Nodes a close-roads strip has taken (each only once).
+            var taken = new HashSet<(int, int, int)>();
+            // Of those, the ones inside a strip (not its ends): no other strip may reach them.
+            var inside = new HashSet<(int, int, int)>();
+            bool Free(int rb, int k, int j) => !nodeVertex.ContainsKey((rb, k, j));
+            // An edge node's outward direction: from the other edge across its ring.
+            Vector3 OutOf(int rb, int k, int j)
+            {
+                var cross = ribbons[rb].Cross[k];
+                var o = j == 0 ? cross[0] - cross[Across] : cross[Across] - cross[0];
+                return o.LengthSquared() > 1e-6f ? Vector3.Normalize(o) : Vector3.Zero;
+            }
+            (int Ribbon, int K, int J)? Partner(int rb, int k, int j)
+            {
+                var p = ribbons[rb].Cross[k][j];
+                var outward = OutOf(rb, k, j);
+                (int, int, int)? best = null;
+                var bestDistance = reachClose;
+                var why = Environment.GetEnvironmentVariable("TMSPLINE_CLOSE_DIAG") == "on" && Near(p) ? new Dictionary<string, int>() : null;
+                void No(string reason) { if (why is not null) why[reason] = why.GetValueOrDefault(reason) + 1; }
+                var cells = (int)MathF.Ceiling((reachClose + 20) / EdgeBucket);
+                int bx = (int)MathF.Floor(p.X / EdgeBucket), bz = (int)MathF.Floor(p.Z / EdgeBucket);
+                for (var x = bx - cells; x <= bx + cells; x++)
+                    for (var z = bz - cells; z <= bz + cells; z++)
+                    {
+                        if (!ribbonBuckets.TryGetValue((x, z), out var list)) continue;
+                        foreach (var (rb2, k2) in list)
+                        {
+                            // (Not this road's own stretch here: far along it, or another road.)
+                            if (rb2 == rb && MathF.Abs(ribbons[rb].Along[k2] - ribbons[rb].Along[k]) < 4 * gap) continue;
+                            foreach (var j2 in new[] { 0, Across })
+                            {
+                                // (The partner may be a node a land strip uses, or a close-roads strip's end; not
+                                // one inside a close-roads strip.)
+                                if (inside.Contains((rb2, k2, j2))) continue;
+                                var q = ribbons[rb2].Cross[k2][j2];
+                                var d = Vector3.Distance(p, q);
+                                if (d >= bestDistance || d < 0.05f) { No("far"); continue; }
+                                // Facing each other: each outward towards the other.
+                                // (Within about 120 degrees: where one road's edge hangs over the other's, a little past
+                                // it, the line runs mostly down; the room and deck checks keep it off the roads.)
+                                var towards = Vector3.Normalize(q - p);
+                                if (Vector3.Dot(towards, outward) < -0.5f || Vector3.Dot(-towards, OutOf(rb2, k2, j2)) < -0.5f) { No("facing"); continue; }
+                                // (The land would be there: at least its lower end at the land, under a road coming down to it.)
+                                if (underLand is not null && !underLand(p.Y < q.Y ? p : q)) { No("over the land"); continue; }
+                                if (!Clear(room, p, q)) { No("room"); continue; }
+                                var offDeck = true;
+                                for (var t = 1; t < 8 && offDeck; t++)
+                                {
+                                    var m = Vector3.Lerp(p, q, t / 8f);
+                                    if (Vector3.Distance(m, p) > 1 && Vector3.Distance(m, q) > 1 && surface(m).Distance < 0.3f) offDeck = false;
+                                }
+                                if (!offDeck) { No("deck"); continue; }
+                                bestDistance = d;
+                                best = (rb2, k2, j2);
+                            }
+                        }
+                    }
+                if (why is not null && best is null) Console.WriteLine($"  no partner for road {rb} ring {k} edge {j}: {string.Join(", ", why.Select(kv => $"{kv.Key} {kv.Value}"))}");
+                return best;
+            }
+            for (var rb = 0; rb < ribbons.Count; rb++)
+                foreach (var j in new[] { 0, Across })
+                {
+                    var count = ribbons[rb].Cross.Count;
+                    var partner = new (int Ribbon, int K, int J)?[count];
+                    for (var k = 0; k < count; k++)
+                    {
+                        if (Free(rb, k, j)) partner[k] = Partner(rb, k, j);
+                        if (Environment.GetEnvironmentVariable("TMSPLINE_CLOSE_DIAG") == "on" && Near(ribbons[rb].Cross[k][j])) Console.WriteLine($"  edge node road {rb} ring {k} edge {j} at {ribbons[rb].Cross[k][j]}: {(Free(rb, k, j) ? (partner[k] is { } pp ? $"paired with road {pp.Ribbon} ring {pp.K} edge {pp.J}" : "free, no partner") : "used by a strip")}");
+                    }
+                    // Runs: consecutive nodes paired to the same edge, its rings going one way.
+                    for (var k = 0; k < count; k++)
+                        if (taken.Contains((rb, k, j)) || partner[k] is { } pk && inside.Contains(pk)) partner[k] = null;
+                    var k0 = 0;
+                    while (k0 < count)
+                    {
+                        if (partner[k0] is not { } first) { k0++; continue; }
+                        var k1 = k0;
+                        while (k1 + 1 < count && partner[k1 + 1] is { } nx && nx.Ribbon == first.Ribbon && nx.J == first.J
+                               && MathF.Abs(nx.K - partner[k1]!.Value.K) <= 3) k1++;
+                        if (k1 > k0 || partner[k0]!.Value.K != first.K)
+                        {
+                            // This edge's stretch and the other's, the other's in the order matching this one's.
+                            var a = Enumerable.Range(k0, k1 - k0 + 1).Select(k => Node(rb, k, j)).ToList();
+                            int b0 = partner[k0]!.Value.K, b1 = partner[k1]!.Value.K, dir = Math.Sign(b1 - b0);
+                            var b = new List<int>();
+                            for (var k = b0; ; k += dir == 0 ? 1 : dir)
+                            {
+                                b.Add(Node(first.Ribbon, k, first.J));
+                                taken.Add((first.Ribbon, k, first.J));
+                                if (k != b0 && k != b1) inside.Add((first.Ribbon, k, first.J));
+                                if (k == b1 || dir == 0) break;
+                            }
+                            for (var k = k0; k <= k1; k++)
+                            {
+                                taken.Add((rb, k, j));
+                                if (k != k0 && k != k1) inside.Add((rb, k, j));
+                            }
+                            // (Later runs of this edge: not into what this one took.)
+                            for (var k = k1 + 1; k < count; k++)
+                                if (partner[k] is { } pk && inside.Contains(pk)) partner[k] = null;
+                            // Zip, the shorter diagonal first; each triangle facing the way the roads' surfaces face.
+                            var up = ribbonNormals[rb][k0][j] + ribbonNormals[first.Ribbon][b0][first.J];
+                            void Add(int x, int y, int z)
+                            {
+                                Vector3 px = mesh.Positions[x], py = mesh.Positions[y], pz = mesh.Positions[z];
+                                if (Vector3.Dot(Vector3.Cross(py - px, pz - px), up) < 0) (y, z) = (z, y);
+                                mesh.Indices.AddRange([x, y, z]);
+                                closeStrips++;
+                                made++;
+                            }
+                            int ia = 0, ib = 0;
+                            while (ia < a.Count - 1 || ib < b.Count - 1)
+                            {
+                                bool stepA = ib == b.Count - 1 || (ia < a.Count - 1 && Vector3.DistanceSquared(mesh.Positions[a[ia + 1]], mesh.Positions[b[ib]]) <= Vector3.DistanceSquared(mesh.Positions[a[ia]], mesh.Positions[b[ib + 1]]));
+                                if (stepA) { Add(a[ia], a[ia + 1], b[ib]); ia++; }
+                                else { Add(a[ia], b[ib], b[ib + 1]); ib++; }
+                            }
+                            if (Near(mesh.Positions[a[0]])) Console.WriteLine($"  close roads: road {rb} rings {k0}..{k1} (edge {j}) to road {first.Ribbon} rings {b0}..{b1} (edge {first.J})");
+                        }
+                        k0 = k1 + 1;
+                    }
+                }
+            if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  close roads: {closeStrips} strip triangles between road edges");
         }
         // Two switches meeting at a node (one piece of land's ends at it, another's starts there), both from or to
         // the same ring of a road: the space between them (the window behind a road's start, up to another road over
