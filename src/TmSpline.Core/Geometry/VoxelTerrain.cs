@@ -612,7 +612,14 @@ public static class VoxelTerrain
             if (OpenSeam)
             {
                 var (toEdge, over, across) = road(mid);
-                if (toEdge < 100 && (across < 1 || toEdge < SeamGap) && over < SeamAbove && over > -SeamBelow) continue;
+                var (toRoom, deck) = nearest(mid);
+                // Under a road and round a closed tube's outside: land within SeamGap of the driving surface's back (the
+                // road's body). Over a tube its two edges meet on top: the land there is beside the edges, as at an open road.
+                var behind = deck != default && toRoom > -1 && toRoom < SeamGap;
+                // Beside the edges, at the road's height, and between them close under the surface.
+                var beside = toEdge < SeamGap && over < SeamAbove && over > -SeamGap;
+                var between = toEdge < 100 && across < 1 && over < SeamAbove && over > -SeamBelow;
+                if (behind || beside || between) continue;
             }
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             if (!KeepFloor && ua != default && ub != default && uc != default)
