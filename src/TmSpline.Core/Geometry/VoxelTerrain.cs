@@ -631,8 +631,9 @@ public static class VoxelTerrain
         var index = new Dictionary<int, int>();
         // Seam experiment (TMSPLINE_SEAM=open): the land is cut back from the roads along a continuous line, not
         // triangle by triangle: its triangles are cut where the seam field (how far from the road's body, less SeamGap)
-        // is zero and the part near the road left out. The body is the road's edges and the back of its driving surface
-        // (under an open road, round a closed tube); a distance has no hollows away from what it is measured to, so the
+        // is zero and the part near the road left out. The body is the road's edges (seen from outside them, across the
+        // road) and the back of its driving surface (under an open road, round a closed tube); a distance has no hollows
+        // away from what it is measured to, so the
         // cut is one clean rim along each road, and land over a road (a tunnel's roof) farther than SeamGap stays.
         float[]? seam = null;
         var crossings = new Dictionary<long, int>();
@@ -642,9 +643,12 @@ public static class VoxelTerrain
             Parallel.For(0, seam.Length, i =>
             {
                 var p = mesh.Positions[i];
-                var (toEdge, _, _) = road(p);
+                var (toEdge, _, across) = road(p);
                 var (toRoom, deck) = nearest(p);
-                var body = toEdge;
+                // From an edge only outwards: the half of the plane across the road beyond the edge (the owner's rule:
+                // never more than 90 degrees from the road's own outward direction). Under the road it is the distance
+                // to the back of its surface that counts.
+                var body = across >= 1 ? toEdge : float.MaxValue;
                 if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
                 seam[i] = body - SeamGap;
             });

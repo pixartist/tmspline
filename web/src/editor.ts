@@ -273,11 +273,18 @@ export class Editor {
         (rim.get(cell) ?? rim.set(cell, []).get(cell)!).push(p);
       }
     }
-    const near = (p: THREE.Vector3) => {
+    // Only outwards from the edge: within 90 degrees of the road's own outward direction there (from the other edge
+    // to this one), a half disc across the road; land straight under the road does not count.
+    const near = (p: THREE.Vector3, outward: THREE.Vector3 | null) => {
       const r = Math.ceil(SEAM_REACH / CELL), cx = Math.floor(p.x / CELL), cz = Math.floor(p.z / CELL);
+      const d = new THREE.Vector3();
       for (let x = cx - r; x <= cx + r; x++)
         for (let z = cz - r; z <= cz + r; z++)
-          for (const q of rim.get(`${x},${z}`) ?? []) if (q.distanceToSquared(p) < SEAM_REACH * SEAM_REACH) return true;
+          for (const q of rim.get(`${x},${z}`) ?? []) {
+            if (q.distanceToSquared(p) >= SEAM_REACH * SEAM_REACH) continue;
+            if (outward && d.subVectors(q, p).dot(outward) < 0) continue;
+            return true;
+          }
       return false;
     };
     const lines: number[] = [];
@@ -302,7 +309,10 @@ export class Editor {
         for (const slot of slots) {
           const p = sides.get(slot)![side]?.[1];
           if (!p) { previous = null; continue; }
-          const missing = !near(p);
+          // Outward: from the other edge to this one (none where they meet, on top of a closed tube).
+          const other = sides.get(slot)![side === "l" ? "r" : "l"]?.[1];
+          const outward = other && other.distanceTo(p) > 1 ? p.clone().sub(other).normalize() : null;
+          const missing = !near(p, outward);
           if (missing && previous) lines.push(previous.x, previous.y + 0.4, previous.z, p.x, p.y + 0.4, p.z);
           previous = missing ? p : null;
         }
