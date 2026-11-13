@@ -1873,12 +1873,21 @@ export class Editor {
     return Math.max(1, this.camera.getWorldDirection(new THREE.Vector3()).dot(point.clone().sub(this.camera.position)));
   }
 
-  /** Nearest road (of any track) or ground along a ray. */
+  /** The own terrain's chunks (when shown), each with a bounds tree for fast raycasts (built on first use). */
+  private terrainChunks(): THREE.Mesh[] {
+    if (!this.terrainMesh?.visible) return [];
+    const chunks = this.terrainMesh.children.filter((o): o is THREE.Mesh => (o as THREE.Mesh).isMesh);
+    for (const c of chunks) if (!c.geometry.boundsTree) c.geometry.computeBoundsTree({ indirect: true });
+    return chunks;
+  }
+
+  /** Nearest road (of any track), own terrain or ground along a ray. */
   private sceneHit(ray: THREE.Ray): { point: THREE.Vector3; distance: number } | null {
     const caster = new THREE.Raycaster(ray.origin, ray.direction, 0, 20000);
     caster.firstHitOnly = true;
     const roads = this.roadMeshes();
-    const hit = caster.intersectObjects([...roads, this.ground], false)[0];
+    const hit = caster.intersectObjects([...roads, ...this.terrainChunks(), this.ground], false)
+      .sort((a, b) => a.distance - b.distance)[0];
     const block = this.blockHit(ray);
     if (block && (!hit || block.distance < hit.distance)) return { point: block.point, distance: block.distance };
     return hit ? { point: hit.point, distance: hit.distance } : null;
@@ -2277,6 +2286,15 @@ export class Editor {
     // The left button orbits only with Alt held (Alt+Shift pans), so plain left drags can select and move things.
     // Runs before OrbitControls' listener (capture phase), which reads the button mapping on pointer down.
     this.orbit.mouseButtons.LEFT = e.altKey ? THREE.MOUSE.ROTATE : (-1 as THREE.MOUSE);
+    // A pan (right button, or Alt+Shift): the orbit center along the view to the depth of what is under the pointer,
+    // so that moves with the pointer (OrbitControls pans by the center's distance).
+    if (e.button === 2 || (e.button === 0 && e.altKey && e.shiftKey)) {
+      const hit = this.sceneHit(this.rayFrom(e).ray);
+      if (hit) {
+        const forward = this.camera.getWorldDirection(new THREE.Vector3());
+        this.setOrbitDepth(hit.point.clone().sub(this.camera.position).dot(forward));
+      }
+    }
     // Alt-drag over something (not Alt+Shift, which pans): turn round the point under the pointer, not the orbit
     // center (over the sky: as before).
     if (e.button === 0 && e.altKey && !e.shiftKey) {
