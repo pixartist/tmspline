@@ -151,6 +151,8 @@ public static class SeamZipper
         var grid = Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "project";
         const int Across = 16;
         var ribbons = new List<(List<Vector3[]> Cross, List<float> Along)>();
+        // Each node's side of the driving surface: the way it faces (into the room).
+        var ribbonNormals = new List<List<Vector3[]>>();
         foreach (var track in map.Tracks)
         {
             track.SyncSegments();
@@ -160,10 +162,18 @@ public static class SeamZipper
             static Vector3 W(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
             var cross = new List<Vector3[]>();
             var along = new List<float>();
+            var normals = new List<Vector3[]>();
             foreach (var r in rings)
             {
                 var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
                 var points = new Vector3[Across + 1];
+                var facing = new Vector3[Across + 1];
+                for (var j = 0; j <= Across; j++)
+                {
+                    var q = RoadMeshBuilder.SurfaceSample(r, (j / (double)Across - 0.5) * r.Width);
+                    facing[j] = Vector3.Normalize(W(r.Right * q.NX + r.Up * q.NY));
+                }
+                normals.Add(facing);
                 points[0] = W(RoadMeshBuilder.EdgeContact(r, segment, -1));
                 points[Across] = W(RoadMeshBuilder.EdgeContact(r, segment, 1));
                 for (var j = 1; j < Across; j++)
@@ -175,6 +185,7 @@ public static class SeamZipper
                 along.Add((float)r.Distance);
             }
             ribbons.Add((cross, along));
+            ribbonNormals.Add(normals);
         }
         var ribbonBuckets = new Dictionary<(int, int), List<(int Ribbon, int Ring)>>();
         for (var rb = 0; rb < ribbons.Count; rb++)
@@ -286,7 +297,10 @@ public static class SeamZipper
                     candidates.Add((h.Ribbon, k, Across));
                 }
                 Vector3 At((int Ribbon, int K, int J) c) => ribbons[c.Ribbon].Cross[c.K][c.J];
-                var reachable = candidates.Distinct().Where(c => Vector3.Distance(p, At(c)) < 2.5f * gap && Clear(room, p, At(c)))
+                // From the driving side (over the road) land meets an edge only, never the driving surface itself;
+                // a node across the road only from behind it (the underside).
+                bool Side((int Ribbon, int K, int J) c) => c.J == 0 || c.J == Across || Vector3.Dot(p - At(c), ribbonNormals[c.Ribbon][c.K][c.J]) < 0;
+                var reachable = candidates.Distinct().Where(c => Side(c) && Vector3.Distance(p, At(c)) < 2.5f * gap && Clear(room, p, At(c)))
                     .OrderBy(c => Vector3.DistanceSquared(p, At(c))).ToList();
                 // The nearest out from the land (not back through it); failing that, the nearest at all.
                 var chosen = reachable.Cast<(int, int, int)?>().FirstOrDefault(c => Vector3.Dot(At(c!.Value) - p, outward) > 0) ?? reachable.Cast<(int, int, int)?>().FirstOrDefault();
@@ -321,6 +335,7 @@ public static class SeamZipper
                     for (var jj = 0; jj <= Across; jj++)
                     {
                         var q = ribbons[rb].Cross[k][jj];
+                        if (jj != 0 && jj != Across && Vector3.Dot(p - q, ribbonNormals[rb][k][jj]) >= 0) continue;
                         var distance = Vector3.Distance(p, q);
                         if (distance < bestDistance && Clear(room, p, q)) { bestDistance = distance; better = (rb, k, jj); }
                     }
