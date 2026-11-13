@@ -874,7 +874,7 @@ public static class SeamZipper
                     // road then and had no filling off it.)
                     // (Along the underside too: a gap's outline may follow it, from where a strip under a road ends to
                     // where the road meets another.)
-                    if (dj != 0 && k != 0 && k != count - 1 && Math.Min(j2, Across - j2) >= Math.Min(j, Across - j)) continue;
+                    if (dj != 0 && k != 0 && k != count - 1 && (j * 2 < Across) != (j2 * 2 < Across)) continue;
                     // (Along a ring between rings only at the edges, the ends or underneath: grid lines all lie on the
                     // road; a grid line the land already meets is no hole's side.)
                     var other = Place((rb, k2, j2));
