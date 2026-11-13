@@ -109,7 +109,7 @@ public sealed partial class ExportService
         try
         {
             var (_, meshes) = MeshQualities.BuildExport(map, quality, 64);
-            if (map.Terrain is { } grid) meshes.AddRange(TerrainMeshBuilder.Build(grid, map));
+            if (map.Terrain is { } grid) meshes.AddRange(TerrainMeshBuilder.Build(grid, map, roadQuality: quality));
             var data = ObjWriter.Write(meshes, name);
             _logger.LogInformation("3D model of '{Name}' built: {Items} items, {Triangles} triangles, {Bytes:0.0} MB in {Seconds:0.0} s",
                 name, meshes.Count, meshes.Sum(m => m.Triangles.Count + m.NotCollidable.Sum(c => c.Triangles.Count)), data.Length / 1e6, watch.Elapsed.TotalSeconds);

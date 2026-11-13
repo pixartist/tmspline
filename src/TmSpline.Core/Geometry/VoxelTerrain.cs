@@ -198,7 +198,7 @@ public static class VoxelTerrain
 
     /// <param name="prepared">From <see cref="Prepare"/> for this land and these roads, or null.</param>
     /// <param name="region">Only this part of the land (plan: x0, z0, x1, z1), with Margin/2 round it for the normals; null: all.</param>
-    public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map, Roads? roads = null, (float X0, float Z0, float X1, float Z1)? region = null)
+    public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map, Roads? roads = null, (float X0, float Z0, float X1, float Z1)? region = null, MeshQuality roadQuality = MeshQuality.Low)
     {
         var (v, tolerance, near) = Cells(grid.Quality);
         // Coarser than High: every cell's point is moved onto the surface (as those of grazing cells are). The mean of
@@ -807,7 +807,7 @@ public static class VoxelTerrain
             // The zipper: the gap closed with strips from the land's rim to the road edges (TMSPLINE_ZIP=off: left open).
             if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "off")
             {
-                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap);
+                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap, roadQuality);
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  zipped {strips} strip triangles");
             }
         }

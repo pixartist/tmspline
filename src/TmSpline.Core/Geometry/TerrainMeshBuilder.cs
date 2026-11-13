@@ -50,7 +50,8 @@ public static class TerrainMeshBuilder
     /// <summary>The last stitched build's details (for the checker).</summary>
     public static StitchedTerrainResult? LastStitched { get; private set; }
 
-    public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain", VoxelTerrain.Roads? roads = null)
+    /// <param name="roadQuality">The quality the roads are built at alongside (the land meets their edges exactly; the editor shows them at Low).</param>
+    public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain", VoxelTerrain.Roads? roads = null, MeshQuality roadQuality = MeshQuality.Low)
     {
         if (grid.Columns < 2 || grid.Rows < 2) return [];
         AdaptiveMesh mesh;
@@ -58,7 +59,7 @@ public static class TerrainMeshBuilder
         if (Voxel)
         {
             LastStitched = null;
-            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap(), roads);
+            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap(), roads, roadQuality: roadQuality);
         }
         else if (Stitched)
         {

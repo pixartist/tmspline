@@ -49,7 +49,8 @@ public static class SeamZipper
     /// an opening. Except at an open road's end: there the land round the end leaves a window the shape of the road's
     /// vault, which nothing drives through; it is closed with a fan.
     /// </summary>
-    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> surface, Func<Vector3, float> room, float gap)
+    /// <param name="roadQuality">The quality the roads are built at: the strips meet their edges' own vertices.</param>
+    public static int Zip(AdaptiveMesh mesh, TrackMap map, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> surface, Func<Vector3, float> room, float gap, MeshQuality roadQuality = MeshQuality.Low)
     {
         if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") == "rail") return ZipEdges(mesh, map, p => surface(p).Distance, room, gap);
         // Diagnostics: what is left unjoined within a radius of a plan point (TMSPLINE_ZIP_NEAR="x;z;radius").
@@ -74,11 +75,77 @@ public static class SeamZipper
             var d = p - e.P;
             return MathF.Abs(Vector3.Dot(d, e.Out)) < gap && MathF.Abs(Vector3.Dot(d, e.Right)) < e.Width / 2 + gap && MathF.Abs(Vector3.Dot(d, e.Up)) < e.Width;
         });
+        // The road edges exactly as the road's mesh has them: each ring's edge contact (a curb's, or the bare edge),
+        // straight between rings.
+        var edges = new List<List<Vector3>>();
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            if (track.Segments.Count == 0) continue;
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(roadQuality));
+            if (rings.Count < 2) continue;
+            foreach (var side in new[] { -1, 1 })
+                edges.Add(rings.Select(r =>
+                {
+                    var w = RoadMeshBuilder.EdgeContact(r, track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)], side);
+                    return new Vector3((float)w.X, (float)w.Y, (float)w.Z);
+                }).ToList());
+        }
+        const float EdgeBucket = 8;
+        var edgeBuckets = new Dictionary<(int, int), List<(int Edge, int Index)>>();
+        for (var e = 0; e < edges.Count; e++)
+            for (var i = 0; i + 1 < edges[e].Count; i++)
+            {
+                // Each piece in the squares its ends and middle fall in.
+                foreach (var p in new[] { edges[e][i], (edges[e][i] + edges[e][i + 1]) / 2, edges[e][i + 1] })
+                {
+                    var key = ((int)MathF.Floor(p.X / EdgeBucket), (int)MathF.Floor(p.Z / EdgeBucket));
+                    if (!edgeBuckets.TryGetValue(key, out var list)) edgeBuckets[key] = list = [];
+                    if (list.Count == 0 || list[^1] != (e, i)) list.Add((e, i));
+                }
+            }
+        // A road point on an edge (within half a metre): onto the edge's own line; which edge, and where along it (its
+        // piece's index plus how far along that piece).
+        (int Edge, float At, Vector3 Point)? OnEdge(Vector3 p)
+        {
+            (int Edge, float At, Vector3 Point)? best = null;
+            var bestDistance = 0.5f;
+            int bx = (int)MathF.Floor(p.X / EdgeBucket), bz = (int)MathF.Floor(p.Z / EdgeBucket);
+            for (var x = bx - 1; x <= bx + 1; x++)
+                for (var z = bz - 1; z <= bz + 1; z++)
+                    if (edgeBuckets.TryGetValue((x, z), out var list))
+                        foreach (var (e, i) in list)
+                        {
+                            Vector3 a = edges[e][i], b = edges[e][i + 1];
+                            var d = b - a;
+                            var h = Math.Clamp(Vector3.Dot(p - a, d) / MathF.Max(d.LengthSquared(), 1e-9f), 0, 1);
+                            var q = a + d * h;
+                            var distance = Vector3.Distance(p, q);
+                            if (distance < bestDistance) { bestDistance = distance; best = (e, i + h, q); }
+                        }
+            return best;
+        }
+        // The edge's own vertices, as the mesh's, made when a strip first uses them.
+        var roadVertex = new Dictionary<(int, int), int>();
+        int RoadVertex(int e, int i)
+        {
+            if (!roadVertex.TryGetValue((e, i), out var id))
+            {
+                id = mesh.Positions.Count;
+                mesh.Positions.Add(edges[e][i]);
+                mesh.Pinned.Add(false);
+                roadVertex[(e, i)] = id;
+            }
+            return id;
+        }
+        int snaps = 0, targets = 0;
+        var farthest = 0f;
         var made = 0;
         foreach (var loop in RimLoops(mesh))
         {
             var n = loop.Count;
             var target = new int[n];
+            var onEdge = new (int Edge, float At)?[n];
             for (var i = 0; i < n; i++)
             {
                 target[i] = -1;
@@ -95,8 +162,18 @@ public static class SeamZipper
                     if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: road surface {distance:0.0} m away at {nearest}, {(distance >= 1.5f * gap ? "too far" : "no line out of the rooms")}");
                     continue;
                 }
+                // On an edge: exactly on the road mesh's edge line.
+                var snapped = point;
+                if (OnEdge(point) is { } edge)
+                {
+                    snapped = edge.Point;
+                    snaps++;
+                    farthest = MathF.Max(farthest, Vector3.Distance(point, edge.Point));
+                    onEdge[i] = (edge.Edge, edge.At);
+                }
+                targets++;
                 target[i] = mesh.Positions.Count;
-                mesh.Positions.Add(point);
+                mesh.Positions.Add(snapped);
                 mesh.Pinned.Add(false);
             }
             for (var i = 0; i < n; i++)
@@ -112,9 +189,19 @@ public static class SeamZipper
                 }
                 mesh.Indices.AddRange([loop[j], loop[i], target[i]]);
                 made++;
-                if (Vector3.DistanceSquared(pi, pj) > 1e-4f)
+                // The road side: from one road point to the next, through the edge's own vertices between them where
+                // both lie on the same edge (the strip then follows the road's edge exactly, not a chord across it).
+                var chain = new List<int> { target[i] };
+                if (onEdge[i] is { } ei && onEdge[j] is { } ej && ei.Edge == ej.Edge && MathF.Abs(ej.At - ei.At) < 16)
                 {
-                    mesh.Indices.AddRange([loop[j], target[i], target[j]]);
+                    if (ej.At > ei.At) for (var v = (int)MathF.Floor(ei.At) + 1; v <= (int)MathF.Ceiling(ej.At) - 1; v++) chain.Add(RoadVertex(ei.Edge, v));
+                    else for (var v = (int)MathF.Ceiling(ei.At) - 1; v >= (int)MathF.Floor(ej.At) + 1; v--) chain.Add(RoadVertex(ei.Edge, v));
+                }
+                chain.Add(target[j]);
+                for (var c = 0; c + 1 < chain.Count; c++)
+                {
+                    if (Vector3.DistanceSquared(mesh.Positions[chain[c]], mesh.Positions[chain[c + 1]]) < 1e-6f) continue;
+                    mesh.Indices.AddRange([loop[j], chain[c], chain[c + 1]]);
                     made++;
                 }
             }
@@ -149,6 +236,7 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them onto an edge of the road's mesh (moved up to {farthest:0.00} m), {edges.Count} edges at {roadQuality}");
         return made;
     }
 

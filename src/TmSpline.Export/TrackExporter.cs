@@ -28,7 +28,7 @@ public static class TrackExporter
         // Own terrain: its chunks (the roads' edges built in), as items like the road.
         if (request.Map.Terrain is { } terrain)
         {
-            var land = TerrainMeshBuilder.Build(terrain, request.Map);
+            var land = TerrainMeshBuilder.Build(terrain, request.Map, roadQuality: request.Quality);
             meshes.AddRange(land);
             log?.Invoke($"Terrain: {land.Count} chunk(s), {land.Sum(m => m.Triangles.Count)} triangles");
         }
