@@ -56,7 +56,12 @@ public static class VoxelTerrain
     /// </summary>
     private const int SeamIsland = 64;
 
-    private static void DropIslands(AdaptiveMesh mesh)
+    /// <summary>
+    /// Also left out: a piece of land whose area lies mostly under a road, between its edges (under: a function telling
+    /// that of a place): land under a road's deck that the cuts along both its edges left on its own, hanging under it.
+    /// The land a track loop encloses is cut off all round too, but lies beside the road, not under it.
+    /// </summary>
+    private static void DropIslands(AdaptiveMesh mesh, Func<Vector3, bool>? under = null)
     {
         var parent = Enumerable.Range(0, mesh.Positions.Count).ToArray();
         int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
@@ -72,9 +77,28 @@ public static class VoxelTerrain
             var root = Find(mesh.Indices[t]);
             size[root] = size.GetValueOrDefault(root) + 1;
         }
+        // Per piece, its area and how much of it lies under a road (the largest piece always stays).
+        var area = new Dictionary<int, (double All, double Under)>();
+        if (under is not null)
+        {
+            var largest = size.MaxBy(kv => kv.Value).Key;
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+            {
+                var root = Find(mesh.Indices[t]);
+                if (root == largest) continue;
+                Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
+                var s = Vector3.Cross(b - a, c - a).Length() / 2;
+                var (all, below) = area.GetValueOrDefault(root);
+                area[root] = (all + s, below + (under((a + b + c) / 3) ? s : 0));
+            }
+        }
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
+            foreach (var (root, x) in area.OrderByDescending(kv => kv.Value.All).Take(8))
+                Console.WriteLine($"  piece of {size[root]} triangles, {x.All:0} m2, {x.Under / Math.Max(x.All, 1e-9):P0} under a road");
+        bool Keep(int root) => size[root] >= SeamIsland && !(area.TryGetValue(root, out var x) && x.Under > x.All / 2);
         var kept = new List<int>(mesh.Indices.Count);
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
-            if (size[Find(mesh.Indices[t])] >= SeamIsland)
+            if (Keep(Find(mesh.Indices[t])))
                 kept.AddRange([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
         mesh.Indices.Clear();
         mesh.Indices.AddRange(kept);
@@ -679,6 +703,9 @@ public static class VoxelTerrain
             // higher than that over the line (a tunnel's roof) does not count.
             if (toEdge < 100 && across < 1 && toRoom > 0 && over < CrownMax) body = MathF.Min(body, MathF.Max(0, -over));
             if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
+            // Land inside a road's room (reaching into it where the voxels missed it) is always the road's: without
+            // this the field jumped back up to the edges' distance a metre inside, and the cut followed that jump.
+            if (toRoom <= 0) body = 0;
             return body - SeamGap;
         }
 
@@ -721,8 +748,24 @@ public static class VoxelTerrain
         if (OpenSeam)
         {
             kept = CutSeam(kept, SeamField);
+            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+                Console.WriteLine($"  right after the cut: {kept.Indices.Distinct().Count(i => SeamField(kept.Positions[i]) < -0.1f)} used vertices inside it");
             if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
-            DropIslands(kept);
+            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+            {
+                // Kept land under a road between its edges, close to its room: why the cut left it.
+                var rows = new List<string>();
+                foreach (var p in kept.Indices.Distinct().Select(i => kept.Positions[i]))
+                {
+                    var (toEdge, over, across, beyond) = road(p);
+                    var (toRoom, deck) = nearest(p);
+                    if (toEdge < 100 && across < 1 && over < 0 && toRoom < 8)
+                        rows.Add($"    at {p.X:0},{p.Y:0},{p.Z:0}: to room {toRoom:0.0}, deck {(deck != default ? "yes" : "no")}, edge {toEdge:0.0}, across {across:0.00}, over {over:0.0}, field {SeamField(p):0.0}");
+                }
+                Console.WriteLine($"  {rows.Count} kept vertices under a road within 8 m of its room");
+                foreach (var r in rows.Take(25)) Console.WriteLine(r);
+            }
+            DropIslands(kept, p => road(p) is var r && r.Edge < 100 && r.Across < 1 && r.Over < 0);
         }
         return kept;
     }
@@ -800,6 +843,12 @@ public static class VoxelTerrain
         var pos = mesh.Positions.ToArray();
         var g = new float[n];
         Parallel.For(0, n, i => g[i] = field(pos[i]));
+        if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+        {
+            var differ = 0;
+            for (var i = 0; i < n; i++) if (MathF.Abs(field(pos[i]) - g[i]) > 1e-3f) differ++;
+            Console.WriteLine($"  field values differing between parallel and sequential: {differ} of {n}");
+        }
         // Each vertex's shortest edge.
         var shortest = Enumerable.Repeat(float.MaxValue, n).ToArray();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
@@ -820,9 +869,21 @@ public static class VoxelTerrain
                 field(p + Vector3.UnitY * h) - field(p - Vector3.UnitY * h),
                 field(p + Vector3.UnitZ * h) - field(p - Vector3.UnitZ * h)) / (2 * h);
             if (grad.LengthSquared() < 0.25f) return;
-            var move = -grad * (g[i] / grad.LengthSquared());
-            if (move.Length() > shortest[i] / 2) return;
-            pos[i] = p + move;
+            // Up to three steps; the move kept only if it really ends on the line (the field is the smallest of
+            // several distances, and one step across a fold between them can land far off it).
+            var q = p;
+            var value = g[i];
+            for (var step = 0; step < 3 && MathF.Abs(value) > 0.05f; step++)
+            {
+                q -= grad * (value / grad.LengthSquared());
+                value = field(q);
+                grad = new Vector3(field(q + Vector3.UnitX * h) - field(q - Vector3.UnitX * h),
+                    field(q + Vector3.UnitY * h) - field(q - Vector3.UnitY * h),
+                    field(q + Vector3.UnitZ * h) - field(q - Vector3.UnitZ * h)) / (2 * h);
+                if (grad.LengthSquared() < 0.25f) break;
+            }
+            if (MathF.Abs(value) > 0.05f || Vector3.Distance(p, q) > shortest[i] / 2) return;
+            pos[i] = q;
             g[i] = 0;
         });
 
@@ -846,7 +907,16 @@ public static class VoxelTerrain
             if (g[j] == 0) return Kept(j);
             var key = i < j ? ((long)i << 32) | (uint)j : ((long)j << 32) | (uint)i;
             if (crossings.TryGetValue(key, out var id)) return id;
-            var at = pos[i] + (pos[j] - pos[i]) * (g[i] / (g[i] - g[j]));
+            // Where the field really is zero along the edge (it bends between the ends): bisection, from the ends'
+            // opposite signs.
+            float lo = 0, hi = 1;
+            var loIn = g[i] >= 0;
+            for (var step = 0; step < 14; step++)
+            {
+                var mid = (lo + hi) / 2;
+                if (field(pos[i] + (pos[j] - pos[i]) * mid) >= 0 == loIn) lo = mid; else hi = mid;
+            }
+            var at = pos[i] + (pos[j] - pos[i]) * ((lo + hi) / 2);
             id = result.Positions.Count;
             result.Positions.Add(at);
             result.Pinned.Add(false);

@@ -211,6 +211,9 @@ public static class ServerApp
         {
             try
             {
+                // Development: the last terrain request's track written to this file (TMSPLINE_DUMP_TERRAIN), for MesherLab.
+                if (app.Environment.IsDevelopment() && Environment.GetEnvironmentVariable("TMSPLINE_DUMP_TERRAIN") is { Length: > 0 } dump)
+                    File.WriteAllText(dump, System.Text.Json.JsonSerializer.Serialize(request.Track, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
                 return Results.Bytes(service.TerrainPreview(request, key), "application/octet-stream");
             }
             catch (ExportRejectedException e)
