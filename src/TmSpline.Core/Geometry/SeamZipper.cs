@@ -187,9 +187,9 @@ public static class SeamZipper
                     facing[j] = Vector3.Normalize(W(r.Right * q.NX + r.Up * q.NY));
                 }
                 normals.Add(facing);
-                points[0] = W(RoadMeshBuilder.EdgeContact(r, segment, -1));
-                points[Across] = W(RoadMeshBuilder.EdgeContact(r, segment, 1));
-                for (var j = 1; j < Across; j++)
+                // (The edges: the driving surface's own, whether or not the road has borders; the owner's: land meets
+                // the road there, a curb on it hides the seam, and no seam has to go round a curb.)
+                for (var j = 0; j <= Across; j++)
                 {
                     var e = RoadMeshBuilder.SurfaceSample(r, (j / (double)Across - 0.5) * r.Width);
                     points[j] = W(r.Position + r.Right * e.X + r.Up * e.Y);
@@ -1080,7 +1080,7 @@ public static class SeamZipper
                         for (var i = 0; i < cycle.Count; i++)
                         {
                             withFeet.Add(cycle[i]);
-                            if (GridOf(cycle[i]) is { } g0 && GridOf(cycle[(i + 1) % cycle.Count]) is { } g1 && g0.Ribbon == g1.Ribbon && g0.K == g1.K
+                            if (Environment.GetEnvironmentVariable("TMSPLINE_FEET") == "on" && GridOf(cycle[i]) is { } g0 && GridOf(cycle[(i + 1) % cycle.Count]) is { } g1 && g0.Ribbon == g1.Ribbon && g0.K == g1.K
                                 && (Math.Min(g0.J, g1.J) == 0 && Math.Max(g0.J, g1.J) == 1 || Math.Min(g0.J, g1.J) == Across - 1 && Math.Max(g0.J, g1.J) == Across))
                                 withFeet.Add(FootVertex(g0.Ribbon, g0.K, g0.J + g1.J < Across ? -1 : 1));
                         }
