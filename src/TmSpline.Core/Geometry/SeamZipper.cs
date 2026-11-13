@@ -242,7 +242,9 @@ public static class SeamZipper
             if (!nodeVertex.TryGetValue((rb, k, j), out var id))
             {
                 id = mesh.Positions.Count;
-                mesh.Positions.Add(ribbons[rb].Cross[k][j]);
+                // (A node across the road a little under its surface: the strips meeting the underside stay under it, not
+                // on the driving surface between nodes.)
+                mesh.Positions.Add(j == 0 || j == Across ? ribbons[rb].Cross[k][j] : ribbons[rb].Cross[k][j] - ribbonNormals[rb][k][j] * 0.15f);
                 mesh.Pinned.Add(false);
                 nodeVertex[(rb, k, j)] = id;
             }
@@ -299,11 +301,25 @@ public static class SeamZipper
                 Vector3 At((int Ribbon, int K, int J) c) => ribbons[c.Ribbon].Cross[c.K][c.J];
                 // From the driving side (over the road) land meets an edge only, never the driving surface itself;
                 // a node across the road only from behind it (the underside).
-                bool Side((int Ribbon, int K, int J) c) => c.J == 0 || c.J == Across || Vector3.Dot(p - At(c), ribbonNormals[c.Ribbon][c.K][c.J]) < 0;
+                bool Side((int Ribbon, int K, int J) c)
+                {
+                    if (c.J == 0 || c.J == Across) return true;
+                    if (Vector3.Dot(p - At(c), ribbonNormals[c.Ribbon][c.K][c.J]) >= 0) return false;
+                    // (And under the road, between its edges as seen across it: land beside it, a little below the
+                    // deck, joins an edge; to the middle of the underside its strip would cut through the road's edge.)
+                    Vector3 l = ribbons[c.Ribbon].Cross[c.K][0], r = ribbons[c.Ribbon].Cross[c.K][Across], lr = r - l;
+                    var across = Vector3.Dot(p - l, lr) / MathF.Max(lr.LengthSquared(), 1e-6f);
+                    return across > 0.02f && across < 0.98f;
+                }
                 var reachable = candidates.Distinct().Where(c => Side(c) && Vector3.Distance(p, At(c)) < 2.5f * gap && Clear(room, p, At(c)))
                     .OrderBy(c => Vector3.DistanceSquared(p, At(c))).ToList();
                 // The nearest out from the land (not back through it); failing that, the nearest at all.
-                var chosen = reachable.Cast<(int, int, int)?>().FirstOrDefault(c => Vector3.Dot(At(c!.Value) - p, outward) > 0) ?? reachable.Cast<(int, int, int)?>().FirstOrDefault();
+                // An edge first (the owner's rule: the seam runs along the underside only where the edge is too far or
+                // a line to it would cross the road): the nearest edge node out from the land, if no farther than half
+                // again the nearest node at all; then the nearest out from the land; then the nearest at all.
+                var nearestAll = reachable.Count > 0 ? Vector3.Distance(p, At(reachable[0])) : 0;
+                var chosen = reachable.Cast<(int, int, int)?>().FirstOrDefault(c => (c!.Value.Item3 == 0 || c.Value.Item3 == Across) && Vector3.Dot(At(c.Value) - p, outward) > 0 && Vector3.Distance(p, At(c.Value)) <= 1.5f * nearestAll)
+                    ?? reachable.Cast<(int, int, int)?>().FirstOrDefault(c => Vector3.Dot(At(c!.Value) - p, outward) > 0) ?? reachable.Cast<(int, int, int)?>().FirstOrDefault();
                 if (chosen is not { } pick)
                 {
                     if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: no grid node it reaches");
@@ -335,7 +351,13 @@ public static class SeamZipper
                     for (var jj = 0; jj <= Across; jj++)
                     {
                         var q = ribbons[rb].Cross[k][jj];
-                        if (jj != 0 && jj != Across && Vector3.Dot(p - q, ribbonNormals[rb][k][jj]) >= 0) continue;
+                        if (jj != 0 && jj != Across)
+                        {
+                            if (Vector3.Dot(p - q, ribbonNormals[rb][k][jj]) >= 0) continue;
+                            Vector3 l = ribbons[rb].Cross[k][0], lr = ribbons[rb].Cross[k][Across] - l;
+                            var across = Vector3.Dot(p - l, lr) / MathF.Max(lr.LengthSquared(), 1e-6f);
+                            if (across <= 0.02f || across >= 0.98f) continue;
+                        }
                         var distance = Vector3.Distance(p, q);
                         if (distance < bestDistance && Clear(room, p, q)) { bestDistance = distance; better = (rb, k, jj); }
                     }
