@@ -189,7 +189,9 @@ public static class SeamZipper
                 }
                 // In a road end's window (over its deck's end): only points at that deck's level (not another road
                 // over it); none, and the window is closed with a fan below.
+                // (Only where that end's deck is about as near as any road: not land along another road over it.)
                 var end = EndOf(p);
+                if (end is { } atEnd && Vector3.Dot(p - atEnd.P, atEnd.Up) > distance + 1) end = null;
                 var candidates = list.Where(c => Vector3.Distance(p, c) < 2.5f * gap)
                     .Where(c => end is not { } e || MathF.Abs(Vector3.Dot(c - e.P, e.Up)) < 2)
                     .OrderBy(c => previous is { } prev2 && Vector3.Distance(c, prev2) < 2 * gap ? 0 : 1)
