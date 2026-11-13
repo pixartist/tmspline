@@ -362,8 +362,19 @@ public static class SeamZipper
                     var k = Math.Clamp((int)MathF.Round(h.S), 0, count - 1);
                     var j = Math.Clamp((int)MathF.Round(h.U * Across), 0, Across);
                     candidates.Add((h.Ribbon, k, j));
-                    candidates.Add((h.Ribbon, k, 0));
-                    candidates.Add((h.Ribbon, k, Across));
+                    // Each edge's own nearest node, searched along it (not that ring's: from under the road the nearest
+                    // place is often on the underside, rings away from where the edge is nearest; strips then folded back).
+                    foreach (var edgeJ in new[] { 0, Across })
+                    {
+                        var bestK = k;
+                        var bestD = float.MaxValue;
+                        for (var kk = Math.Max(0, k - 24); kk <= Math.Min(count - 1, k + 24); kk++)
+                        {
+                            var d = Vector3.DistanceSquared(p, ribbons[h.Ribbon].Cross[kk][edgeJ]);
+                            if (d < bestD) { bestD = d; bestK = kk; }
+                        }
+                        candidates.Add((h.Ribbon, bestK, edgeJ));
+                    }
                 }
                 Vector3 At((int Ribbon, int K, int J) c) => ribbons[c.Ribbon].Cross[c.K][c.J];
                 var nearestAcross = Project(p)?.U;
