@@ -737,6 +737,178 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  window between two switches closed at {middle} ({polygon.Count} corners)");
             }
         if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {bridges.Count} switches bridged, {windows} windows between them closed");
+        // Holes as loops (the owner's idea): every open edge of the land that is not land meeting a road along the grid,
+        // closed by the shortest way back from its far end to its start, along other open land edges and the roads'
+        // grids (their edges, undersides and ends; not their driving surface), no longer round than MaxHole; that loop
+        // filled as one polygon, unless the fill would pass through a road's room (a tunnel's mouth stays open).
+        var loopFills = 0;
+        if (grid && Environment.GetEnvironmentVariable("TMSPLINE_HOLES") != "off")
+        {
+            const float MaxHole = 40;
+            var roadNode = nodeVertex.ToDictionary(kv => kv.Value, kv => (Ribbon: kv.Key.Item1, K: kv.Key.Item2, J: kv.Key.Item3));
+            var tried = new HashSet<(int, int)>();
+            for (var pass = 0; pass < 200; pass++)
+            {
+            var progress = false;
+            // The open edges, each as its triangle runs it (a to b).
+            var uses = new Dictionary<(int, int), int>();
+            var runs = new Dictionary<(int, int), bool>();
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+                for (var k = 0; k < 3; k++)
+                {
+                    int a = mesh.Indices[t + k], b = mesh.Indices[t + (k + 1) % 3];
+                    var key = a < b ? (a, b) : (b, a);
+                    uses[key] = uses.GetValueOrDefault(key) + 1;
+                    runs[(a, b)] = true;
+                }
+            bool Seam(int a, int b) => roadNode.TryGetValue(a, out var na) && roadNode.TryGetValue(b, out var nb) && na.Ribbon == nb.Ribbon
+                && Math.Abs(na.K - nb.K) + Math.Abs(na.J - nb.J) == 1;
+            var open = new Dictionary<int, List<int>>();
+            foreach (var ((a, b), n) in uses)
+            {
+                if (n != 1 || Seam(a, b)) continue;
+                if (!open.TryGetValue(a, out var la)) open[a] = la = [];
+                if (!open.TryGetValue(b, out var lb)) open[b] = lb = [];
+                la.Add(b);
+                lb.Add(a);
+            }
+            // The graph's places: the mesh's vertices (>= 0), and grid nodes not yet in it (< 0, made when a fill uses them).
+            var virtualNodes = new List<(int Ribbon, int K, int J)>();
+            var virtualIndex = new Dictionary<(int, int, int), int>();
+            int Place((int Ribbon, int K, int J) n)
+            {
+                if (nodeVertex.TryGetValue(n, out var id)) return id;
+                if (!virtualIndex.TryGetValue(n, out var v)) { v = -1 - virtualNodes.Count; virtualNodes.Add(n); virtualIndex[n] = v; }
+                return v;
+            }
+            (int Ribbon, int K, int J)? GridOf(int place) => place < 0 ? virtualNodes[-1 - place] : roadNode.TryGetValue(place, out var n) ? n : null;
+            Vector3 PosOf(int place)
+            {
+                if (place >= 0) return mesh.Positions[place];
+                var (rb, k, j) = virtualNodes[-1 - place];
+                return j == 0 || j == Across ? ribbons[rb].Cross[k][j] : ribbons[rb].Cross[k][j] - ribbonNormals[rb][k][j] * 0.15f;
+            }
+            IEnumerable<int> Neighbours(int place)
+            {
+                if (place >= 0 && open.TryGetValue(place, out var list)) foreach (var o in list) yield return o;
+                if (GridOf(place) is not { } g) yield break;
+                var (rb, k, j) = g;
+                var count = ribbons[rb].Cross.Count;
+                foreach (var (dk, dj) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                {
+                    int k2 = k + dk, j2 = j + dj;
+                    if (k2 < 0 || k2 >= count || j2 < 0 || j2 > Across) continue;
+                    // (Along a ring between rings only at the edges, the ends or underneath: grid lines all lie on the
+                    // road; a grid line the land already meets is no hole's side.)
+                    var other = Place((rb, k2, j2));
+                    if (place >= 0 && other >= 0 && uses.TryGetValue(place < other ? (place, other) : (other, place), out var n) && n >= 1 && Seam(place, other)) continue;
+                    yield return other;
+                }
+            }
+            foreach (var (a, list) in open.ToList())
+            {
+                foreach (var b in list.ToList())
+                {
+                    if (a > b || tried.Contains((a, b))) continue;
+                    tried.Add((a, b));
+                    // The way back from b to a, not over the edge itself: shortest, at most MaxHole round with it.
+                    var first = Vector3.Distance(PosOf(a), PosOf(b));
+                    var dist = new Dictionary<int, float> { [b] = 0 };
+                    var from = new Dictionary<int, int>();
+                    var queue = new PriorityQueue<int, float>();
+                    queue.Enqueue(b, 0);
+                    var found = false;
+                    while (queue.TryDequeue(out var at, out var d))
+                    {
+                        if (d > dist[at]) continue;
+                        if (at == a) { found = true; break; }
+                        if (d + first > MaxHole) break;
+                        foreach (var nb in Neighbours(at))
+                        {
+                            if (at == b && nb == a) continue;
+                            var nd = d + Vector3.Distance(PosOf(at), PosOf(nb));
+                            if (nd + first > MaxHole || (dist.TryGetValue(nb, out var old) && old <= nd)) continue;
+                            dist[nb] = nd;
+                            from[nb] = at;
+                            queue.Enqueue(nb, nd);
+                        }
+                    }
+                    if (!found) continue;
+                    // The loop: a, b, then the way back to a.
+                    var cycle = new List<int> { a };
+                    var path = new List<int>();
+                    for (var at = a; at != b; at = from[at]) path.Add(from[at]);
+                    // (path runs from a's predecessor back towards b: reverse it to go b ... before a.)
+                    path.Reverse();
+                    cycle.AddRange(path);
+                    if (cycle.Count < 3 || cycle.Distinct().Count() != cycle.Count) continue;
+                    // Only land's open edges and the road: at least one open land edge besides a-b counts as well.
+                    var polygon = cycle.Select(PosOf).ToList();
+                    // Ear clipping in the loop's best-fit plane (Newell's normal).
+                    var normal = Vector3.Zero;
+                    for (var i = 0; i < polygon.Count; i++)
+                    {
+                        Vector3 u = polygon[i], v = polygon[(i + 1) % polygon.Count];
+                        normal += new Vector3((u.Y - v.Y) * (u.Z + v.Z), (u.Z - v.Z) * (u.X + v.X), (u.X - v.X) * (u.Y + v.Y));
+                    }
+                    if (normal.LengthSquared() < 1e-8f) continue;
+                    normal = Vector3.Normalize(normal);
+                    var axisU = Vector3.Normalize(Vector3.Cross(MathF.Abs(normal.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX, normal));
+                    var axisV = Vector3.Cross(normal, axisU);
+                    var flat = polygon.Select(q => new Vector2(Vector3.Dot(q, axisU), Vector3.Dot(q, axisV))).ToList();
+                    var remaining = Enumerable.Range(0, cycle.Count).ToList();
+                    var triangles = new List<(int, int, int)>();
+                    static float Cross2(Vector2 o, Vector2 p, Vector2 q) => (p.X - o.X) * (q.Y - o.Y) - (p.Y - o.Y) * (q.X - o.X);
+                    var guard = 0;
+                    while (remaining.Count > 3 && guard++ < 1000)
+                    {
+                        var clipped = false;
+                        for (var i = 0; i < remaining.Count; i++)
+                        {
+                            int i0 = remaining[(i - 1 + remaining.Count) % remaining.Count], i1 = remaining[i], i2 = remaining[(i + 1) % remaining.Count];
+                            if (Cross2(flat[i0], flat[i1], flat[i2]) <= 1e-6f) continue;
+                            var inside = false;
+                            foreach (var o in remaining)
+                            {
+                                if (o == i0 || o == i1 || o == i2) continue;
+                                if (Cross2(flat[i0], flat[i1], flat[o]) >= 0 && Cross2(flat[i1], flat[i2], flat[o]) >= 0 && Cross2(flat[i2], flat[i0], flat[o]) >= 0) { inside = true; break; }
+                            }
+                            if (inside) continue;
+                            triangles.Add((i0, i1, i2));
+                            remaining.RemoveAt(i);
+                            clipped = true;
+                            break;
+                        }
+                        if (!clipped) break;
+                    }
+                    if (remaining.Count != 3) continue;
+                    triangles.Add((remaining[0], remaining[1], remaining[2]));
+                    // Not through a road's room.
+                    if (triangles.Any(tr => room((polygon[tr.Item1] + polygon[tr.Item2] + polygon[tr.Item3]) / 3) < -1)) continue;
+                    // Wound against the edge a-b's own triangle: if that runs a to b, the fill runs b to a.
+                    var reverse = runs.ContainsKey((a, b));
+                    foreach (var (x, y, z) in triangles)
+                    {
+                        int vx = cycle[x], vy = cycle[y], vz = cycle[z];
+                        var ids = new[] { vx, vy, vz }.Select(pl => pl >= 0 ? pl : Node(virtualNodes[-1 - pl].Ribbon, virtualNodes[-1 - pl].K, virtualNodes[-1 - pl].J)).ToArray();
+                        // (The polygon goes a, then the way back: a's next is the way back's first, so the loop runs a->path->b->a:
+                        // its edge b->a; the fill's order as clipped runs the loop's way.)
+                        if (reverse) mesh.Indices.AddRange([ids[0], ids[2], ids[1]]);
+                        else mesh.Indices.AddRange([ids[0], ids[1], ids[2]]);
+                        made++;
+                    }
+                    loopFills++;
+                    if (Near(PosOf(a))) Console.WriteLine($"  hole of {cycle.Count} corners ({first + dist[a]:0} m round) filled at {PosOf(a)}");
+                    // (The open edges changed: start again from them.)
+                    progress = true;
+                    break;
+                }
+                if (progress) break;
+            }
+            if (!progress) break;
+            }
+        }
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {loopFills} holes filled as loops");
         if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
             foreach (var rim in RimLoops(mesh).Where(l => l.Any(v => Near(mesh.Positions[v]))))
             {
