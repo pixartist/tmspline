@@ -14,6 +14,9 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class SeamZipper
 {
+    /// <summary>Debug: the last build's front edges left open (x, y, z, x, y, z, 1 for a road piece), for the editor's mesh view.</summary>
+    public static float[] LastOpen { get; private set; } = [];
+
     private sealed class Rail
     {
         public readonly List<Vector3> Points = [];
@@ -149,6 +152,9 @@ public static class SeamZipper
         // two ends' cross lines. Rim vertices join its nodes, and between two neighbours the road side runs along the
         // grid from one node to the next: continuous along a run, whatever each vertex chose.
         var grid = Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "project";
+        // The advancing front (the default with the grid; TMSPLINE_STITCH=off: the earlier bridges, close-road strips,
+        // end windows and hole fills): what the strips along runs leave open, closed triangle by triangle.
+        var stitch = grid && Environment.GetEnvironmentVariable("TMSPLINE_STITCH") != "off";
         const int Across = 16;
         var ribbons = new List<(List<Vector3[]> Cross, List<float> Along)>();
         // Each node's side of the driving surface: the way it faces (into the room).
@@ -237,6 +243,7 @@ public static class SeamZipper
         }
         // The grid's nodes as the mesh's vertices (on an edge, the road mesh's own edge vertex), made when first used.
         var nodeVertex = new Dictionary<(int, int, int), int>();
+        var roadNodeOf = new Dictionary<int, (int Ribbon, int K, int J)>();
         int Node(int rb, int k, int j)
         {
             if (!nodeVertex.TryGetValue((rb, k, j), out var id))
@@ -247,8 +254,42 @@ public static class SeamZipper
                 mesh.Positions.Add(j == 0 || j == Across ? ribbons[rb].Cross[k][j] : ribbons[rb].Cross[k][j] - ribbonNormals[rb][k][j] * 0.15f);
                 mesh.Pinned.Add(false);
                 nodeVertex[(rb, k, j)] = id;
+                roadNodeOf[id] = (rb, k, j);
             }
             return id;
+        }
+        // (The front's helpers.) A grid node's mesh vertex the other way round; an edge node's outward direction; a
+        // ring's direction along the road; whether a triangle stays out of the rooms and off the decks.
+        Vector3 OutOf(int rb, int k, int j)
+        {
+            var cross = ribbons[rb].Cross[k];
+            var o = j == 0 ? cross[0] - cross[Across] : cross[Across] - cross[0];
+            return o.LengthSquared() > 1e-6f ? Vector3.Normalize(o) : Vector3.Zero;
+        }
+        Vector3 Tangent(int rb, int k)
+        {
+            var cross = ribbons[rb].Cross;
+            int k0 = Math.Max(0, k - 1), k1 = Math.Min(cross.Count - 1, k + 1);
+            var d = cross[k1][Across / 2] - cross[k0][Across / 2];
+            return d.LengthSquared() > 1e-6f ? Vector3.Normalize(d) : Vector3.Zero;
+        }
+        bool ClearOfRoads(Vector3 x, Vector3 y, Vector3 z)
+        {
+            for (var u = 1; u < 6; u++)
+                for (var v = 1; u + v < 6; v++)
+                {
+                    var q = x + (y - x) * (u / 6f) + (z - x) * (v / 6f);
+                    if (MathF.Min(Vector3.Distance(q, x), MathF.Min(Vector3.Distance(q, y), Vector3.Distance(q, z))) < 0.75f) continue;
+                    if (room(q) < -0.5f) return false;
+                    var (d, _, l, r) = surface(q);
+                    var lr = r - l;
+                    if (d < 0.25f && lr.LengthSquared() > 1e-4f)
+                    {
+                        var across = Vector3.Dot(q - l, lr) / lr.LengthSquared();
+                        if (across > 0.05f && across < 0.95f) return false;
+                    }
+                }
+            return true;
         }
         var breaks = 0;
         // Switches from one road to another along a rim (bridged): from one node to the other.
@@ -462,7 +503,7 @@ public static class SeamZipper
                                 if (!nearCorner && surface(q).Distance < 0.3f) { stays = false; break; }
                             }
                         }
-                    if (stays)
+                    if (stays && !stitch)
                     {
                         mesh.Indices.AddRange([loop[j], loop[i], target[i]]);
                         mesh.Indices.AddRange([loop[j], target[i], target[j]]);
@@ -549,7 +590,7 @@ public static class SeamZipper
             }
             // An open road's end: a run of unjoined rim vertices, all at the end, between two joined ones: the window
             // over the end's deck, closed by a fan from its middle (in the rim's order back, then along the road).
-            for (var i = 0; i < n; i++)
+            for (var i = 0; !stitch && i < n; i++)
             {
                 var j = (i + 1) % n;
                 if (target[i] < 0 || target[j] >= 0) continue;
@@ -584,7 +625,7 @@ public static class SeamZipper
         // it) that it faces, within two gaps and a bit, where the line between them stays out of the rooms and off the
         // decks and the land would be there (its middle not over the land); runs of such pairs zipped edge to edge.
         var closeStrips = 0;
-        if (grid)
+        if (grid && !stitch)
         {
             var reachClose = 2 * gap + 2;
             // Nodes a close-roads strip has taken (each only once).
@@ -593,12 +634,6 @@ public static class SeamZipper
             var inside = new HashSet<(int, int, int)>();
             bool Free(int rb, int k, int j) => !nodeVertex.ContainsKey((rb, k, j));
             // An edge node's outward direction: from the other edge across its ring.
-            Vector3 OutOf(int rb, int k, int j)
-            {
-                var cross = ribbons[rb].Cross[k];
-                var o = j == 0 ? cross[0] - cross[Across] : cross[Across] - cross[0];
-                return o.LengthSquared() > 1e-6f ? Vector3.Normalize(o) : Vector3.Zero;
-            }
             (int Ribbon, int K, int J)? Partner(int rb, int k, int j)
             {
                 var p = ribbons[rb].Cross[k][j];
@@ -742,7 +777,7 @@ public static class SeamZipper
         // grids (their edges, undersides and ends; not their driving surface), no longer round than MaxHole; that loop
         // filled as one polygon, unless the fill would pass through a road's room (a tunnel's mouth stays open).
         var loopFills = 0;
-        if (grid && Environment.GetEnvironmentVariable("TMSPLINE_HOLES") != "off")
+        if (grid && !stitch && Environment.GetEnvironmentVariable("TMSPLINE_HOLES") != "off")
         {
             const float MaxHole = 40;
             var roadNode = nodeVertex.ToDictionary(kv => kv.Value, kv => (Ribbon: kv.Key.Item1, K: kv.Key.Item2, J: kv.Key.Item3));
@@ -995,10 +1030,261 @@ public static class SeamZipper
                 }
                 Console.WriteLine($"  open boundary of {rim.Count} near: {string.Join(" ", text)}");
             }
+        // The advancing front: every open edge near a road that still needs a triangle (the land's open rims; the road
+        // edges' and ends' pieces land is near and no strip uses), closed one triangle at a time: on a front edge, the
+        // third corner from the front's vertices near it, the best first (closing a corner of the front, then small and
+        // well shaped). A triangle only where it enters no road's room and crosses no deck, intersects none there is,
+        // does not fold back over the triangle it grows from, has no edge longer than the reach nor a sliver's angle;
+        // between road vertices only where the land would be. Until none is left that may be made.
+        if (stitch)
+        {
+            var reachStitch = 2.5f * gap;
+            var used = new HashSet<(int, int)>();
+            var edgeUses = new Dictionary<(int, int), int>();
+            var thirdOf = new Dictionary<(int, int), int>();
+            void Record(int a, int b, int c)
+            {
+                foreach (var (x, y, z) in new[] { (a, b, c), (b, c, a), (c, a, b) })
+                {
+                    used.Add((x, y));
+                    thirdOf[(x, y)] = z;
+                    var key = x < y ? (x, y) : (y, x);
+                    edgeUses[key] = edgeUses.GetValueOrDefault(key) + 1;
+                }
+            }
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) Record(mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]);
+            // Triangles in 8 m cells, for the intersection test.
+            const float Cell = 8;
+            var cellsOf = new Dictionary<(int, int, int), List<int>>();
+            IEnumerable<(int, int, int)> Cells(Vector3 lo, Vector3 hi)
+            {
+                for (var x = (int)MathF.Floor(lo.X / Cell); x <= (int)MathF.Floor(hi.X / Cell); x++)
+                    for (var y = (int)MathF.Floor(lo.Y / Cell); y <= (int)MathF.Floor(hi.Y / Cell); y++)
+                        for (var z = (int)MathF.Floor(lo.Z / Cell); z <= (int)MathF.Floor(hi.Z / Cell); z++)
+                            yield return (x, y, z);
+            }
+            void AddCells(int t)
+            {
+                Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
+                foreach (var key in Cells(Vector3.Min(a, Vector3.Min(b, c)), Vector3.Max(a, Vector3.Max(b, c))))
+                {
+                    if (!cellsOf.TryGetValue(key, out var list)) cellsOf[key] = list = [];
+                    list.Add(t);
+                }
+            }
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) AddCells(t);
+            // Road pieces: an edge's or an end's segment between two grid nodes (on the road; no triangle on its road side).
+            var roadPiece = new HashSet<(int, int)>();
+            bool Piece(int a, int b) => roadPiece.Contains(a < b ? (a, b) : (b, a));
+            // Terrain vertices in cells, to find road pieces land is near.
+            var landCells = new Dictionary<(int, int, int), List<int>>();
+            for (var t = 0; t < mesh.Indices.Count; t++)
+            {
+                var v = mesh.Indices[t];
+                if (nodeVertex.ContainsValue(v)) continue;
+                var q = mesh.Positions[v];
+                var key = ((int)MathF.Floor(q.X / Cell), (int)MathF.Floor(q.Y / Cell), (int)MathF.Floor(q.Z / Cell));
+                if (!landCells.TryGetValue(key, out var list)) landCells[key] = list = [];
+                list.Add(v);
+            }
+            bool LandNear(Vector3 q)
+            {
+                foreach (var key in Cells(q - new Vector3(reachStitch), q + new Vector3(reachStitch)))
+                    if (landCells.TryGetValue(key, out var list))
+                        foreach (var v in list)
+                            if (Vector3.DistanceSquared(mesh.Positions[v], q) < reachStitch * reachStitch) return true;
+                return false;
+            }
+            // The front.
+            var front = new HashSet<(int, int)>();
+            foreach (var ((a, b), n) in edgeUses)
+            {
+                if (n != 1) continue;
+                var (x, y) = used.Contains((a, b)) ? (a, b) : (b, a);
+                if (Piece(x, y)) continue;
+                if (MathF.Min(surface(mesh.Positions[x]).Distance, surface(mesh.Positions[y]).Distance) > reachStitch) continue;
+                front.Add((y, x));
+            }
+            for (var rb = 0; rb < ribbons.Count; rb++)
+            {
+                var count = ribbons[rb].Cross.Count;
+                void Segment(int k0, int j0, int k1, int j1)
+                {
+                    var mid = (ribbons[rb].Cross[k0][j0] + ribbons[rb].Cross[k1][j1]) / 2;
+                    var known = nodeVertex.ContainsKey((rb, k0, j0)) && nodeVertex.ContainsKey((rb, k1, j1));
+                    if (!known && !LandNear(mid)) return;
+                    int a = Node(rb, k0, j0), b = Node(rb, k1, j1);
+                    roadPiece.Add(a < b ? (a, b) : (b, a));
+                    // (The land meets it from one side at most here: the side facing the way the road does.)
+                    if (edgeUses.GetValueOrDefault(a < b ? (a, b) : (b, a)) > 0) return;
+                    front.Add((a, b));
+                    front.Add((b, a));
+                }
+                foreach (var j in new[] { 0, Across })
+                    for (var k = 0; k + 1 < count; k++) Segment(k, j, k + 1, j);
+                foreach (var k in new[] { 0, count - 1 })
+                    for (var j = 0; j < Across; j++) Segment(k, j, k, j + 1);
+            }
+            Vector3 P(int v) => mesh.Positions[v];
+            bool IsRoad(int v) => roadNodeOf.ContainsKey(v);
+            // Front vertices in cells.
+            var frontCells = new Dictionary<(int, int, int), HashSet<int>>();
+            void AddFrontVertex(int v)
+            {
+                var q = P(v);
+                var key = ((int)MathF.Floor(q.X / Cell), (int)MathF.Floor(q.Y / Cell), (int)MathF.Floor(q.Z / Cell));
+                if (!frontCells.TryGetValue(key, out var set)) frontCells[key] = set = [];
+                set.Add(v);
+            }
+            foreach (var (a, b) in front) { AddFrontVertex(a); AddFrontVertex(b); }
+            // Segment-triangle intersection (Moller-Trumbore), strictly inside both.
+            static bool SegmentHits(Vector3 p0, Vector3 p1, Vector3 a, Vector3 b, Vector3 c)
+            {
+                var d = p1 - p0;
+                Vector3 e1 = b - a, e2 = c - a, h = Vector3.Cross(d, e2);
+                var det = Vector3.Dot(e1, h);
+                if (MathF.Abs(det) < 1e-9f) return false;
+                var f = 1 / det;
+                var sv = p0 - a;
+                var u = f * Vector3.Dot(sv, h);
+                if (u <= 1e-4f || u >= 1 - 1e-4f) return false;
+                var q = Vector3.Cross(sv, e1);
+                var v = f * Vector3.Dot(d, q);
+                if (v <= 1e-4f || u + v >= 1 - 1e-4f) return false;
+                var t = f * Vector3.Dot(e2, q);
+                return t > 1e-4f && t < 1 - 1e-4f;
+            }
+            bool Crosses(int u, int v, int c)
+            {
+                Vector3 a = P(u), b = P(v), d = P(c);
+                foreach (var key in Cells(Vector3.Min(a, Vector3.Min(b, d)), Vector3.Max(a, Vector3.Max(b, d))))
+                {
+                    if (!cellsOf.TryGetValue(key, out var list)) continue;
+                    foreach (var t in list)
+                    {
+                        int x = mesh.Indices[t], y = mesh.Indices[t + 1], z = mesh.Indices[t + 2];
+                        Vector3 px = P(x), py = P(y), pz = P(z);
+                        // Edges of the one through the other, where they share no corner.
+                        if (x != u && x != v && x != c && y != u && y != v && y != c && z != u && z != v && z != c)
+                        {
+                            if (SegmentHits(a, b, px, py, pz) || SegmentHits(b, d, px, py, pz) || SegmentHits(d, a, px, py, pz)) return true;
+                            if (SegmentHits(px, py, a, b, d) || SegmentHits(py, pz, a, b, d) || SegmentHits(pz, px, a, b, d)) return true;
+                        }
+                        else
+                        {
+                            // (Sharing a corner: only the edges away from it.)
+                            if (SegmentHits(px, py, a, b, d) && x != u && x != v && x != c && y != u && y != v && y != c) return true;
+                            if (SegmentHits(py, pz, a, b, d) && y != u && y != v && y != c && z != u && z != v && z != c) return true;
+                            if (SegmentHits(pz, px, a, b, d) && z != u && z != v && z != c && x != u && x != v && x != c) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            static float MinAngle(Vector3 a, Vector3 b, Vector3 c)
+            {
+                static float At(Vector3 p, Vector3 q, Vector3 r) { Vector3 x = q - p, y = r - p; var d = x.Length() * y.Length(); return d < 1e-9f ? 0 : MathF.Acos(Math.Clamp(Vector3.Dot(x, y) / d, -1, 1)); }
+                return MathF.Min(At(a, b, c), MathF.Min(At(b, c, a), At(c, a, b))) * 180 / MathF.PI;
+            }
+            // Whether a triangle on the front edge u->v with its third corner c may be made.
+            bool Valid(int u, int v, int c)
+            {
+                if (c == u || c == v || used.Contains((v, c)) || used.Contains((c, u))) return false;
+                if (edgeUses.GetValueOrDefault(v < c ? (v, c) : (c, v)) >= 2 || edgeUses.GetValueOrDefault(c < u ? (c, u) : (u, c)) >= 2) return false;
+                Vector3 a = P(u), b = P(v), d = P(c);
+                if (Vector3.Distance(b, d) > reachStitch || Vector3.Distance(d, a) > reachStitch) return false;
+                if (MinAngle(a, b, d) < 8) return false;
+                // Not folding back over the triangle the front edge belongs to (it lies on v->u's side).
+                var mid = (a + b) / 2;
+                var e = b - a;
+                if (thirdOf.TryGetValue((v, u), out var t))
+                {
+                    var o = mid - P(t);
+                    o -= e * (Vector3.Dot(o, e) / MathF.Max(e.LengthSquared(), 1e-9f));
+                    if (Vector3.Dot(d - mid, o) <= 0) return false;
+                }
+                else if (Piece(u, v) && roadNodeOf.TryGetValue(u, out var nu))
+                {
+                    // On a road piece: out from the road (not across it), facing the way the road does.
+                    var o = OutOf(nu.Ribbon, nu.K, nu.J);
+                    if (nu.J != 0 && nu.J != Across) o = nu.K == 0 ? -Tangent(nu.Ribbon, 0) : Tangent(nu.Ribbon, ribbons[nu.Ribbon].Cross.Count - 1);
+                    if (Vector3.Dot(d - mid, o) <= 0) return false;
+                    if (Vector3.Dot(Vector3.Cross(b - a, d - a), ribbonNormals[nu.Ribbon][nu.K][nu.J]) < 0) return false;
+                }
+                // Between road vertices only: only where the land would be.
+                if (IsRoad(u) && IsRoad(v) && IsRoad(c) && underLand is not null)
+                {
+                    var low = a.Y < b.Y ? (a.Y < d.Y ? a : d) : (b.Y < d.Y ? b : d);
+                    if (!underLand(low)) return false;
+                }
+                if (!ClearOfRoads(a, b, d)) return false;
+                return !Crosses(u, v, c);
+            }
+            float Score(int u, int v, int c)
+            {
+                Vector3 a = P(u), b = P(v), d = P(c);
+                var perimeter = Vector3.Distance(a, b) + Vector3.Distance(b, d) + Vector3.Distance(d, a);
+                // Closing a corner of the front (c on a front edge from v, or into u): first.
+                var closes = front.Contains((c, v)) || front.Contains((u, c));
+                return perimeter * (closes ? 0.3f : 1);
+            }
+            var queue = new PriorityQueue<(int U, int V, int C), float>();
+            void Propose((int, int) edge)
+            {
+                var (u, v) = edge;
+                Vector3 a = P(u), b = P(v);
+                var mid = (a + b) / 2;
+                var best = -1;
+                var bestScore = float.MaxValue;
+                foreach (var key in Cells(mid - new Vector3(reachStitch), mid + new Vector3(reachStitch)))
+                {
+                    if (!frontCells.TryGetValue(key, out var set)) continue;
+                    foreach (var c in set)
+                    {
+                        if (c == u || c == v || Vector3.Distance(P(c), mid) > reachStitch) continue;
+                        var sc = Score(u, v, c);
+                        if (sc >= bestScore) continue;
+                        if (!Valid(u, v, c)) continue;
+                        bestScore = sc;
+                        best = c;
+                    }
+                }
+                if (best >= 0) queue.Enqueue((u, v, best), bestScore);
+            }
+            foreach (var edge in front.ToList()) Propose(edge);
+            var stitched = 0;
+            while (queue.TryDequeue(out var cand, out _) && stitched < 20000)
+            {
+                var (u, v, c) = cand;
+                if (!front.Contains((u, v))) continue;
+                if (!Valid(u, v, c)) { Propose((u, v)); continue; }
+                mesh.Indices.AddRange([u, v, c]);
+                Record(u, v, c);
+                AddCells(mesh.Indices.Count - 3);
+                stitched++;
+                made++;
+                front.Remove((u, v));
+                foreach (var (x, y) in new[] { (v, c), (c, u) })
+                {
+                    if (front.Remove((x, y))) continue;
+                    // A new front edge, unless it is a road piece (its other side is the road) or closed already.
+                    if (Piece(x, y) || edgeUses.GetValueOrDefault(x < y ? (x, y) : (y, x)) >= 2) { front.Remove((y, x)); continue; }
+                    front.Add((y, x));
+                    AddFrontVertex(x);
+                    AddFrontVertex(y);
+                    Propose((y, x));
+                }
+            }
+            if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  front: {stitched} triangles, {front.Count} front edges left open");
+            LastOpen = front.SelectMany(e => new[] { P(e.Item1).X, P(e.Item1).Y, P(e.Item1).Z, P(e.Item2).X, P(e.Item2).Y, P(e.Item2).Z, Piece(e.Item1, e.Item2) ? 1f : 0f }).ToArray();
+            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+                foreach (var (a, b) in front.Where(e => Near(P(e.Item1))).Take(30))
+                    Console.WriteLine($"    open: {P(a)} to {P(b)}{(Piece(a, b) ? " (road)" : "")}");
+        }
         // What is left open and small (a rim shorter than four gaps: no road's opening is) is filled, with a fan from
         // its middle: the patterns the strips do not cover (where the land between a helix's turns meets a road's start).
         var filled = 0;
-        foreach (var hole in RimLoops(mesh))
+        foreach (var hole in stitch ? [] : RimLoops(mesh))
         {
             var perimeter = 0f;
             for (var k = 0; k < hole.Count; k++) perimeter += Vector3.Distance(mesh.Positions[hole[k]], mesh.Positions[hole[(k + 1) % hole.Count]]);

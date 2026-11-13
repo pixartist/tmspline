@@ -181,8 +181,6 @@ export interface TerrainPaint {
 }
 /** Land lower than the stadium's ground lies this deep (ownTerrain's SUNK). */
 const SUNK_LAND = -2;
-/** Seam experiment: a road edge's land rim searched only outwards (a half disc across the road); off for now. */
-const SEAM_HALF_DISC = false;
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 /** Height range of track points and free blocks, meters above the ground (the export server's limit; the exported map grows to fit). */
 const Y_MIN = -8, Y_MAX = 1960;
@@ -231,7 +229,7 @@ export class Editor {
     this.updateSeamDebug();
   }
 
-  /** Seam debug: the stretches of road edge with no rim of the land near them (red), with the mesh debug view. */
+  /** Seam debug: the dev server's seam front left open (red), with the mesh debug view. */
   private seamDebug: THREE.LineSegments | null = null;
   private readonly seamDebugMaterial = new THREE.LineBasicMaterial({ color: 0xff2020, depthTest: false });
 
@@ -249,84 +247,19 @@ export class Editor {
     }
     const group = this.terrainMesh;
     if (!this.wireEnabled || !group) return;
-    const SEAM_REACH = 12, CELL = 4;
-    const key = (x: number, y: number, z: number) => `${Math.round(x * 50)},${Math.round(y * 50)},${Math.round(z * 50)}`;
-    const edges = new Map<string, { n: number; a: THREE.Vector3; b: THREE.Vector3 }>();
-    for (const child of group.children) {
-      const mesh = child as THREE.Mesh;
-      const pos = mesh.geometry?.getAttribute("position") as THREE.BufferAttribute | undefined;
-      if (!pos) continue;
-      for (let t = 0; t + 2 < pos.count; t += 3)
-        for (let k = 0; k < 3; k++) {
-          const a = new THREE.Vector3().fromBufferAttribute(pos, t + k), b = new THREE.Vector3().fromBufferAttribute(pos, t + (k + 1) % 3);
-          const ka = key(a.x, a.y, a.z), kb = key(b.x, b.y, b.z);
-          const id = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-          const e = edges.get(id);
-          if (e) e.n++;
-          else edges.set(id, { n: 1, a, b });
-        }
-    }
-    // The rim's points in a grid of squares, for looking up what is near.
-    const rim = new Map<string, THREE.Vector3[]>();
-    for (const e of edges.values()) {
-      if (e.n !== 1) continue;
-      for (const p of [e.a, e.b, e.a.clone().lerp(e.b, 0.5)]) {
-        const cell = `${Math.floor(p.x / CELL)},${Math.floor(p.z / CELL)}`;
-        (rim.get(cell) ?? rim.set(cell, []).get(cell)!).push(p);
-      }
-    }
-    // Only outwards from the edge: within 90 degrees of the road's own outward direction there (from the other edge
-    // to this one), a half disc across the road; land straight under the road does not count.
-    const near = (p: THREE.Vector3, outward: THREE.Vector3 | null) => {
-      const r = Math.ceil(SEAM_REACH / CELL), cx = Math.floor(p.x / CELL), cz = Math.floor(p.z / CELL);
-      const d = new THREE.Vector3();
-      for (let x = cx - r; x <= cx + r; x++)
-        for (let z = cz - r; z <= cz + r; z++)
-          for (const q of rim.get(`${x},${z}`) ?? []) {
-            if (q.distanceToSquared(p) >= SEAM_REACH * SEAM_REACH) continue;
-            if (outward && d.subVectors(q, p).dot(outward) < 0) continue;
-            return true;
-          }
-      return false;
-    };
-    const lines: number[] = [];
-    for (const v of this.views.values()) {
-      if (!v.road) continue;
-      const pos = v.road.geometry.getAttribute("position") as THREE.BufferAttribute;
-      const sc = v.surfaceCoords;
-      // Per 2 m along the road: its outermost surface vertices left and right.
-      const sides = new Map<number, { l?: [number, THREE.Vector3]; r?: [number, THREE.Vector3] }>();
-      for (let i = 0; i < pos.count && i * 2 + 1 < sc.length; i++) {
-        const d = sc[i * 2], across = sc[i * 2 + 1];
-        if (!Number.isFinite(d) || !Number.isFinite(across)) continue;
-        const slot = Math.round(d / 2);
-        const s = sides.get(slot) ?? sides.set(slot, {}).get(slot)!;
-        const p = new THREE.Vector3().fromBufferAttribute(pos, i);
-        if (across < 0 && (!s.l || across < s.l[0])) s.l = [across, p];
-        if (across > 0 && (!s.r || across > s.r[0])) s.r = [across, p];
-      }
-      const slots = [...sides.keys()].sort((a, b) => a - b);
-      for (const side of ["l", "r"] as const) {
-        let previous: THREE.Vector3 | null = null;
-        for (const slot of slots) {
-          const p = sides.get(slot)![side]?.[1];
-          if (!p) { previous = null; continue; }
-          // Outward: from the other edge to this one (none where they meet, on top of a closed tube).
-          const other = sides.get(slot)![side === "l" ? "r" : "l"]?.[1];
-          // (Half disc off for now, as on the server: TMSPLINE_SEAM_HALF=off.)
-          const outward = SEAM_HALF_DISC && other && other.distanceTo(p) > 1 ? p.clone().sub(other).normalize() : null;
-          const missing = !near(p, outward);
-          if (missing && previous) lines.push(previous.x, previous.y + 0.4, previous.z, p.x, p.y + 0.4, p.z);
-          previous = missing ? p : null;
-        }
-      }
-    }
-    if (lines.length === 0) return;
-    const geo = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
-    this.seamDebug = new THREE.LineSegments(geo, this.seamDebugMaterial);
-    this.seamDebug.renderOrder = 20;
-    this.seamDebug.raycast = () => {};
-    this.scene.add(this.seamDebug);
+    // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
+    void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
+      if (!data || !this.wireEnabled || this.terrainMesh !== group) return;
+      const points: number[] = [];
+      for (let i = 0; i + 6 < data.length + 1; i += 7) points.push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      if (this.seamDebug) { this.scene.remove(this.seamDebug); this.seamDebug.geometry.dispose(); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+      this.seamDebug = new THREE.LineSegments(geo, this.seamDebugMaterial);
+      this.seamDebug.renderOrder = 999;
+      this.seamDebug.raycast = () => {};
+      this.scene.add(this.seamDebug);
+    }).catch(() => {});
   }
 
   /** A mesh's triangles as lines on it (its "wire" child), there while the debug view is on. */

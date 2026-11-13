@@ -225,6 +225,9 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The brush's dabs, built into the terrain last asked for under the key: only the chunks they reach come back.
+        // Development: the seam's front edges the last terrain build left open (the editor draws them with the mesh view).
+        if (app.Environment.IsDevelopment()) app.MapGet("/api/terrain/open", () => Results.Ok(TmSpline.Core.Geometry.SeamZipper.LastOpen));
+
         app.MapPost("/api/terrain/dab", (ExportService.TerrainDabDto request, ExportService service) =>
         {
             try
