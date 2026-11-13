@@ -146,6 +146,8 @@ public static class SeamZipper
         int snaps = 0, targets = 0;
         var farthest = 0f;
         var made = 0;
+        var pinches = Unpinch(mesh);
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {pinches} vertices where rims touched split");
         SplitLongRims(mesh, gap);
         // Each edge's triangle's third corner (as the triangle winds the edge): a rim edge's land lies towards it.
         var third = new Dictionary<(int, int), int>();
@@ -357,6 +359,56 @@ public static class SeamZipper
             if (room(Vector3.Lerp(from, to, k / (float)steps)) < -2f) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Vertices where two pieces of land touch at a point only (two rims meeting there: the land round a road and the
+    /// land between a helix's turns): one copy per fan of triangles round them, so each rim is a loop of its own and
+    /// the strips on one side do not take the other's for a neighbour. Returns how many were split.
+    /// </summary>
+    private static int Unpinch(AdaptiveMesh mesh)
+    {
+        var around = new Dictionary<int, List<int>>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+            for (var k = 0; k < 3; k++)
+            {
+                if (!around.TryGetValue(mesh.Indices[t + k], out var list)) around[mesh.Indices[t + k]] = list = [];
+                list.Add(t);
+            }
+        var split = 0;
+        foreach (var (v, triangles) in around)
+        {
+            if (triangles.Count < 2) continue;
+            // Fans: triangles round v joined where they share an edge from v (the same other corner).
+            var parent = Enumerable.Range(0, triangles.Count).ToArray();
+            int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+            var byCorner = new Dictionary<int, int>();
+            for (var i = 0; i < triangles.Count; i++)
+                for (var k = 0; k < 3; k++)
+                {
+                    var c = mesh.Indices[triangles[i] + k];
+                    if (c == v) continue;
+                    if (byCorner.TryGetValue(c, out var j)) parent[Find(i)] = Find(j);
+                    else byCorner[c] = i;
+                }
+            var copies = new Dictionary<int, int>();
+            for (var i = 0; i < triangles.Count; i++)
+            {
+                var root = Find(i);
+                if (root == Find(0)) continue;
+                if (!copies.TryGetValue(root, out var copy))
+                {
+                    copy = mesh.Positions.Count;
+                    mesh.Positions.Add(mesh.Positions[v]);
+                    mesh.Pinned.Add(false);
+                    copies[root] = copy;
+                    split++;
+                }
+                for (var k = 0; k < 3; k++)
+                    if (mesh.Indices[triangles[i] + k] == v) mesh.Indices[triangles[i] + k] = copy;
+            }
+        }
+        return split;
     }
 
     /// <summary>
