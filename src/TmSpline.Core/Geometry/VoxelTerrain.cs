@@ -40,9 +40,7 @@ public static class VoxelTerrain
     private const float FloorCover = 2f;
     /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
     public static bool OpenSeam { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
-    /// <summary>How far under a road's surface (and over it) land counts as enclosed by it, metres.</summary>
-    private const float SeamBelow = 6, SeamAbove = 1;
-    /// <summary>And this far out from a road's edges (beside it), the band the seam's strip will fill; metres (TMSPLINE_SEAM_GAP).</summary>
+    /// <summary>The land is cut back this far from a road's body (its edges, the back of its surface): the band the seam's strip will fill; metres (TMSPLINE_SEAM_GAP).</summary>
     public static float SeamGap { get; set; } = Setting("TMSPLINE_SEAM_GAP", 6);
 
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
@@ -600,46 +598,91 @@ public static class VoxelTerrain
         });
         var kept = new AdaptiveMesh();
         var index = new Dictionary<int, int>();
+        // Seam experiment (TMSPLINE_SEAM=open): the land is cut back from the roads along a continuous line, not
+        // triangle by triangle: its triangles are cut where the seam field (how far from the road's body, less SeamGap)
+        // is zero and the part near the road left out. The body is the road's edges and the back of its driving surface
+        // (under an open road, round a closed tube); a distance has no hollows away from what it is measured to, so the
+        // cut is one clean rim along each road, and land over a road (a tunnel's roof) farther than SeamGap stays.
+        float[]? seam = null;
+        var crossings = new Dictionary<long, int>();
+        if (OpenSeam)
+        {
+            seam = new float[mesh.Positions.Count];
+            Parallel.For(0, seam.Length, i =>
+            {
+                var p = mesh.Positions[i];
+                var (toEdge, _, _) = road(p);
+                var (toRoom, deck) = nearest(p);
+                var body = toEdge;
+                if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
+                seam[i] = body - SeamGap;
+            });
+        }
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
         {
             Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
             var mid = (a + b + c) / 3;
             if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
-            // Seam experiment (TMSPLINE_SEAM=open): the land the roads enclose is left out, triangle by triangle: within a
-            // road's width (between its edges) or SeamGap beside them, and close under or at its surface. Land far under a road (under a bridge)
-            // and over it (a tunnel's roof) stays. What is left has holes along the roads, whose rims are the seam's loops.
-            if (OpenSeam)
-            {
-                var (toEdge, over, across) = road(mid);
-                var (toRoom, deck) = nearest(mid);
-                // Under a road and round a closed tube's outside: land within SeamGap of the driving surface's back (the
-                // road's body). Over a tube its two edges meet on top: the land there is beside the edges, as at an open road.
-                var behind = deck != default && toRoom > -1 && toRoom < SeamGap;
-                // Beside the edges, at the road's height, and between them close under the surface.
-                var beside = toEdge < SeamGap && over < SeamAbove && over > -SeamGap;
-                var between = toEdge < 100 && across < 1 && over < SeamAbove && over > -SeamBelow;
-                if (behind || beside || between) continue;
-            }
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             if (!KeepFloor && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
             }
-            for (var k = 0; k < 3; k++)
+            if (seam is not null)
             {
-                var i = mesh.Indices[t + k];
-                if (!index.TryGetValue(i, out var id))
-                {
-                    id = kept.Positions.Count;
-                    kept.Positions.Add(mesh.Positions[i]);
-                    kept.Pinned.Add(false);
-                    index[i] = id;
-                }
-                kept.Indices.Add(id);
+                Clip(mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]);
+                continue;
             }
+            for (var k = 0; k < 3; k++) kept.Indices.Add(Kept(mesh.Indices[t + k]));
         }
         return kept;
+
+        int Kept(int i)
+        {
+            if (!index.TryGetValue(i, out var id))
+            {
+                id = kept.Positions.Count;
+                kept.Positions.Add(mesh.Positions[i]);
+                kept.Pinned.Add(false);
+                index[i] = id;
+            }
+            return id;
+        }
+
+        // Seam experiment: a triangle cut along the seam field's zero (the part where it is positive kept), its new
+        // corners on its edges shared with the triangles beside it.
+        int Crossing(int i, int j)
+        {
+            var key = i < j ? ((long)i << 32) | (uint)j : ((long)j << 32) | (uint)i;
+            if (crossings.TryGetValue(key, out var id)) return id;
+            float gi = seam![i], gj = seam[j];
+            var at = mesh.Positions[i] + (mesh.Positions[j] - mesh.Positions[i]) * (gi / (gi - gj));
+            id = kept.Positions.Count;
+            kept.Positions.Add(at);
+            kept.Pinned.Add(false);
+            crossings[key] = id;
+            return id;
+        }
+        void Clip(int i0, int i1, int i2)
+        {
+            Span<int> corners = [i0, i1, i2];
+            Span<int> polygon = stackalloc int[4];
+            var n = 0;
+            for (var k = 0; k < 3; k++)
+            {
+                int i = corners[k], j = corners[(k + 1) % 3];
+                bool inI = seam![i] >= 0, inJ = seam[j] >= 0;
+                if (inI) polygon[n++] = Kept(i);
+                if (inI != inJ) polygon[n++] = Crossing(i, j);
+            }
+            for (var k = 1; k + 1 < n; k++)
+            {
+                kept.Indices.Add(polygon[0]);
+                kept.Indices.Add(polygon[k]);
+                kept.Indices.Add(polygon[k + 1]);
+            }
+        }
     }
 }
