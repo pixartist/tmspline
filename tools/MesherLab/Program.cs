@@ -6,6 +6,16 @@ using SkiaSharp;
 using TmSpline.Core.Geometry;
 
 if (args.Length >= 2 && args[0] == "--chunks") { ChunkCheck.Run(args[1]); return; }
+if (args.Length >= 2 && args[0] == "--size")
+{
+    // The land's mesh as the settings in the environment build it: triangles, vertices, and the estimated size.
+    var sizeMap = TmSpline.Core.Model.TrackJson.ParseMap(File.ReadAllText(args[1]));
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    var land = TmSpline.Core.Geometry.VoxelTerrain.Build(sizeMap.Terrain!, sizeMap);
+    var used = land.Indices.Distinct().Count();
+    Console.WriteLine($"{land.Indices.Count / 3} triangles, {used} vertices, about {land.Indices.Count / 3 * 24.3 / 1024:0} KB, built in {watch.Elapsed.TotalSeconds:0.0} s");
+    return;
+}
 if (args.Length >= 2 && args[0] == "--seam") { SeamLoops.Run(args[1], args.Length > 2 ? double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 12); return; }
 if (args.Length >= 3 && args[0] == "--map") { MapMode.Run(args[1], args[2]); return; }
 if (args.Length >= 3 && args[0] == "--check") { Check.Run(args[1], args[2], args.Length > 3 ? args[3] : "new", args.Length > 4 ? args[4] : null); return; }

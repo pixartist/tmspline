@@ -644,7 +644,11 @@ public static class StitchedTerrain
                 var vaultMid = (railL + railR) / 2;
                 var o = Vector2.Normalize(new Vector2(-half.Y, half.X));
                 var toDeck = Vector2.Dot(o, mid - vaultMid);
-                if (MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
+                // On the driving side: the way the deck faces (a half-pipe's deck lies under the line between its rails,
+                // a road arching up lies over it: either way its vault goes the way it faces). Only where that is too
+                // sideways to tell (a tube nearly closed), away from the deck.
+                var facing = nb.LengthSquared() > 1e-8f ? Vector2.Dot(o, Vector2.Normalize(nb)) : 0;
+                if (MathF.Abs(facing) > 0.3f ? facing < 0 : MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
                 var height = MathF.Max(ArchHeight, half.Length());
                 for (var k = 1; k < ArchN; k++)
                 {

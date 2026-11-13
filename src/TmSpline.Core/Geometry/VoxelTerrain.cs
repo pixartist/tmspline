@@ -81,6 +81,7 @@ public static class VoxelTerrain
         }
         // Per piece, its area and how much of it lies under a road (the largest piece always stays).
         var area = new Dictionary<int, (double All, double Under)>();
+        var where = new Dictionary<int, Vector3>();
         if (under is not null)
         {
             var largest = size.MaxBy(kv => kv.Value).Key;
@@ -92,11 +93,12 @@ public static class VoxelTerrain
                 var s = Vector3.Cross(b - a, c - a).Length() / 2;
                 var (all, below) = area.GetValueOrDefault(root);
                 area[root] = (all + s, below + (under((a + b + c) / 3) ? s : 0));
+                where.TryAdd(root, (a + b + c) / 3);
             }
         }
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
             foreach (var (root, x) in area.OrderByDescending(kv => kv.Value.All).Take(8))
-                Console.WriteLine($"  piece of {size[root]} triangles, {x.All:0} m2, {x.Under / Math.Max(x.All, 1e-9):P0} under a road");
+                Console.WriteLine($"  piece of {size[root]} triangles, {x.All:0} m2, {x.Under / Math.Max(x.All, 1e-9):P0} under a road, at {where[root]}");
         bool Keep(int root) => size[root] >= SeamIsland && !(area.TryGetValue(root, out var x) && x.Under > x.All / 2);
         var kept = new List<int>(mesh.Indices.Count);
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
@@ -775,6 +777,33 @@ public static class VoxelTerrain
                 foreach (var r in rows.Take(25)) Console.WriteLine(r);
             }
             DropIslands(kept, p => road(p) is var r && r.Edge < 100 && r.Across < 1 && r.Over < 0);
+            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+            {
+                // Land facing down under a road (its back to the sky): where, and the field there.
+                var rows = new List<(Vector3 Mid, float Area)>();
+                for (var t = 0; t + 2 < kept.Indices.Count; t += 3)
+                {
+                    Vector3 a = kept.Positions[kept.Indices[t]], b = kept.Positions[kept.Indices[t + 1]], c = kept.Positions[kept.Indices[t + 2]];
+                    var n = Vector3.Cross(b - a, c - a);
+                    if (n.LengthSquared() < 1e-8f || Vector3.Normalize(n).Y > -0.3f) continue;
+                    var mid = (a + b + c) / 3;
+                    if (surface(mid).Distance > 30) continue;
+                    rows.Add((mid, n.Length() / 2));
+                }
+                Console.WriteLine($"  {rows.Count} land triangles facing down within 30 m of a road, {rows.Sum(r => r.Area):0} m2");
+                foreach (var g in rows.GroupBy(r => ((int)MathF.Floor(r.Mid.X / 40), (int)MathF.Floor(r.Mid.Z / 40))).OrderByDescending(g => g.Sum(r => r.Area)).Take(8))
+                {
+                    var m = g.OrderByDescending(r => r.Area).First().Mid;
+                    Console.WriteLine($"    {g.Count()} near {m.X:0},{m.Y:0},{m.Z:0} ({g.Sum(r => r.Area):0} m2): road surface {surface(m).Distance:0.0} m away, room {room(m):0.0}, field {SeamField(m):0.0}, land field {Field(m):0.0}");
+                }
+            }
+            if (Environment.GetEnvironmentVariable("TMSPLINE_PROBE") is { Length: > 0 } probeAt)
+            {
+                var pv = probeAt.Split(';').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                var q = new Vector3(pv[0], pv[1], pv[2]);
+                var rd = road(q);
+                Console.WriteLine($"  probe {q}: edge {rd.Edge:0.0}, over {rd.Over:0.0}, across {rd.Across:0.00}, beyond {rd.Beyond:0.0}; surface {surface(q).Distance:0.0} at {surface(q).Point}; room {room(q):0.0}; field {SeamField(q):0.0}");
+            }
             // The zipper: the gap closed with strips from the land's rim to the road edges (TMSPLINE_ZIP=off: left open).
             if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "off")
             {
