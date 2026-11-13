@@ -38,6 +38,10 @@ public static class VoxelTerrain
     private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
     /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
     private const float FloorCover = 2f;
+    /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
+    public static bool OpenSeam { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
+    /// <summary>How far under a road's surface (and over it) land counts as enclosed by it, metres.</summary>
+    private const float SeamBelow = 6, SeamAbove = 1;
 
     /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
     public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
@@ -600,6 +604,14 @@ public static class VoxelTerrain
             var mid = (a + b + c) / 3;
             if (double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
+            // Seam experiment (TMSPLINE_SEAM=open): the land the roads enclose is left out, triangle by triangle: within a
+            // road's width (between its edges) and close under or at its surface. Land far under a road (under a bridge)
+            // and over it (a tunnel's roof) stays. What is left has holes along the roads, whose rims are the seam's loops.
+            if (OpenSeam)
+            {
+                var (toEdge, over, across) = road(mid);
+                if (toEdge < 100 && across < 1 && over < SeamAbove && over > -SeamBelow) continue;
+            }
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             if (!KeepFloor && ua != default && ub != default && uc != default)
             {
