@@ -170,12 +170,12 @@ public static class StitchedTerrain
     public static StitchedTerrainResult Build(TerrainGrid grid, TrackMap map, int maxTriangles = 0) => new Builder(grid, map, maxTriangles).Run();
 
     /// <summary>The roads' rooms alone, for VoxelTerrain: signed distance to them (negative inside), and their lowest point in a plan point's square of 8 m (+infinity: none there), and the distance with the way the driving surface faces where that is the nearest of a room's outline (else zero); the distance to the nearest road edge with the height over that road's edge line.</summary>
-    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across)> Road) Rooms(TerrainGrid grid, TrackMap map)
+    public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
-        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across), over, across));
+        return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across, out var beyond), over, across, beyond));
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -727,11 +727,13 @@ public static class StitchedTerrain
         }
 
         /// <summary>Distance to the nearest road edge (a rail), metres (`far` where none is within about a bucket), and how far over that road's edge line the point lies (towards its vault's top).</summary>
-        public float RoadDistance(Vector3 p, out float over, out float across, float far = 1e3f)
+        /// <param name="beyond">Past an open road's end (along it, outwards): the distance to its end, the line across between its edges; else MaxValue.</param>
+        public float RoadDistance(Vector3 p, out float over, out float across, out float beyond, float far = 1e3f)
         {
             var best = far;
             over = 0;
             across = 0;
+            beyond = float.MaxValue;
             int bx = (int)Math.Floor(p.X / Bucket), bz = (int)Math.Floor(p.Z / Bucket);
             for (var ox = -1; ox <= 1; ox++)
                 for (var oz = -1; oz <= 1; oz++)
@@ -767,6 +769,14 @@ public static class StitchedTerrain
                         // And where across the road: 0 at its middle, 1 at an edge.
                         var half = (railR - railL) / 2;
                         across = half.LengthSquared() > 1e-8f ? MathF.Abs(Vector2.Dot(q - mid, half)) / half.LengthSquared() : 0;
+                        if (along > 0)
+                        {
+                            // To the line between the edges at the end, in the section's plane, then along.
+                            var line = railR - railL;
+                            var h = line.LengthSquared() > 1e-8f ? Math.Clamp(Vector2.Dot(q - railL, line) / line.LengthSquared(), 0, 1) : 0;
+                            beyond = MathF.Sqrt((q - (railL + line * h)).LengthSquared() + along * along);
+                        }
+                        else beyond = float.MaxValue;
                     }
                 }
             return best;

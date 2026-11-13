@@ -113,7 +113,7 @@ public static class VoxelTerrain
     /// <summary>What a build needs of the roads (their rooms, and how far each place is from them): the same until a road or the land's extent changes.</summary>
     public sealed class Roads
     {
-        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across)> Road) Rooms { get; init; }
+        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road) Rooms { get; init; }
         internal float[] Away { get; init; } = [];
         internal int Columns { get; init; }
         internal int Rows { get; init; }
@@ -358,7 +358,7 @@ public static class VoxelTerrain
                 // Beside the road, at the height of its edges and under it, the cut stays hard: the land meets them
                 // exactly. Straight over the road it is soft from the edges' height on: a road coming out of the land
                 // comes out where its cover gets thin, not through a wedge of land thinning to nothing along it.
-                var (edge, over, across) = road(p);
+                var (edge, over, across, _) = road(p);
                 var k = Soften * (edge < 100 ? MathF.Max(Ramp(0.5f, 3, over), (1 - Ramp(0.8f, 1, across)) * Ramp(0, 0.75f, over)) : 1);
                 if (k > 0.01f)
                 {
@@ -404,7 +404,7 @@ public static class VoxelTerrain
             var above = 0f;
             if (from <= 0)
             {
-                var (edge, up, _) = road(c);
+                var (edge, up, _, _) = road(c);
                 from = MathF.Max(0, MathF.Min(edge, 2 * Coarse) - reach);
                 above = up;
             }
@@ -643,12 +643,14 @@ public static class VoxelTerrain
             Parallel.For(0, seam.Length, i =>
             {
                 var p = mesh.Positions[i];
-                var (toEdge, _, across) = road(p);
+                var (toEdge, _, across, beyond) = road(p);
                 var (toRoom, deck) = nearest(p);
                 // From an edge only outwards: the half of the plane across the road beyond the edge (the owner's rule:
                 // never more than 90 degrees from the road's own outward direction). Under the road it is the distance
                 // to the back of its surface that counts.
                 var body = across >= 1 ? toEdge : float.MaxValue;
+                // Past an open road's end: its end counts as an edge too, outwards along the road.
+                body = MathF.Min(body, beyond);
                 if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
                 seam[i] = body - SeamGap;
             });
