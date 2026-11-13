@@ -208,9 +208,22 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     editor.setWire(!editor.wireEnabled);
     wireButton.classList.toggle("active", editor.wireEnabled);
   });
+  // The gap view's legend, over the 3D view's bottom left corner while it is on.
+  const gapsLegend = document.createElement("div");
+  gapsLegend.style.cssText = "position:absolute;left:12px;bottom:12px;z-index:5;padding:8px 10px;border-radius:6px;background:rgba(20,22,26,0.85);color:#e8e8e8;font:12px/1.6 system-ui,sans-serif;pointer-events:none";
+  gapsLegend.hidden = true;
+  for (const [color, label] of [["#00e5ff", "Land edge meeting no road"], ["#ffd400", "Road edge no land meets"], ["#ff2d95", "Close-road hole (loop)"]]) {
+    const row = document.createElement("div");
+    const swatch = document.createElement("span");
+    swatch.style.cssText = `display:inline-block;width:18px;height:3px;margin-right:8px;vertical-align:middle;background:${color}`;
+    row.append(swatch, label);
+    gapsLegend.append(row);
+  }
+  editor.renderer.domElement.parentElement?.append(gapsLegend);
   const gapsButton = button("Gaps", "Show the seam's gaps (dev server): land edges meeting no road (cyan), road edges no land meets (yellow), close-road holes (magenta)", () => {
     editor.setGaps(!editor.gapsEnabled);
     gapsButton.classList.toggle("active", editor.gapsEnabled);
+    gapsLegend.hidden = !editor.gapsEnabled;
   });
 
   window.addEventListener("keydown", (e) => {
