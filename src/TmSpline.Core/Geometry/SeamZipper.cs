@@ -14,7 +14,7 @@ namespace TmSpline.Core.Geometry;
 /// </summary>
 public static class SeamZipper
 {
-    /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 the seam on the road (where the land meets it), 2 the close-road holes (the loops found, filled or not).</summary>
+    /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 the seam on the road (where the land meets it), 2 the close-road holes (the loops found, filled or not), 3 the seam where land meets the road twice (the loops found, filled or not).</summary>
     public static float[] LastOpen { get; private set; } = [];
 
     private sealed class Rail
@@ -1586,9 +1586,13 @@ public static class SeamZipper
             // edge's foot), along its edges and, where the seam leaves them, across its underside.
             foreach (var ((a, b), n) in uses)
             {
-                if (n != 1 || LandVertex(a) || LandVertex(b)) continue;
+                if (LandVertex(a) || LandVertex(b)) continue;
+                // (On the road: two neighbouring grid nodes of one road; not a line between road nodes through a fill.)
+                if (!roadNodeOf.TryGetValue(a, out var ga) || !roadNodeOf.TryGetValue(b, out var gb) || ga.Ribbon != gb.Ribbon || Math.Abs(ga.K - gb.K) + Math.Abs(ga.J - gb.J) != 1) continue;
                 Vector3 pa = mesh.Positions[a], pb = mesh.Positions[b];
-                debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 1]);
+                // (Used by two land triangles: land on it twice, kind 3.)
+                if (n == 1) debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 1]);
+                else if (n >= 2) debug.AddRange([pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, 3]);
             }
             LastOpen = debug.ToArray();
         }

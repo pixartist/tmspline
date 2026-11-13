@@ -212,7 +212,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   const gapsLegend = document.createElement("div");
   gapsLegend.style.cssText = "position:absolute;left:12px;bottom:12px;z-index:5;padding:8px 10px;border-radius:6px;background:rgba(20,22,26,0.85);color:#e8e8e8;font:12px/1.6 system-ui,sans-serif;pointer-events:none";
   gapsLegend.hidden = true;
-  for (const [color, label] of [["#00e5ff", "Land edge meeting no road"], ["#ffd400", "Seam on the road (land attached)"], ["#ff2d95", "Close-road hole (loop)"]]) {
+  for (const [color, label] of [["#00e5ff", "Land edge meeting no road"], ["#ffd400", "Seam on the road (land attached)"], ["#ff2d95", "Close-road hole (loop)"], ["#ff7a00", "Seam with land on it twice"]]) {
     const row = document.createElement("div");
     const swatch = document.createElement("span");
     swatch.style.cssText = `display:inline-block;width:18px;height:3px;margin-right:8px;vertical-align:middle;background:${color}`;

@@ -245,7 +245,7 @@ export class Editor {
    * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), the seam on
    * the road, where land attaches (yellow), the close-road holes (magenta).
    */
-  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
+  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -264,8 +264,8 @@ export class Editor {
     // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
     void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
       if (!data || !this.gapsEnabled || this.terrainMesh !== group) return;
-      const points: number[][] = [[], [], []];
-      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(2, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      const points: number[][] = [[], [], [], []];
+      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(3, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
       if (this.seamDebug) { this.scene.remove(this.seamDebug); for (const c of this.seamDebug.children) (c as LineSegments2).geometry.dispose(); }
       const lines = new THREE.Group();
       points.forEach((list, kind) => {
