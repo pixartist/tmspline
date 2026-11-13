@@ -2277,6 +2277,16 @@ export class Editor {
     // The left button orbits only with Alt held (Alt+Shift pans), so plain left drags can select and move things.
     // Runs before OrbitControls' listener (capture phase), which reads the button mapping on pointer down.
     this.orbit.mouseButtons.LEFT = e.altKey ? THREE.MOUSE.ROTATE : (-1 as THREE.MOUSE);
+    // Alt-drag over something (not Alt+Shift, which pans): turn round the point under the pointer, not the orbit
+    // center (over the sky: as before).
+    if (e.button === 0 && e.altKey && !e.shiftKey) {
+      const hit = this.sceneHit(this.rayFrom(e).ray);
+      if (hit) {
+        this.orbit.mouseButtons.LEFT = -1 as THREE.MOUSE;
+        this.pivotDrag = { pivot: hit.point.clone(), x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+        this.renderer.domElement.setPointerCapture(e.pointerId);
+      }
+    }
     if (e.button !== 0 || e.altKey) return;
     if (this.terrainPaint && this.map.terrain) { this.startStroke(e); return; }
     // The optional axis gizmo handles its own drags.
@@ -2323,8 +2333,38 @@ export class Editor {
     this.beginDragPlane(e);
   }
 
+  /** An Alt-drag turning the camera round the point that was under the pointer. */
+  private pivotDrag: { pivot: THREE.Vector3; x: number; y: number; pointerId: number } | null = null;
+
+  /** Turns the camera round the pivot: sideways round the vertical through it, up and down round the camera's right. */
+  private turnAroundPivot(e: PointerEvent): void {
+    const drag = this.pivotDrag!;
+    const height = this.renderer.domElement.clientHeight || 1;
+    const yaw = (-2 * Math.PI * (e.clientX - drag.x)) / height;
+    let pitch = (-2 * Math.PI * (e.clientY - drag.y)) / height;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    const camera = this.camera;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    // Not over the top: the view stays short of straight up or down.
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    const next = forward.clone().applyAxisAngle(right, pitch);
+    if (Math.abs(next.y) > 0.98) pitch = 0;
+    const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(right, pitch));
+    camera.position.sub(drag.pivot).applyQuaternion(turn).add(drag.pivot);
+    camera.quaternion.premultiply(turn);
+    // The orbit center along the view at the pivot's depth (OrbitControls looks at it; the view does not jump).
+    const ahead = camera.getWorldDirection(new THREE.Vector3());
+    this.setOrbitDepth(Math.max(1, drag.pivot.clone().sub(camera.position).dot(ahead)));
+  }
+
   private onPointerMove(e: PointerEvent): void {
     this.lastPointer = e;
+    if (this.pivotDrag && e.pointerId === this.pivotDrag.pointerId) {
+      this.turnAroundPivot(e);
+      return;
+    }
     if (this.terrainPaint && this.map.terrain && (!this.stroke || e.pointerId === this.stroke.pointerId)) {
       if (this.stroke) this.continueStroke(e);
       else if (!this.hoverQueued && !e.buttons) {
@@ -2374,6 +2414,11 @@ export class Editor {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    if (this.pivotDrag && e.pointerId === this.pivotDrag.pointerId) {
+      this.pivotDrag = null;
+      if (this.renderer.domElement.hasPointerCapture(e.pointerId)) this.renderer.domElement.releasePointerCapture(e.pointerId);
+      return;
+    }
     if (e.button === 2) {
       // A right click (not a pan): puts the block in hand away, or deselects the selected block.
       const start = this.rightClickStart;
