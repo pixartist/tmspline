@@ -143,6 +143,103 @@ public static class SeamZipper
             }
             return id;
         }
+        // The grid zipper (the default; TMSPLINE_ZIP=project: each rim vertex its own road point): each road's attach
+        // surface as a grid, ring by ring at the quality the road is built at, across from its left edge's contact (a
+        // curb's, or the bare edge) over the driving surface to its right edge's; its border is the two edges and the
+        // two ends' cross lines. Rim vertices join its nodes, and between two neighbours the road side runs along the
+        // grid from one node to the next: continuous along a run, whatever each vertex chose.
+        var grid = Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "project";
+        const int Across = 16;
+        var ribbons = new List<(List<Vector3[]> Cross, List<float> Along)>();
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            if (track.Segments.Count == 0) continue;
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(roadQuality));
+            if (rings.Count < 2) continue;
+            static Vector3 W(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
+            var cross = new List<Vector3[]>();
+            var along = new List<float>();
+            foreach (var r in rings)
+            {
+                var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
+                var points = new Vector3[Across + 1];
+                points[0] = W(RoadMeshBuilder.EdgeContact(r, segment, -1));
+                points[Across] = W(RoadMeshBuilder.EdgeContact(r, segment, 1));
+                for (var j = 1; j < Across; j++)
+                {
+                    var e = RoadMeshBuilder.SurfaceSample(r, (j / (double)Across - 0.5) * r.Width);
+                    points[j] = W(r.Position + r.Right * e.X + r.Up * e.Y);
+                }
+                cross.Add(points);
+                along.Add((float)r.Distance);
+            }
+            ribbons.Add((cross, along));
+        }
+        var ribbonBuckets = new Dictionary<(int, int), List<(int Ribbon, int Ring)>>();
+        for (var rb = 0; rb < ribbons.Count; rb++)
+            for (var k = 0; k < ribbons[rb].Cross.Count; k++)
+            {
+                var c = ribbons[rb].Cross[k][Across / 2];
+                var key = ((int)MathF.Floor(c.X / EdgeBucket), (int)MathF.Floor(c.Z / EdgeBucket));
+                if (!ribbonBuckets.TryGetValue(key, out var list)) ribbonBuckets[key] = list = [];
+                list.Add((rb, k));
+            }
+        // The nearest place on any road's grid: which road, where along (ring index and fraction) and across (0 at the
+        // left edge, 1 at the right), how far.
+        (int Ribbon, float S, float U, float Distance)? Project(Vector3 p)
+        {
+            (int, float, float, float)? best = null;
+            var bestDistance = 2.5f * gap;
+            var cells = (int)MathF.Ceiling((2.5f * gap + 20) / EdgeBucket);
+            int bx = (int)MathF.Floor(p.X / EdgeBucket), bz = (int)MathF.Floor(p.Z / EdgeBucket);
+            var seen = new HashSet<(int, int)>();
+            for (var x = bx - cells; x <= bx + cells; x++)
+                for (var z = bz - cells; z <= bz + cells; z++)
+                {
+                    if (!ribbonBuckets.TryGetValue((x, z), out var list)) continue;
+                    foreach (var (rb, k0) in list)
+                        for (var k = k0 - 1; k <= k0; k++)
+                        {
+                            var cross = ribbons[rb].Cross;
+                            if (k < 0 || k + 1 >= cross.Count || !seen.Add((rb, k))) continue;
+                            for (var j = 0; j < Across; j++)
+                            {
+                                Vector3 a = cross[k][j], b = cross[k + 1][j], c = cross[k + 1][j + 1], d = cross[k][j + 1];
+                                foreach (var (p0, p1, p2, s0, u0, s1, u1, s2, u2) in new[]
+                                {
+                                    (a, b, c, k, j, k + 1, j, k + 1, j + 1),
+                                    (a, c, d, k, j, k + 1, j + 1, k, j + 1),
+                                })
+                                {
+                                    var q = ClosestOnTriangle(p, p0, p1, p2, out var v, out var w);
+                                    var distance = Vector3.Distance(p, q);
+                                    if (distance >= bestDistance) continue;
+                                    bestDistance = distance;
+                                    var u = 1 - v - w;
+                                    best = (rb, u * s0 + v * s1 + w * s2, (u * u0 + v * u1 + w * u2) / Across, distance);
+                                }
+                            }
+                        }
+                }
+            return best;
+        }
+        // The grid's nodes as the mesh's vertices (on an edge, the road mesh's own edge vertex), made when first used.
+        var nodeVertex = new Dictionary<(int, int, int), int>();
+        int Node(int rb, int k, int j)
+        {
+            if (!nodeVertex.TryGetValue((rb, k, j), out var id))
+            {
+                id = mesh.Positions.Count;
+                mesh.Positions.Add(ribbons[rb].Cross[k][j]);
+                mesh.Pinned.Add(false);
+                nodeVertex[(rb, k, j)] = id;
+            }
+            return id;
+        }
+        var breaks = 0;
+        // Switches from one road to another along a rim (bridged): from one node to the other.
+        var bridges = new List<((int Ribbon, int K, int J) From, (int Ribbon, int K, int J) To)>();
         int snaps = 0, targets = 0;
         var farthest = 0f;
         var made = 0;
@@ -168,7 +265,77 @@ public static class SeamZipper
             var n = loop.Count;
             var target = new int[n];
             var onEdge = new (int Edge, float At)?[n];
-            for (var i = 0; i < n; i++)
+            var node = new (int Ribbon, int K, int J)[n];
+            for (var i = 0; grid && i < n; i++)
+            {
+                target[i] = -1;
+                var p = mesh.Positions[loop[i]];
+                var outward = Outward(loop[(i - 1 + n) % n], loop[i]) + Outward(loop[i], loop[(i + 1) % n]);
+                outward = outward.LengthSquared() > 1e-9f ? Vector3.Normalize(outward) : Vector3.Zero;
+                // The nodes it may join: nearest the place where it is nearest a road's grid, and that ring's edges; the
+                // same for the place a step out from the land (another road may be nearer that way).
+                var candidates = new List<(int Ribbon, int K, int J)>();
+                foreach (var hit in new[] { Project(p), Project(p + outward * gap) })
+                {
+                    if (hit is not { } h) continue;
+                    var count = ribbons[h.Ribbon].Cross.Count;
+                    var k = Math.Clamp((int)MathF.Round(h.S), 0, count - 1);
+                    var j = Math.Clamp((int)MathF.Round(h.U * Across), 0, Across);
+                    candidates.Add((h.Ribbon, k, j));
+                    candidates.Add((h.Ribbon, k, 0));
+                    candidates.Add((h.Ribbon, k, Across));
+                }
+                Vector3 At((int Ribbon, int K, int J) c) => ribbons[c.Ribbon].Cross[c.K][c.J];
+                var reachable = candidates.Distinct().Where(c => Vector3.Distance(p, At(c)) < 2.5f * gap && Clear(room, p, At(c)))
+                    .OrderBy(c => Vector3.DistanceSquared(p, At(c))).ToList();
+                // The nearest out from the land (not back through it); failing that, the nearest at all.
+                var chosen = reachable.Cast<(int, int, int)?>().FirstOrDefault(c => Vector3.Dot(At(c!.Value) - p, outward) > 0) ?? reachable.Cast<(int, int, int)?>().FirstOrDefault();
+                if (chosen is not { } pick)
+                {
+                    if (Near(p)) Console.WriteLine($"  rim vertex {p} not joined: no grid node it reaches");
+                    continue;
+                }
+                node[i] = pick;
+                target[i] = Node(pick.Item1, pick.Item2, pick.Item3);
+                targets++;
+                if (pick.Item3 == 0 || pick.Item3 == Across) snaps++;
+                if (Near(p)) Console.WriteLine($"  rim vertex {p} (loop of {n}, #{i}) joined to road {pick.Item1} ring {pick.Item2} across {pick.Item3} at {At(pick)}");
+            }
+            // A vertex on another road than both its neighbours, which agree (one rim vertex at the tip of the land
+            // between a helix's turns choosing the upper turn, its neighbours the lower one's start): onto their road,
+            // the nearest node between their rings it reaches. (From the neighbours' choices only, not the order the
+            // rim is walked in.)
+            bool Together((int Ribbon, int K, int J) a, (int Ribbon, int K, int J) b) =>
+                a.Ribbon == b.Ribbon && MathF.Abs(ribbons[a.Ribbon].Along[a.K] - ribbons[a.Ribbon].Along[b.K]) <= 3 * gap;
+            for (var i = 0; grid && i < n; i++)
+            {
+                int prev = (i - 1 + n) % n, next = (i + 1) % n;
+                if (target[i] < 0 || target[prev] < 0 || target[next] < 0) continue;
+                if (Together(node[i], node[prev]) || Together(node[i], node[next]) || !Together(node[prev], node[next])) continue;
+                var p = mesh.Positions[loop[i]];
+                var rb = node[prev].Ribbon;
+                int k0 = Math.Min(node[prev].K, node[next].K), k1 = Math.Max(node[prev].K, node[next].K);
+                (int, int, int)? better = null;
+                var bestDistance = 2.5f * gap;
+                for (var k = k0; k <= k1; k++)
+                    for (var jj = 0; jj <= Across; jj++)
+                    {
+                        var q = ribbons[rb].Cross[k][jj];
+                        var distance = Vector3.Distance(p, q);
+                        if (distance < bestDistance && Clear(room, p, q)) { bestDistance = distance; better = (rb, k, jj); }
+                    }
+                if (better is not { } b)
+                {
+                    // None it reaches: not joined (the fan below closes it with its neighbours').
+                    if (Near(p)) Console.WriteLine($"  rim vertex {p} on road {node[i].Ribbon} ring {node[i].K}, its neighbours on another, unjoined");
+                    target[i] = -1;
+                    continue;
+                }
+                if (Near(p)) Console.WriteLine($"  rim vertex {p} moved from road {node[i].Ribbon} ring {node[i].K} to its neighbours' road {b.Item1} ring {b.Item2} across {b.Item3}");
+                node[i] = b;
+                target[i] = Node(b.Item1, b.Item2, b.Item3);
+            }
+            for (var i = 0; !grid && i < n; i++)
             {
                 target[i] = -1;
                 var p = mesh.Positions[loop[i]];
@@ -231,7 +398,59 @@ public static class SeamZipper
                 mesh.Positions.Add(point);
                 mesh.Pinned.Add(false);
             }
-            for (var i = 0; i < n; i++)
+            for (var i = 0; grid && i < n; i++)
+            {
+                var j = (i + 1) % n;
+                if (target[i] < 0 || target[j] < 0) continue;
+                var (ri, ki, ji) = node[i];
+                var (rj, kj, jj) = node[j];
+                // A break: from one road to another, or far along it (a run ends there). Bridged, where the piece of
+                // land it makes stays out of the rooms and is not too long (the land between a helix's turns going from
+                // the upper one to the lower one's start); else reported and left open.
+                if (ri != rj || MathF.Abs(ribbons[ri].Along[ki] - ribbons[ri].Along[kj]) > 3 * gap)
+                {
+                    Vector3 ni = mesh.Positions[target[i]], nj = mesh.Positions[target[j]], li = mesh.Positions[loop[i]], lj = mesh.Positions[loop[j]];
+                    var stays = Vector3.Distance(ni, nj) <= 6 * gap;
+                    foreach (var (u, v) in new[] { (0.33f, 0.33f), (0.5f, 0.25f), (0.25f, 0.5f), (0.5f, 0.5f) })
+                        if (stays && (room(li + (lj - li) * u + (ni - li) * v) < -3 || room(lj + (ni - lj) * u + (nj - lj) * v) < -3)) stays = false;
+                    if (stays)
+                    {
+                        mesh.Indices.AddRange([loop[j], loop[i], target[i]]);
+                        mesh.Indices.AddRange([loop[j], target[i], target[j]]);
+                        made += 2;
+                        bridges.Add((node[i], node[j]));
+                        if (Near(li)) Console.WriteLine($"  bridge from rim {li} (road {ri} ring {ki}) to {lj} (road {rj} ring {kj})");
+                        continue;
+                    }
+                    breaks++;
+                    if (Near(mesh.Positions[loop[i]])) Console.WriteLine($"  break between rim {mesh.Positions[loop[i]]} (road {ri} ring {ki}) and {mesh.Positions[loop[j]]} (road {rj} ring {kj})");
+                    continue;
+                }
+                // The road side: along the grid from i's node to j's, ring by ring (across as far as between them), or
+                // across one ring (round an end).
+                var chain = new List<int> { target[i] };
+                if (ki == kj)
+                    for (var c = ji; c != jj;) { c += Math.Sign(jj - ji); chain.Add(Node(ri, ki, c)); }
+                else
+                {
+                    var dir = Math.Sign(kj - ki);
+                    for (var k = ki + dir; ; k += dir)
+                    {
+                        var c = (int)MathF.Round(ji + (jj - ji) * (k - ki) / (float)(kj - ki));
+                        chain.Add(Node(ri, k, c));
+                        if (k == kj) break;
+                    }
+                }
+                mesh.Indices.AddRange([loop[j], loop[i], chain[0]]);
+                made++;
+                for (var c = 0; c + 1 < chain.Count; c++)
+                {
+                    if (chain[c] == chain[c + 1]) continue;
+                    mesh.Indices.AddRange([loop[j], chain[c], chain[c + 1]]);
+                    made++;
+                }
+            }
+            for (var i = 0; !grid && i < n; i++)
             {
                 var j = (i + 1) % n;
                 if (target[i] < 0 || target[j] < 0) continue;
@@ -283,7 +502,8 @@ public static class SeamZipper
                 var k = j;
                 while (target[k] < 0 && run.Count < n) { run.Add(k); k = (k + 1) % n; }
                 if (run.Count == n || run.Count > 24) continue;
-                if (!run.All(r => AtEnd(mesh.Positions[loop[r]]))) continue;
+                // (At an open road's end; or one or two vertices only, anywhere: a single unjoined one between joined ones.)
+                if (run.Count > 2 && !run.All(r => AtEnd(mesh.Positions[loop[r]]))) continue;
                 // The window: from the joined vertex after the run, back along the rim to the one before it, then
                 // its road point and the other's.
                 var window = new List<int> { loop[k] };
@@ -304,6 +524,44 @@ public static class SeamZipper
                 if (Near(middle)) Console.WriteLine($"  end window of {run.Count} rim vertices closed at {middle}");
             }
         }
+        // Two switches meeting at a node (one piece of land's ends at it, another's starts there), both from or to
+        // the same ring of a road: the space between them (the window behind a road's start, up to another road over
+        // it, between two pieces of land) closed, along that ring between their nodes. A fan over the switches' far
+        // nodes, the shared one and that ring's nodes between.
+        var windows = 0;
+        foreach (var into in bridges)
+            foreach (var outOf in bridges)
+            {
+                if (into.To != outOf.From) continue;
+                var (y, x, z) = (outOf.To, into.To, into.From);
+                // (into: z to x; outOf: x to y. Their strips' road sides run z->x and x->y; the window turns the other way round them.)
+                if (y.Ribbon != z.Ribbon || y.K != z.K || y == z) continue;
+                var polygon = new List<int> { Node(y.Ribbon, y.K, y.J), Node(x.Ribbon, x.K, x.J), Node(z.Ribbon, z.K, z.J) };
+                for (var c = z.J; c != y.J;) { c += Math.Sign(y.J - z.J); if (c != y.J) polygon.Add(Node(z.Ribbon, z.K, c)); }
+                var middle = polygon.Aggregate(Vector3.Zero, (sum, v) => sum + mesh.Positions[v]) / polygon.Count;
+                var centre = mesh.Positions.Count;
+                mesh.Positions.Add(middle);
+                mesh.Pinned.Add(false);
+                for (var w = 0; w < polygon.Count; w++) mesh.Indices.AddRange([polygon[w], polygon[(w + 1) % polygon.Count], centre]);
+                made += polygon.Count;
+                windows++;
+                if (Near(middle)) Console.WriteLine($"  window between two switches closed at {middle} ({polygon.Count} corners)");
+            }
+        if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {bridges.Count} switches bridged, {windows} windows between them closed");
+        if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
+            foreach (var rim in RimLoops(mesh).Where(l => l.Any(v => Near(mesh.Positions[v]))))
+            {
+                // The open boundary round the place, as R (a road point) and L (land), with where it runs.
+                var start = rim.FindIndex(v => Near(mesh.Positions[v]));
+                var text = new List<string>();
+                for (var k = -6; k < 30; k++)
+                {
+                    var v = rim[((start + k) % rim.Count + rim.Count) % rim.Count];
+                    var q = mesh.Positions[v];
+                    text.Add($"{(surface(q).Distance < 0.1f ? "R" : "L")}({q.X:0},{q.Y:0},{q.Z:0})");
+                }
+                Console.WriteLine($"  open boundary of {rim.Count} near: {string.Join(" ", text)}");
+            }
         // What is left open and small (a rim shorter than four gaps: no road's opening is) is filled, with a fan from
         // its middle: the patterns the strips do not cover (where the land between a helix's turns meets a road's start).
         var filled = 0;
@@ -339,8 +597,33 @@ public static class SeamZipper
             Console.WriteLine($"  edges run the same way by two triangles: {same.Count}; edges of three or more triangles: {undirected.Count(kv => kv.Value > 2)}");
             foreach (var kv in same.Where(kv => Near(mesh.Positions[kv.Key.Item1])).Take(12)) Console.WriteLine($"    same way: {mesh.Positions[kv.Key.Item1]} to {mesh.Positions[kv.Key.Item2]}");
         }
+        if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {ribbons.Count} roads, {Across} across; {breaks} breaks between runs");
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
         return made;
+    }
+
+    /// <summary>The point of a triangle nearest p (Ericson), with its weights on b (v) and c (w).</summary>
+    private static Vector3 ClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c, out float v, out float w)
+    {
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0 && d2 <= 0) { v = 0; w = 0; return a; }
+        var bp = p - b;
+        float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0 && d4 <= d3) { v = 1; w = 0; return b; }
+        var vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) { v = d1 / (d1 - d3); w = 0; return a + ab * v; }
+        var cp = p - c;
+        float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0 && d5 <= d6) { v = 0; w = 1; return c; }
+        var vb = d5 * d2 - d1 * d6;
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) { v = 0; w = d2 / (d2 - d6); return a + ac * w; }
+        var va = d3 * d6 - d5 * d4;
+        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); v = 1 - w; return b + (c - b) * w; }
+        var denom = 1 / (va + vb + vc);
+        v = vb * denom;
+        w = vc * denom;
+        return a + ab * v + ac * w;
     }
 
     /// <summary>
@@ -398,6 +681,7 @@ public static class SeamZipper
                 if (root == Find(0)) continue;
                 if (!copies.TryGetValue(root, out var copy))
                 {
+                    if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on") Console.WriteLine($"  pinch at {mesh.Positions[v]}: {triangles.Count} triangles round it");
                     copy = mesh.Positions.Count;
                     mesh.Positions.Add(mesh.Positions[v]);
                     mesh.Pinned.Add(false);
