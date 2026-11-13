@@ -294,6 +294,7 @@ public static class SeamZipper
         var breaks = 0;
         // Debug: the rim edges the strips fail at (a break, or an end unjoined), for the editor's mesh view.
         var failedEdges = new List<float>();
+        var gapOutline = new List<float>();
         void Failed(int a, int b) { Vector3 p = mesh.Positions[a], q = mesh.Positions[b]; failedEdges.AddRange([p.X, p.Y, p.Z, q.X, q.Y, q.Z, 0]); }
         // Switches from one road to another along a rim (bridged): from one node to the other.
         var bridges = new List<((int Ribbon, int K, int J) From, (int Ribbon, int K, int J) To)>();
@@ -1136,6 +1137,14 @@ public static class SeamZipper
             }
             Vector3 P(int v) => mesh.Positions[v];
             bool IsRoad(int v) => roadNodeOf.ContainsKey(v);
+            // Debug: the gap's whole outline (each edge once): the land's open edges near the roads where it does not
+            // meet one, and the road pieces near land that no triangle uses.
+            gapOutline.Clear();
+            foreach (var (a, b) in front)
+            {
+                if (a > b && front.Contains((b, a))) continue;
+                gapOutline.AddRange([P(a).X, P(a).Y, P(a).Z, P(b).X, P(b).Y, P(b).Z, Piece(a, b) ? 1 : 0]);
+            }
             // Front vertices in cells.
             var frontCells = new Dictionary<(int, int, int), HashSet<int>>();
             void AddFrontVertex(int v)
@@ -1329,7 +1338,7 @@ public static class SeamZipper
         }
         if (grid && Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  grid: {ribbons.Count} roads, {Across} across; {breaks} breaks between runs");
         if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  {targets} road points, {snaps} of them to a vertex on an edge of the road's mesh (their road vertex up to {farthest:0.00} m away), {edges.Count} edges at {roadQuality}");
-        LastOpen = failedEdges.ToArray();
+        LastOpen = stitch ? gapOutline.ToArray() : failedEdges.ToArray();
         return made;
     }
 
