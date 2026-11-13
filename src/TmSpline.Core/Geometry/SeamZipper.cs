@@ -300,6 +300,7 @@ public static class SeamZipper
             return true;
         }
         var footVertex = new Dictionary<(int, int, int), int>();
+        var footIds = new HashSet<int>();
         int FootVertex(int rb, int k, int side)
         {
             if (!footVertex.TryGetValue((rb, k, side), out var id))
@@ -308,6 +309,7 @@ public static class SeamZipper
                 mesh.Positions.Add(side < 0 ? ribbonFeet[rb][k].Left : ribbonFeet[rb][k].Right);
                 mesh.Pinned.Add(false);
                 footVertex[(rb, k, side)] = id;
+                footIds.Add(id);
             }
             return id;
         }
@@ -885,6 +887,9 @@ public static class SeamZipper
                 foreach (var b in list.ToList())
                 {
                     if (a > b || tried.Contains((a, b))) continue;
+                    // (From the land's open edges only: at least one end land's, not the road's or an edge's foot.)
+                    bool Land(int v) => v >= 0 && !roadNodeOf.ContainsKey(v) && !footIds.Contains(v);
+                    if (!Land(a) && !Land(b)) continue;
                     // (Only the land's edges near roads: not the map's border.)
                     if (MathF.Min(surface(PosOf(a)).Distance, surface(PosOf(b)).Distance) > 2.5f * gap) continue;
                     tried.Add((a, b));
@@ -923,6 +928,8 @@ public static class SeamZipper
                     path.Reverse();
                     cycle.AddRange(path);
                     if (cycle.Count < 3 || cycle.Distinct().Count() != cycle.Count) continue;
+                    // (A gap's loop runs along the land somewhere: not round the road alone.)
+                    if (!cycle.Any(Land)) continue;
                     // A plug only (the owner's: where two roads overlap): its loop runs along two road parts, two roads
                     // or one road far along it (a loop's entry and exit); not along one road's edge and the land.
                     var parts = cycle.Select(GridOf).Where(g => g is not null).Select(g => g!.Value).ToList();
