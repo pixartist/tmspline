@@ -40,6 +40,8 @@ public static class VoxelTerrain
     private const float FloorCover = 2f;
     /// <summary>Seam experiment: land between a road's edges up to this far over the line between them (under a road bent downwards) belongs to the road, metres.</summary>
     private const float CrownMax = 4;
+    /// <summary>Seam experiment: the edges cut only outwards, a half disc across the road (TMSPLINE_SEAM_HALF=off: all round).</summary>
+    public static bool SeamHalfDisc { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_HALF") != "off";
     /// <summary>Simplification experiment: the land simplified to this many triangles (TMSPLINE_SIMPLIFY; 0: not), and no further than this changes it, metres (TMSPLINE_SIMPLIFY_ERROR).</summary>
     /// <summary>Seam experiment: vertices close to the cut line are moved onto it (TMSPLINE_SEAM_SNAP=off: not).</summary>
     public static bool SeamSnap { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_SNAP") != "off";
@@ -670,7 +672,7 @@ public static class VoxelTerrain
         {
             var (toEdge, over, across, beyond) = road(p);
             var (toRoom, deck) = nearest(p);
-            var body = across >= 1 ? toEdge : float.MaxValue;
+            var body = across >= 1 || !SeamHalfDisc ? toEdge : float.MaxValue;
             body = MathF.Min(body, beyond);
             // Between the edges, outside the road's room: under the line between the edges, how far under it; over it
             // (under a road bent downwards, whose middle stands over its edges) nothing, the road's own space. Land
@@ -726,6 +728,66 @@ public static class VoxelTerrain
     }
 
     /// <summary>
+    /// Seam experiment: edges whose two ends lie outside the cut but whose middle lies in it (a long edge reaching over
+    /// the gap, whose triangles bridged it and touched the road) are split in their middle, again where needed, so the
+    /// cut sees that they pass through it.
+    /// </summary>
+    private static AdaptiveMesh SplitAcross(AdaptiveMesh mesh, Func<Vector3, float> field)
+    {
+        var pos = mesh.Positions.ToList();
+        var g = new List<float>(pos.Select(field));
+        var faces = new List<int[]>();
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) faces.Add([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
+        for (var round = 0; round < 4; round++)
+        {
+            var split = new Dictionary<long, int>();
+            foreach (var f in faces)
+                for (var k = 0; k < 3; k++)
+                {
+                    int a = f[k], b = f[(k + 1) % 3];
+                    if (g[a] < 0 || g[b] < 0) continue;
+                    var key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+                    if (split.ContainsKey(key)) continue;
+                    var mid = (pos[a] + pos[b]) / 2;
+                    var gm = field(mid);
+                    if (gm >= 0) continue;
+                    split[key] = pos.Count;
+                    pos.Add(mid);
+                    g.Add(gm);
+                }
+            if (split.Count == 0) break;
+            // Each triangle with split edges: into two, three or four.
+            var next = new List<int[]>(faces.Count + split.Count * 2);
+            int? Mid(int a, int b) => split.TryGetValue(a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a, out var m) ? m : null;
+            foreach (var f in faces)
+            {
+                int a = f[0], b = f[1], c = f[2];
+                int? ab = Mid(a, b), bc = Mid(b, c), ca = Mid(c, a);
+                var count = (ab is null ? 0 : 1) + (bc is null ? 0 : 1) + (ca is null ? 0 : 1);
+                if (count == 0) { next.Add(f); continue; }
+                if (count == 3) { next.Add([a, ab!.Value, ca!.Value]); next.Add([ab.Value, b, bc!.Value]); next.Add([ca.Value, bc.Value, c]); next.Add([ab.Value, bc.Value, ca.Value]); continue; }
+                // Rotate so that the split edge (or the first of two) starts at a.
+                while (Mid(a, b) is null || (count == 2 && Mid(b, c) is null && Mid(c, a) is not null && Mid(a, b) is null))
+                {
+                    (a, b, c) = (b, c, a);
+                    if (Mid(a, b) is not null) break;
+                }
+                var m1 = Mid(a, b)!.Value;
+                if (count == 1) { next.Add([a, m1, c]); next.Add([m1, b, c]); continue; }
+                if (Mid(b, c) is { } m2) { next.Add([a, m1, c]); next.Add([m1, b, m2]); next.Add([m1, m2, c]); continue; }
+                var m3 = Mid(c, a)!.Value;
+                next.Add([a, m1, m3]); next.Add([m1, b, c]); next.Add([m1, c, m3]);
+            }
+            faces = next;
+        }
+        var result = new AdaptiveMesh();
+        result.Positions.AddRange(pos);
+        result.Pinned.AddRange(pos.Select(_ => false));
+        foreach (var f in faces) result.Indices.AddRange(f);
+        return result;
+    }
+
+    /// <summary>
     /// Seam experiment: the land cut back from the roads along one continuous line, where the field (SeamField) is
     /// zero, the part where it is negative left out. A vertex already close to the line (within a third of its
     /// shortest edge) is moved onto it first, and the line then passes through it: the cut leaves no slivers. The new
@@ -733,6 +795,7 @@ public static class VoxelTerrain
     /// </summary>
     private static AdaptiveMesh CutSeam(AdaptiveMesh mesh, Func<Vector3, float> field)
     {
+        mesh = SplitAcross(mesh, field);
         var n = mesh.Positions.Count;
         var pos = mesh.Positions.ToArray();
         var g = new float[n];

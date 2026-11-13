@@ -181,6 +181,8 @@ export interface TerrainPaint {
 }
 /** Land lower than the stadium's ground lies this deep (ownTerrain's SUNK). */
 const SUNK_LAND = -2;
+/** Seam experiment: a road edge's land rim searched only outwards (a half disc across the road); off for now. */
+const SEAM_HALF_DISC = false;
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 /** Height range of track points and free blocks, meters above the ground (the export server's limit; the exported map grows to fit). */
 const Y_MIN = -8, Y_MAX = 1960;
@@ -311,7 +313,8 @@ export class Editor {
           if (!p) { previous = null; continue; }
           // Outward: from the other edge to this one (none where they meet, on top of a closed tube).
           const other = sides.get(slot)![side === "l" ? "r" : "l"]?.[1];
-          const outward = other && other.distanceTo(p) > 1 ? p.clone().sub(other).normalize() : null;
+          // (Half disc off for now, as on the server: TMSPLINE_SEAM_HALF=off.)
+          const outward = SEAM_HALF_DISC && other && other.distanceTo(p) > 1 ? p.clone().sub(other).normalize() : null;
           const missing = !near(p, outward);
           if (missing && previous) lines.push(previous.x, previous.y + 0.4, previous.z, p.x, p.y + 0.4, p.z);
           previous = missing ? p : null;
