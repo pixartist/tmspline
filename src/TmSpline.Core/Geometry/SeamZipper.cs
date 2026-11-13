@@ -626,10 +626,10 @@ public static class SeamZipper
                                 var d = Vector3.Distance(p, q);
                                 if (d >= bestDistance || d < 0.05f) { No("far"); continue; }
                                 // Facing each other: each outward towards the other.
-                                // (Within about 120 degrees: where one road's edge hangs over the other's, a little past
-                                // it, the line runs mostly down; the room and deck checks keep it off the roads.)
+                                // (Each outward towards the other: the edges face; where they cross over each other, the
+                                // holes either side are the loops' to fill, not a fan up a loop.)
                                 var towards = Vector3.Normalize(q - p);
-                                if (Vector3.Dot(towards, outward) < -0.5f || Vector3.Dot(-towards, OutOf(rb2, k2, j2)) < -0.5f) { No("facing"); continue; }
+                                if (Vector3.Dot(towards, outward) <= 0 || Vector3.Dot(-towards, OutOf(rb2, k2, j2)) <= 0) { No("facing"); continue; }
                                 // (The land would be there: at least its lower end at the land, under a road coming down to it.)
                                 if (underLand is not null && !underLand(p.Y < q.Y ? p : q)) { No("over the land"); continue; }
                                 if (!Clear(room, p, q)) { No("room"); continue; }
@@ -842,7 +842,11 @@ public static class SeamZipper
                     path.Reverse();
                     cycle.AddRange(path);
                     if (cycle.Count < 3 || cycle.Distinct().Count() != cycle.Count) continue;
-                    // Only land's open edges and the road: at least one open land edge besides a-b counts as well.
+                    // A plug only (the owner's: where two roads overlap): its loop runs along two road parts, two roads
+                    // or one road far along it (a loop's entry and exit); not along one road's edge and the land.
+                    var parts = cycle.Select(GridOf).Where(g => g is not null).Select(g => g!.Value).ToList();
+                    var twoParts = parts.Any(x => parts.Any(y => x.Ribbon != y.Ribbon || MathF.Abs(ribbons[x.Ribbon].Along[x.K] - ribbons[y.Ribbon].Along[y.K]) > 4 * gap));
+                    if (!twoParts) continue;
                     var polygon = cycle.Select(PosOf).ToList();
                     // Ear clipping in the loop's best-fit plane (Newell's normal).
                     var normal = Vector3.Zero;
