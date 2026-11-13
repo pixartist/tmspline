@@ -40,6 +40,8 @@ public static class VoxelTerrain
     private const float FloorCover = 2f;
     /// <summary>Seam experiment: land between a road's edges up to this far over the line between them (under a road bent downwards) belongs to the road, metres.</summary>
     private const float CrownMax = 4;
+    /// <summary>Seam experiment: the cut's field as one distance to the road's surface, without jumps (TMSPLINE_SEAM_FIELD=rules: the earlier rules for edges, end, crown and deck).</summary>
+    public static bool SeamSmooth { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_FIELD") != "rules";
     /// <summary>Seam experiment: the edges cut only outwards, a half disc across the road (TMSPLINE_SEAM_HALF=off: all round).</summary>
     public static bool SeamHalfDisc { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_HALF") != "off";
     /// <summary>Simplification experiment: the land simplified to this many triangles (TMSPLINE_SIMPLIFY; 0: not), and no further than this changes it, metres (TMSPLINE_SIMPLIFY_ERROR).</summary>
@@ -146,7 +148,7 @@ public static class VoxelTerrain
     /// <summary>What a build needs of the roads (their rooms, and how far each place is from them): the same until a road or the land's extent changes.</summary>
     public sealed class Roads
     {
-        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road) Rooms { get; init; }
+        internal (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, float> Surface) Rooms { get; init; }
         internal float[] Away { get; init; } = [];
         internal int Columns { get; init; }
         internal int Rows { get; init; }
@@ -201,7 +203,7 @@ public static class VoxelTerrain
         // a large cell's edge crossings can lie well off it, and then land stood in the roads' space.
         var settle = grid.Quality > TerrainQuality.High || Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_SETTLE") == "on";
         var prepared = roads ?? Prepare(grid, map);
-        var (room, _, nearest, road) = prepared.Rooms;
+        var (room, _, nearest, road, surface) = prepared.Rooms;
         // The land's heights, also beyond its outline (each place without land takes its nearest land's: the octree
         // needs a height everywhere; what lies outside the outline is left out of the mesh at the end).
         var heights = (double[])grid.Heights.Clone();
@@ -693,6 +695,13 @@ public static class VoxelTerrain
         // than 90 degrees from the road's own outward direction, the owner's rule), an open road's end seen from past it,
         // and the back of its driving surface (under an open road, round a closed tube).
         float SeamField(Vector3 p)
+        {
+            // The smooth field: how far from the road's surface (its edges included, past an open end its end), less
+            // the gap, and inside a road's room how deep in it (negative); no jumps, so the cut's line is clean.
+            if (SeamSmooth) return MathF.Min(surface(p) - SeamGap, room(p));
+            return SeamRules(p);
+        }
+        float SeamRules(Vector3 p)
         {
             var (toEdge, over, across, beyond) = road(p);
             var (toRoom, deck) = nearest(p);
