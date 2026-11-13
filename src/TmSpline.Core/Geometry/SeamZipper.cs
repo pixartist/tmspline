@@ -159,6 +159,8 @@ public static class SeamZipper
         var ribbons = new List<(List<Vector3[]> Cross, List<float> Along)>();
         // Each node's side of the driving surface: the way it faces (into the room).
         var ribbonNormals = new List<List<Vector3[]>>();
+        // Each ring's edge feet (left, right): where the road's outline turns from its outer face to its underside.
+        var ribbonFeet = new List<List<(Vector3 Left, Vector3 Right)>>();
         foreach (var track in map.Tracks)
         {
             track.SyncSegments();
@@ -169,9 +171,11 @@ public static class SeamZipper
             var cross = new List<Vector3[]>();
             var along = new List<float>();
             var normals = new List<Vector3[]>();
+            var feet = new List<(Vector3, Vector3)>();
             foreach (var r in rings)
             {
                 var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
+                feet.Add((W(RoadMeshBuilder.EdgeFoot(r, segment, -1)), W(RoadMeshBuilder.EdgeFoot(r, segment, 1))));
                 var points = new Vector3[Across + 1];
                 var facing = new Vector3[Across + 1];
                 for (var j = 0; j <= Across; j++)
@@ -192,6 +196,7 @@ public static class SeamZipper
             }
             ribbons.Add((cross, along));
             ribbonNormals.Add(normals);
+            ribbonFeet.Add(feet);
         }
         var ribbonBuckets = new Dictionary<(int, int), List<(int Ribbon, int Ring)>>();
         for (var rb = 0; rb < ribbons.Count; rb++)
@@ -917,6 +922,14 @@ public static class SeamZipper
                         for (var i = 0; i < cycle.Count; i++)
                         {
                             Vector3 p0 = PosOf(cycle[i]), p1 = PosOf(cycle[(i + 1) % cycle.Count]);
+                            // (Between an edge and its neighbour under the road: round the road's outline, by the foot.)
+                            if (GridOf(cycle[i]) is { } g0 && GridOf(cycle[(i + 1) % cycle.Count]) is { } g1 && g0.Ribbon == g1.Ribbon && g0.K == g1.K
+                                && (Math.Min(g0.J, g1.J) == 0 && Math.Max(g0.J, g1.J) == 1 || Math.Min(g0.J, g1.J) == Across - 1 && Math.Max(g0.J, g1.J) == Across))
+                            {
+                                var foot = g0.J + g1.J < Across ? ribbonFeet[g0.Ribbon][g0.K].Left : ribbonFeet[g0.Ribbon][g0.K].Right;
+                                loopOutline.AddRange([p0.X, p0.Y, p0.Z, foot.X, foot.Y, foot.Z, 1, foot.X, foot.Y, foot.Z, p1.X, p1.Y, p1.Z, 1]);
+                            }
+                            else
                             loopOutline.AddRange([p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z, GridOf(cycle[i]) is not null && GridOf(cycle[(i + 1) % cycle.Count]) is not null ? 1 : 0]);
                             int u = cycle[i], v = cycle[(i + 1) % cycle.Count];
                             if (u >= 0 && v >= 0) tried.Add(u < v ? (u, v) : (v, u));

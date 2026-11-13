@@ -318,6 +318,30 @@ public static class RoadMeshBuilder
         return ring.Position + ring.Right * contact.X + ring.Up * contact.Y;
     }
 
+    /// <summary>
+    /// The foot of a road's edge on side ±1 in world space: under its edge contact, where the road's outline turns from
+    /// its outer face to its underside (a curb's bottom outer corner; without curbs the slab's bottom at the edge). Land
+    /// meeting the road from under it reaches its edge round this, not through the curb.
+    /// </summary>
+    public static Vec3d EdgeFoot(Ring ring, TrackSegment segment, int side)
+    {
+        var s = new RoadMeshSettings();
+        var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
+        var edge = side * ring.Width * 0.5;
+        (double X, double Y) foot;
+        if (segment.Borders)
+        {
+            var (_, bt) = BorderSize(ring, s);
+            (_, foot) = CurbBottom(ring, arc, edge, side, bt, s.Thickness);
+        }
+        else
+        {
+            var (e, n) = (arc.Point(edge), arc.Normal(edge));
+            foot = (e.X - n.X * s.Thickness, e.Y - n.Y * s.Thickness);
+        }
+        return ring.Position + ring.Right * foot.X + ring.Up * foot.Y;
+    }
+
     /// <summary>How far past upright (the curb's up, downwards) the land's contact has moved along the curb's outer face to its other end.</summary>
     private const double CurbTurnOver = 0.25;
 
