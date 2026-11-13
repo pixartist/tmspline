@@ -56,6 +56,8 @@ public static class StitchedTerrain
     private static float DeckTuck => deckTuck > 0 ? deckTuck : Tuck;
     /// <summary>The arch over the driving surface (along its normals, less on tight bends), and the rims' lift along the section's opening, metres.</summary>
     private const float ArchHeight = 4.5f, RimLift = 2f;
+    /// <summary>Voxel rooms: the vault over a road is at most this high over the line between its edges, metres (TMSPLINE_VAULT; a narrower road's lower, half its width).</summary>
+    public static float VaultHeight { get; set; } = float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VAULT"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var vault) ? vault : 8;
     /// <summary>Between a road's held edges the ground lies this much over their line (inside the room: cut out), metres.</summary>
     private const float InteriorLift = 1.2f;
     private const int DeckN = 24, ArchN = 12;
@@ -656,7 +658,8 @@ public static class StitchedTerrain
                 // sideways to tell (a tube nearly closed), away from the deck.
                 var facing = nb.LengthSquared() > 1e-8f ? Vector2.Dot(o, Vector2.Normalize(nb)) : 0;
                 if (MathF.Abs(facing) > 0.3f ? facing < 0 : MathF.Abs(toDeck) < 0.5f ? Vector2.Dot(o, nb) < 0 : toDeck > 0) o = -o;
-                var height = MathF.Max(ArchHeight, half.Length());
+                // (No higher than VaultHeight: a wide road's vault a flatter half-ellipse, not carving the land far over it.)
+                var height = MathF.Max(ArchHeight, MathF.Min(half.Length(), VaultHeight));
                 for (var k = 1; k < ArchN; k++)
                 {
                     var a = MathF.PI * k / ArchN;
