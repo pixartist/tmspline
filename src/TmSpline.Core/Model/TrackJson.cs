@@ -77,6 +77,9 @@ public static class TrackJson
         /// <summary>The mesh's fineness (TerrainQuality); missing: High.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Quality { get; set; }
+        /// <summary>How the mesh is made (TerrainMesher: voxel, seamless); missing: voxel.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Mesher { get; set; }
         /// <summary>The 3D brush's dabs: x, y, z, radius, amount (metres of land added, negative: removed) each.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public double[]? Edits { get; set; }
@@ -249,6 +252,7 @@ public static class TrackJson
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
                 Quality = Enum.TryParse<TerrainQuality>(t.Quality, true, out var quality) && Enum.IsDefined(quality) ? quality : TerrainQuality.High,
+                Mesher = Enum.TryParse<TerrainMesher>(t.Mesher, true, out var mesher) && Enum.IsDefined(mesher) ? mesher : TerrainMesher.Voxel,
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
                 Edits = t.Edits is { } edits && edits.Length % 5 == 0 && edits.All(double.IsFinite) ? edits : [],
                 EditsOver = t.EditsOver is { } over && over.Length % 5 == 0 && over.All(double.IsFinite) ? over : [],

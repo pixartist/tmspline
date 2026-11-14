@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainQuality, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
+import { BLOCK_CELL, MAP_HALF_EXTENT, type TerrainGrid, type TerrainMesher, type TerrainQuality, type TerrainSurface, type VanillaBlock, type VanillaItem } from "./track";
 import { clearOfRoads, plantForest, type SceneryLandOptions, type SceneryTheme } from "./scenery";
 
 /**
@@ -35,6 +35,8 @@ export interface OwnTerrainOptions {
   rise: number;
   /** How fine the mesh is (see TerrainGrid.quality). */
   quality?: TerrainQuality;
+  /** How the mesh is made (see TerrainGrid.mesher). */
+  mesher?: TerrainMesher;
   /**
    * The land bends down towards its outer edge and ends this far lower, metres (0: it ends level, and its edge shows
    * against the sky from the road). The bend takes twice this distance (at most half the width), so it ends at 45°.
@@ -382,7 +384,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     else if (h >= 0.05) heights[i] = h;
   }
   // No walls under the land's outer edge: they cost triangles and nobody drives there.
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle, ...(own.quality && own.quality !== "High" ? { quality: own.quality } : {}) };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle, ...(own.quality && own.quality !== "High" ? { quality: own.quality } : {}), ...(own.mesher === "seamless" ? { mesher: own.mesher } : {}) };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

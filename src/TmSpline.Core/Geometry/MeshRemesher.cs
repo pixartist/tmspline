@@ -21,6 +21,24 @@ public static class MeshRemesher
     /// <param name="project">Puts a place back onto the surface (null: it stays where it was moved).</param>
     public static AdaptiveMesh Remesh(AdaptiveMesh mesh, Func<Vector3, Vector3>? project = null, int rounds = 5, float flatDegrees = 35)
     {
+        // Timing (TMSPLINE_VOXEL_STATS=on): each step's time, and how often and how long the projection ran.
+        var stats = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on";
+        var stepTime = new double[4];
+        long projections = 0, projectTicks = 0;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        void Step(int i) { stepTime[i] += watch.Elapsed.TotalSeconds; watch.Restart(); }
+        if (stats && project is not null)
+        {
+            var inner = project;
+            project = p =>
+            {
+                var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                var r = inner(p);
+                Interlocked.Increment(ref projections);
+                Interlocked.Add(ref projectTicks, System.Diagnostics.Stopwatch.GetTimestamp() - t0);
+                return r;
+            };
+        }
         var pos = mesh.Positions.Select(p => p).ToList();
         var faces = new List<int[]>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) faces.Add([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
@@ -54,7 +72,7 @@ public static class MeshRemesher
 
         bool[] Locked()
         {
-            var count = new Dictionary<long, int>();
+            var count = new Dictionary<long, int>(EdgeKeyComparer.Instance);
             foreach (var f in faces) for (var k = 0; k < 3; k++) { var key = Key(f[k], f[(k + 1) % 3]); count[key] = count.GetValueOrDefault(key) + 1; }
             var locked = new bool[pos.Count];
             foreach (var (key, c) in count) if (c != 2) { locked[(int)(key >> 32)] = true; locked[(int)(key & 0xffffffff)] = true; }
@@ -62,13 +80,14 @@ public static class MeshRemesher
         }
         Vector3 Normal(int[] f) => Vector3.Cross(pos[f[1]] - pos[f[0]], pos[f[2]] - pos[f[0]]);
 
+        watch.Restart();
         for (var round = 0; round < rounds; round++)
         {
             var locked = Locked();
 
             // 1. Split long edges (both triangles on an edge split together; a border edge splits its one triangle).
             {
-                var edgeFaces = new Dictionary<long, List<int>>();
+                var edgeFaces = new Dictionary<long, List<int>>(EdgeKeyComparer.Instance);
                 for (var f = 0; f < faces.Count; f++)
                     for (var k = 0; k < 3; k++)
                     {
@@ -106,6 +125,7 @@ public static class MeshRemesher
                 }
             }
 
+            Step(0);
             // 2. Collapse short edges.
             {
                 var around = new List<int>[pos.Count];
@@ -169,11 +189,12 @@ public static class MeshRemesher
                 faces = faces.Where((_, f) => alive[f]).ToList();
             }
 
+            Step(1);
             // 3. Flip towards six neighbours a vertex (four on a border), where the two triangles lie nearly flat.
             {
                 locked = Locked();
                 var valence = new int[pos.Count];
-                var edgeFaces = new Dictionary<long, List<int>>();
+                var edgeFaces = new Dictionary<long, List<int>>(EdgeKeyComparer.Instance);
                 for (var f = 0; f < faces.Count; f++)
                     for (var k = 0; k < 3; k++)
                     {
@@ -213,6 +234,7 @@ public static class MeshRemesher
                 }
             }
 
+            Step(2);
             // 4. Slide along the surface towards the neighbours' middle, then back onto the surface.
             {
                 locked = Locked();
@@ -246,7 +268,11 @@ public static class MeshRemesher
                 }
                 for (var v = 0; v < pos.Count; v++) if (!undo[v]) pos[v] = moved[v];
             }
+            Step(3);
         }
+        if (stats)
+            Console.WriteLine($"  [remesh] split {stepTime[0]:0.0} s, collapse {stepTime[1]:0.0} s, flip {stepTime[2]:0.0} s, relax {stepTime[3]:0.0} s; " +
+                $"{projections} projections, {projectTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0} s in them (summed over threads)");
 
         var result = new AdaptiveMesh();
         var index = new int[pos.Count];

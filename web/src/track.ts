@@ -325,10 +325,20 @@ export interface TerrainGrid {
   smoothsOver?: number[];
   /** How fine the mesh is (the cells at the roads' edges: 1, 1.5, 2, 2 m, and Low's grow sooner away from them); missing: High. */
   quality?: TerrainQuality;
+  /** How the mesh is made (see TERRAIN_MESHERS); missing: voxel. */
+  mesher?: TerrainMesher;
 }
 
 export const TERRAIN_QUALITIES = ["Fine", "High", "Medium", "Low"] as const;
 export type TerrainQuality = (typeof TERRAIN_QUALITIES)[number];
+
+/**
+ * How the own terrain is meshed: voxel (the voxel terrain, strips from the roads' edges to it), or seamless
+ * (experimental: the land simplified and remeshed, cut back a little from the roads and zipped to their edges and
+ * undersides; built whole only, so after a stroke of the brush the whole is built again).
+ */
+export const TERRAIN_MESHERS = ["voxel", "seamless"] as const;
+export type TerrainMesher = (typeof TERRAIN_MESHERS)[number];
 
 /**
  * A vanilla item of the game's Stadium collection (e.g. "SpringTreeTall") standing at `position` (metres, its base),

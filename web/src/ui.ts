@@ -47,12 +47,13 @@ function restoreScenery(saved: Record<string, unknown>): void {
   // Maps saved before this option had no rise.
   t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
   t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
+  t.mesher = choice<TerrainMesher>(own.mesher, TERRAIN_MESHERS, "voxel");
   // Maps saved before this option get the default bend when generated again.
   t.edgeDrop = number(own.edgeDrop, 0, 256, EDGE_DROP);
   t.seed = whole(own.seed, 0, 999999, 0);
 }
 import {
-  appendPoint, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, MAP_ENVIRONMENTS, TERRAIN_MESHERS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainMesher, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint,
 } from "./track";
 
@@ -212,7 +213,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   const gapsLegend = document.createElement("div");
   gapsLegend.style.cssText = "position:absolute;left:12px;bottom:12px;z-index:5;padding:8px 10px;border-radius:6px;background:rgba(20,22,26,0.85);color:#e8e8e8;font:12px/1.6 system-ui,sans-serif;pointer-events:none";
   gapsLegend.hidden = true;
-  for (const [color, label] of [["#00e5ff", "Land edge meeting no road"], ["#ffd400", "Seam on the road (land attached)"], ["#ff2d95", "Close-road hole (loop)"], ["#ff7a00", "Seam with land on it twice"]]) {
+  for (const [color, label] of [["#00e5ff", "Land edge meeting no road"], ["#ffd400", "Seam on the road (land attached)"], ["#ff2d95", "Close-road hole (loop)"], ["#ff7a00", "Seam with land on it twice"], ["#40ff60", "Land edge as cut (before strips)"], ["#b060ff", "Uncut land meeting the underside"]]) {
     const row = document.createElement("div");
     const swatch = document.createElement("span");
     swatch.style.cssText = `display:inline-block;width:18px;height:3px;margin-right:8px;vertical-align:middle;background:${color}`;
@@ -559,7 +560,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${obj?.checkpointGroup ?? ""}:${editor.map.tracks.flatMap((tr) => tr.objects.map((q) => q.checkpointGroup ?? 0)).join(",")}:${t.closed}:${editor.map.blocks.length}:${!!editor.library}`
-    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}:${editor.map.environment ?? ""}`
+    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${editor.map.terrain?.mesher ?? scenery.ownTerrain.mesher ?? ""}:${paint.brush}:${editor.map.environment ?? ""}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
@@ -643,6 +644,18 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
             m.terrain = v === "High" ? land : { ...land, quality: v as TerrainQuality };
           });
       }, false, { Fine: "Fine (about 150%)", High: "High (100%)", Medium: "Medium (about 60%)", Low: "Low (about 45%)" });
+      // How the mesh is made: the map's own (kept with its land), and changed at once, like the quality.
+      selectField(root, "Mesher", TERRAIN_MESHERS, () => editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher ?? "voxel"), (v) => {
+        t.mesher = v as TerrainMesher;
+        if (editor.map.terrain && (editor.map.terrain.mesher ?? "voxel") !== v)
+          editor.editMap((m) => {
+            const { mesher: _, ...land } = m.terrain!;
+            m.terrain = v === "voxel" ? land : { ...land, mesher: v as TerrainMesher };
+          });
+        relayout();
+      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)" });
+      if ((editor.map.terrain?.mesher ?? t.mesher) === "seamless")
+        hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer, and after each brush stroke the whole terrain is built again.");
       const size = Object.assign(document.createElement("p"), { className: "hint" });
       const showSize = () => {
         const s = editor.terrainSize();

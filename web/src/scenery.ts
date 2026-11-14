@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, wrapBank, type TerrainQuality, type VanillaBlock, type VanillaItem } from "./track";
+import { BLOCK_CELL, BLOCK_LEVEL, MAP_HALF_EXTENT, wrapBank, type TerrainMesher, type TerrainQuality, type VanillaBlock, type VanillaItem } from "./track";
 import { blockMatrix, blockSize, cellOf, type VanillaLibrary } from "./vanilla";
 
 /**
@@ -151,7 +151,7 @@ export interface SceneryLandOptions extends SceneryOptions {
   /** Nestle: how the pieces are fitted to the height map (see TerrainOptions.far). */
   far?: "steps" | "lower" | "fit";
   /** Own terrain: its width, smoothing and noise (see OwnTerrainOptions; defaults when missing). */
-  ownTerrain?: { width: number; smoothing: number; noise: number; noiseSize: number; rockAngle: number; rise: number; quality?: TerrainQuality; edgeDrop?: number; seed?: number };
+  ownTerrain?: { width: number; smoothing: number; noise: number; noiseSize: number; rockAngle: number; rise: number; quality?: TerrainQuality; mesher?: TerrainMesher; edgeDrop?: number; seed?: number };
   /** Nestle: cells of land beyond the shoulder. */
   band: number;
   /** Hills: platform-base land and DecoHill slopes, up to just below the roads and rising away from them. */

@@ -245,7 +245,7 @@ export class Editor {
    * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), the seam on
    * the road, where land attaches (yellow), the close-road holes (magenta).
    */
-  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
+  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00, 0x40ff60, 0xb060ff].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -264,8 +264,8 @@ export class Editor {
     // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
     void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
       if (!data || !this.gapsEnabled || this.terrainMesh !== group) return;
-      const points: number[][] = [[], [], [], []];
-      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(3, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      const points: number[][] = [[], [], [], [], [], []];
+      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(5, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
       if (this.seamDebug) { this.scene.remove(this.seamDebug); for (const c of this.seamDebug.children) (c as LineSegments2).geometry.dispose(); }
       const lines = new THREE.Group();
       points.forEach((list, kind) => {
@@ -442,7 +442,9 @@ export class Editor {
     this.orbit.target.set(0, 16, 0);
     // Zoom is our own (onWheel): towards the cursor, by the distance to what is under it.
     this.orbit.enableZoom = false;
-    this.orbit.maxPolarAngle = Math.PI * 0.495;
+    // Down to below the target, looking up (under bridges, into tunnels and loops); not quite straight up, where the
+    // orbit flips over.
+    this.orbit.maxPolarAngle = Math.PI * 0.95;
     this.orbit.update();
 
     this.axisGizmo = new TransformControls(this.camera, this.renderer.domElement);
@@ -917,7 +919,7 @@ export class Editor {
   private terrainMesh: THREE.Group | null = null;
   private terrainMaterials: THREE.Material[] = [];
   /** The server's name for the land shown (dabs can be built into it there), with the roads it was built for; or null. */
-  private terrainKey: { key: string; tracks: string } | null = null;
+  private terrainKey: { key: string; tracks: string; local: boolean } | null = null;
   private terrainShown: TerrainGrid | undefined;
   private terrainBuild = 0;
   /** The triangles of each chunk of the land shown (by its name); null while it is being built. */
@@ -950,7 +952,7 @@ export class Editor {
     if (!grid) { this.setTerrainMesh(null); this.setQuickTerrain(false); this.setBusy("terrain", null); return; }
     this.setBusy("terrain", "Meshing the terrain…");
     const tracks = JSON.stringify(this.map.tracks);
-    void buildTerrain(this.map).then(({ chunks, key }) => {
+    void buildTerrain(this.map).then(({ chunks, key, local }) => {
       if (build !== this.terrainBuild) return;
       this.setBusy("terrain", null);
       const textured = (name: string, fallback: number) => {
@@ -970,7 +972,7 @@ export class Editor {
       for (const chunk of chunks) if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, materials));
       this.setTerrainMesh(group, materials);
       this.updateSeamDebug();
-      this.terrainKey = key ? { key, tracks } : null;
+      this.terrainKey = key ? { key, tracks, local } : null;
       this.terrainTriangles = new Map(chunks.map((c) => [`${c.x},${c.z}`, c.mesh.indices.length / 3]));
       this.onTerrainSize();
       // All of it as one mesh, for the trees.
@@ -1217,7 +1219,9 @@ export class Editor {
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     if (!this.sculpting) this.setQuickTerrain(true);
     // The solid's brushes build each dab into the land shown, when the server has it as it is here (the same roads).
-    this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
+    // Not where the land comes out right only built whole: its chunks built again on their own had holes along their
+    // edges; the dabs are marked instead, and the whole is built again when the stroke ends.
+    this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.local && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
     this.dab(at);
   }
 

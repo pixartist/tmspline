@@ -612,7 +612,7 @@ public static class AdaptiveTerrainBuilder
     }
 
     /// <summary>Per cell the nearest cell with a value (not NaN) and its distance in cells (two-pass Euclidean transform).</summary>
-    private static (int[] Nearest, float[] Distance) NearestTransform(float[] values, int columns, int rows)
+    internal static (int[] Nearest, float[] Distance) NearestTransform(float[] values, int columns, int rows)
     {
         var n = values.Length;
         var src = new int[n];
@@ -641,7 +641,7 @@ public static class AdaptiveTerrainBuilder
     }
 
     /// <summary>Two box blurs each way, radius in cells.</summary>
-    private static float[] Blur(float[] values, int columns, int rows, int radius)
+    internal static float[] Blur(float[] values, int columns, int rows, int radius)
     {
         var a = values;
         for (var pass = 0; pass < 2; pass++)

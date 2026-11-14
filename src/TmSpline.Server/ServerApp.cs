@@ -207,14 +207,18 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The own terrain's preview mesh, built natively (the editor's WebAssembly core takes many times as long).
-        app.MapPost("/api/terrain", (ExportRequestDto request, string? key, ExportService service) =>
+        app.MapPost("/api/terrain", (ExportRequestDto request, string? key, ExportService service, HttpContext context) =>
         {
             try
             {
                 // Development: the last terrain request's track written to this file (TMSPLINE_DUMP_TERRAIN), for MesherLab.
                 if (app.Environment.IsDevelopment() && Environment.GetEnvironmentVariable("TMSPLINE_DUMP_TERRAIN") is { Length: > 0 } dump)
                     File.WriteAllText(dump, System.Text.Json.JsonSerializer.Serialize(request.Track, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
-                return Results.Bytes(service.TerrainPreview(request, key), "application/octet-stream");
+                var bytes = service.TerrainPreview(request, key, out var wholeOnly);
+                // Whether the brush's dabs may stay as built into single chunks (0: this terrain comes out right only
+                // built whole; the editor builds it again when a stroke ends).
+                context.Response.Headers["X-Terrain-Local"] = wholeOnly ? "0" : "1";
+                return Results.Bytes(bytes, "application/octet-stream");
             }
             catch (ExportRejectedException e)
             {

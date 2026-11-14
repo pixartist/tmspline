@@ -37,7 +37,7 @@ public static class MeshSimplifier
             foreach (var v in faces[f]) around[v].Add(f);
 
         // The open borders: edges of one triangle; their vertices stay.
-        var edgeCount = new Dictionary<long, int>();
+        var edgeCount = new Dictionary<long, int>(EdgeKeyComparer.Instance);
         long Key(int a, int b) => a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
         foreach (var f in faces)
             for (var k = 0; k < 3; k++) { var key = Key(f[k], f[(k + 1) % 3]); edgeCount[key] = edgeCount.GetValueOrDefault(key) + 1; }
@@ -202,7 +202,7 @@ public static class MeshSimplifier
         for (var pass = 0; pass < passes; pass++)
         {
             // Each edge's triangles (the edges of exactly two can flip).
-            var edges = new Dictionary<long, List<int>>();
+            var edges = new Dictionary<long, List<int>>(EdgeKeyComparer.Instance);
             for (var f = 0; f < faces.Count; f++)
                 for (var k = 0; k < 3; k++)
                 {

@@ -101,7 +101,7 @@ export async function buildTerrain(map: TrackMap): Promise<TerrainChunks> {
     });
     if (response.ok) {
       const chunks = decodeChunks(new Uint8Array(await response.arrayBuffer()));
-      if (chunks) return { chunks, key };
+      if (chunks) return { chunks, key, local: response.headers.get("X-Terrain-Local") !== "0" };
     }
   } catch { /* no server: the worker builds it */ }
   await loadCore();
@@ -110,11 +110,15 @@ export async function buildTerrain(map: TrackMap): Promise<TerrainChunks> {
     pending.set(id, { resolve, reject });
     worker.postMessage({ type: "terrain", id, json: JSON.stringify(map) });
   });
-  return { chunks: [{ x: 0, z: 0, mesh: decodeTerrain(bytes) }], key: null };
+  return { chunks: [{ x: 0, z: 0, mesh: decodeTerrain(bytes) }], key: null, local: true };
 }
 
-/** The terrain in chunks (squares of land, each its own mesh); `key`: the server's name for it, for dabTerrain, or null. */
-export interface TerrainChunks { chunks: TerrainChunk[]; key: string | null }
+/**
+ * The terrain in chunks (squares of land, each its own mesh); `key`: the server's name for it, for dabTerrain, or null;
+ * `local`: whether chunks built again after a dab stay as they are (false: the land comes out right only built whole,
+ * so it is built again when the stroke ends).
+ */
+export interface TerrainChunks { chunks: TerrainChunk[]; key: string | null; local: boolean }
 /** A chunk at its place in the land's grid of chunks; no triangles: nothing is left there. */
 export interface TerrainChunk { x: number; z: number; mesh: TerrainMesh }
 
