@@ -90,6 +90,9 @@ public static class BooleanSeam
     /// <summary>The free space's floor lies this far under the driving surface (metres, TMSPLINE_BOOL_UNDER): inside the slab, so no face of it lies on the road's, and the land under the road is cut level there.</summary>
     public static float FreeUnder { get; set; } = float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_BOOL_UNDER"), System.Globalization.CultureInfo.InvariantCulture, out var u) ? u : 0.25f;
 
+    /// <summary>How far a free space reaches past the road's edges (metres), from the rooms' rails.</summary>
+    private const float FreeBeyond = 0.08f;
+
     /// <summary>Debug lines of the last build's free spaces (x, y, z, x, y, z, kind; kind 10 a valid one, 11 one the library refused).</summary>
     public static float[] LastVolumes { get; private set; } = [];
 
@@ -106,7 +109,19 @@ public static class BooleanSeam
             if (all.Count < 2) continue;
             var p = all[0].Length;
 
-            foreach (var section in all) ContinueCurl(section);
+            foreach (var section in all)
+            {
+                // The rails (the rooms tuck them 3 cm in from the road's edge) moved out past it by FreeBeyond: land in
+                // the strip along the edge stood over the driving surface and showed through it.
+                var midPoint = section[1 + (StitchedTerrain.RoomDeckPoints - 1) / 2];
+                foreach (var rail in new[] { 0, StitchedTerrain.RoomRailRight })
+                {
+                    var outward = section[rail] - midPoint;
+                    outward.Y = 0;
+                    if (outward.LengthSquared() > 1e-4f) section[rail] += Vector3.Normalize(outward) * FreeBeyond;
+                }
+                ContinueCurl(section);
+            }
             var sections = Thin(all, FreeTolerance);
             // A closed track: its last section is its first (all round, no ends).
             var round = track.Closed && Vector3.Distance(sections[0][0], sections[^1][0]) < 0.01f;
@@ -265,13 +280,50 @@ public static class BooleanSeam
         return kept;
     }
 
+    /// <summary>
+    /// The roads' own rings as the embankments' stations (laid out like a room's section: index 0 the left contact, 1 to
+    /// RoomDeckPoints the driving surface left to right, RoomRailRight the right contact, a point over the middle after it):
+    /// the same rings, at the same quality, as the roads cut out of the land, so an embankment's edge runs straight
+    /// between the same points as the road's, exactly along it.
+    /// </summary>
+    internal static List<(Track Track, List<Vector3[]> Sections)> RoadStations(TrackMap map, MeshQuality quality)
+    {
+        static Vector3 W(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
+        var result = new List<(Track, List<Vector3[]>)>();
+        const int deck = StitchedTerrain.RoomDeckPoints, rightRail = StitchedTerrain.RoomRailRight, points = StitchedTerrain.RoomSectionPoints;
+        foreach (var track in map.Tracks)
+        {
+            track.SyncSegments();
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(quality));
+            if (rings.Count < 2 || track.Segments.Count == 0) continue;
+            var list = new List<Vector3[]>();
+            foreach (var r in rings)
+            {
+                var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
+                var section = new Vector3[points];
+                for (var j = 0; j < deck; j++)
+                {
+                    var q = RoadMeshBuilder.SurfaceSample(r, (j / (double)(deck - 1) - 0.5) * r.Width);
+                    section[1 + j] = W(r.Position + r.Right * q.X + r.Up * q.Y);
+                }
+                var mid = section[1 + (deck - 1) / 2];
+                var m = RoadMeshBuilder.SurfaceSample(r, 0);
+                var normal = W(r.Right * m.NX + r.Up * m.NY);
+                for (var j = rightRail + 1; j < points; j++) section[j] = mid + normal * 5;
+                section[0] = W(RoadMeshBuilder.EdgeContact(r, segment, -1));
+                section[rightRail] = W(RoadMeshBuilder.EdgeContact(r, segment, 1));
+                list.Add(section);
+            }
+            result.Add((track, list));
+        }
+        return result;
+    }
+
     /// <summary>Embankments and cuttings: their slope (metres out per metre down or up), the most they fill or cut (metres; more: a bridge or a tunnel, left alone), the edge's anchor under the top of the land's contact on the road's side (metres).</summary>
-    private const float EmbankSlope = 1.5f, MaxFill = 10, MaxCut = 10, EmbankAnchor = 0.3f;
-    private const int EmbankPoints = 5;
-    /// <summary>How much an embankment's weight may change from one station to the next, and the stations' spacing (metres, as the rooms').</summary>
-    private const float WeightStep = 0.12f, StationStep = 2;
-    /// <summary>How far along the road an embankment's anchor height is averaged either way (metres).</summary>
-    private const float AnchorReach = 6;
+    private const float EmbankSlope = 1.5f, MaxFill = 10, MaxCut = 10, EmbankAnchor = 0.3f, EdgeAnchor = 0f, Berm = 0.25f, UnderSlab = 0.6f;
+    private const int EmbankPoints = 6;
+    /// <summary>How much an embankment's weight may change from one station to the next.</summary>
+    private const float WeightStep = 0.12f;
 
     /// <summary>The land's heights where a vertical line meets it: its triangles in plan squares.</summary>
     internal sealed class LandHeights
@@ -361,11 +413,13 @@ public static class BooleanSeam
                     var flat = new Vector3(across.X, 0, across.Z);
                     if (flat.Length() < 0.3f * across.Length()) continue;
                     outward[i] = Vector3.Normalize(flat);
-                    // Banking: the edges' height apart over their distance; curl: how far the surface at this edge turns
+                    // Banking (a banked turn keeps its embankments; they fade only from about 58 to 76 degrees): the edges' height apart over their distance; curl: how far the surface at this edge turns
                     // up (its last piece's direction, outwards).
                     var edgeDir = side == 0 ? sec[1] - sec[2] : sec[StitchedTerrain.RoomDeckPoints] - sec[StitchedTerrain.RoomDeckPoints - 1];
-                    var curl = edgeDir.LengthSquared() > 1e-8f ? Vector3.Normalize(edgeDir).Y : 0;
-                    weight[i] = MathF.Min(Fade(0.08f, 0.3f, MathF.Abs(across.Y) / across.Length()), Fade(0.15f, 0.45f, curl));
+                    // (Against the road's own cross-section, the line between its rails: on a banked road the whole
+                    // surface is tilted, and its high edge rising in the world is no curl.)
+                    var curl = edgeDir.LengthSquared() > 1e-8f ? MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(edgeDir), Vector3.Normalize(across)), -1, 1)) : 0;
+                    weight[i] = MathF.Min(Fade(0.85f, 0.97f, MathF.Abs(across.Y) / across.Length()), Fade(1.2f, 1.9f, curl));
                     // Twist: how fast the driving surface's edge rises or falls against the road's middle from the station
                     // before, per metre along (a road rolling over). The surface's own edge, not the rail: where a curb
                     // grows out of the edge the rail climbs by the curb's height on a level road, and was taken for a twist.
@@ -375,29 +429,18 @@ public static class BooleanSeam
                         var edge = side == 0 ? 1 : StitchedTerrain.RoomDeckPoints;
                         var along = Vector3.Distance(sec[deckMid], prev[deckMid]);
                         if (along > 1e-3f)
-                            weight[i] = MathF.Min(weight[i], Fade(0.05f, 0.2f, MathF.Abs((sec[edge].Y - sec[deckMid].Y) - (prev[edge].Y - prev[deckMid].Y)) / along));
+                            weight[i] = MathF.Min(weight[i], Fade(0.25f, 0.5f, MathF.Abs((sec[edge].Y - sec[deckMid].Y) - (prev[edge].Y - prev[deckMid].Y)) / along));
                     }
-                    anchor[i] = rail - Vector3.UnitY * EmbankAnchor;
+                    // Under a curb's top (its outer face then holds the land), or, where the road has no curb (the rail is
+                    // the driving surface's own edge, near the deck's), just under that edge: 0.3 m down the slab's side
+                    // the land met it half way and left its edge standing out.
+                    var hasCurb = Vector3.Distance(rail, sec[side == 0 ? 1 : StitchedTerrain.RoomDeckPoints]) > 0.5f;
+                    anchor[i] = rail - Vector3.UnitY * (hasCurb ? EmbankAnchor : EdgeAnchor);
                     half[i] = flat.Length() / 2 + 1;
                     valid[i] = true;
                 }
-                // The anchors' heights over the road's middle smoothed along it (the mean of the stations within
-                // AnchorReach either way): where a curb starts or ends the land's contact jumps by its height, and the
-                // slopes from it left a step there.
-                {
-                    var over = new float[n];
-                    for (var i = 0; i < n; i++) if (valid[i]) over[i] = anchor[i].Y - sections[i][deckMid].Y;
-                    var reach = (int)MathF.Round(AnchorReach / StationStep);
-                    for (var i = 0; i < n; i++)
-                    {
-                        if (!valid[i]) continue;
-                        float sum = 0;
-                        var count = 0;
-                        for (var k = Math.Max(0, i - reach); k <= Math.Min(n - 1, i + reach); k++)
-                            if (valid[k]) { sum += over[k]; count++; }
-                        anchor[i].Y = sections[i][deckMid].Y + sum / count;
-                    }
-                }
+                // (Each anchor at its own station's edge, not smoothed along the road: the land is to meet the edge
+                // exactly, to be drivable.)
                 for (var i = 0; i < n; i++)
                 {
                     if (!valid[i]) continue;
@@ -471,14 +514,7 @@ public static class BooleanSeam
                     }
                     i = j + 1;
                 }
-                // Debug lines: the rail (grey) and the smoothed anchor (green), station to station.
-                for (var k = 1; k < n; k++)
-                {
-                    Vector3 r0 = sections[k - 1][side], r1 = sections[k][side];
-                    debug.AddRange([r0.X, r0.Y, r0.Z, r1.X, r1.Y, r1.Z, 9]);
-                    if (valid[k - 1] && valid[k]) debug.AddRange([anchor[k - 1].X, anchor[k - 1].Y, anchor[k - 1].Z, anchor[k].X, anchor[k].Y, anchor[k].Z, 4]);
-                }
-                // Each piece: its depth or height the deepest of the stations round each (no dips), ramped down to the
+                // Each piece: its depth or height its own station's (every station exact, not smoothed), ramped down to the
                 // edge over its first and last three stations, swept.
                 for (var i = 0; i < n;)
                 {
@@ -490,10 +526,11 @@ public static class BooleanSeam
                     var polys = new List<Vector3[]>();
                     for (var k = i; k <= j; k++)
                     {
-                        var amount = 0f;
-                        for (var m = Math.Max(i, k - 2); m <= Math.Min(j, k + 2); m++) amount = MathF.Max(amount, amounts[m]);
+                        var amount = MathF.Max(0, amounts[k]);
                         // Ramped over the piece's ends: as long along the road as its slope reaches out, and 2 m more.
-                        var ramp = MathF.Min(1, (Math.Min(k - i, j - k) + 0.5f) * StationStep / (amount * EmbankSlope + 2));
+                        // (By distance along the road: the road's rings are not evenly spaced.)
+                        var fromEnd = MathF.Min(Vector3.Distance(sections[k][deckMid], sections[i][deckMid]), Vector3.Distance(sections[k][deckMid], sections[j][deckMid]));
+                        var ramp = MathF.Min(1, (fromEnd + 1) / (amount * EmbankSlope + 2));
                         // Less of it (the ramps at a piece's ends, a banked or curling road): the slope starts nearer the
                         // ground (lower for a fill, higher for a cutting) and still reaches it, at the same slope; none
                         // at all at the ground itself.
@@ -503,11 +540,15 @@ public static class BooleanSeam
                         var shift = (amount - 1) * (1 - f);
                         Vector3 o = outward[k], u = Vector3.UnitY;
                         var e = anchor[k] + (kind == 1 ? -u : u) * shift;
+                        // (A level strip of Berm before the slope: the land flush with the edge where it is seen.)
+                        var berm = o * (Berm * f);
                         polys.Add(kind == 1
-                            ? [e - o * half[k], e, e + o * (a * EmbankSlope) - u * a, e + o * (a * EmbankSlope) - u * (a + 1), e - o * half[k] - u * (a + 1)]
-                            : [e - o * f, e, e + o * (a * EmbankSlope) + u * a, e + o * (a * EmbankSlope) + u * (a + 2 * f + 0.05f), e - o * f + u * (a + 2 * f + 0.05f)]);
+                            // (Inside the edge it drops under the slab at once before reaching in under the road: level with the
+                            // edge it stood over the driving surface of a banked or curved road and poked through.)
+                            ? [e - o * half[k] - u * UnderSlab, e - o * 0.02f - u * UnderSlab, e, e + berm, e + berm + o * (a * EmbankSlope) - u * a, e - o * half[k] - u * MathF.Max(a + 1, UnderSlab + 0.5f)]
+                            : [e - o * f, e, e + berm, e + berm + o * (a * EmbankSlope) + u * a, e + berm + o * (a * EmbankSlope) + u * (a + 2 * f + 0.05f), e - o * f + u * (a + 2 * f + 0.05f)]);
                     }
-                    (kind == 1 ? fills : cuts).Add(Sweep(Thin(polys, FreeTolerance)));
+                    (kind == 1 ? fills : cuts).Add(Sweep(polys));
                     i = j + 1;
                 }
             }
@@ -771,7 +812,7 @@ public static class BooleanSeam
             if (Environment.GetEnvironmentVariable("TMSPLINE_BOOL_EMBANK") != "off")
             {
                 var heights = new LandHeights(mesh);
-                var (fills, cuts) = Embankments(rooms, heights, volumeLines);
+                var (fills, cuts) = Embankments(RoadStations(map, quality), heights, volumeLines);
                 var fillSolids = new List<ManifoldLib.Solid>();
                 foreach (var (kind, list, ids, lineKind) in new[] { (0, fills, fillIds, 12), (1, cuts, cutIds, 13) })
                     foreach (var (ep, ei) in list)

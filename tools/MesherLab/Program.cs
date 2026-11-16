@@ -16,6 +16,33 @@ if (args.Length >= 2 && args[0] == "--size")
     Console.WriteLine($"{land.Indices.Count / 3} triangles, {used} vertices, about {land.Indices.Count / 3 * 24.3 / 1024:0} KB, built in {watch.Elapsed.TotalSeconds:0.0} s");
     return;
 }
+if (args.Length >= 3 && args[0] == "--chunkprobe")
+{
+    // The land as the editor gets it (TerrainMeshBuilder.Build: chunks), its heights at plan points "x;z|x;z".
+    var probeMap = TmSpline.Core.Model.TrackJson.ParseMap(File.ReadAllText(args[1]));
+    var chunks = TmSpline.Core.Geometry.TerrainMeshBuilder.Build(probeMap.Terrain!, probeMap);
+    foreach (var probe in args[2].Split('|'))
+    {
+        var c = probe.Split(';').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var hits = new List<string>();
+        foreach (var ch in chunks)
+        {
+            var o = ch.ItemOffset;
+            foreach (var t in ch.Triangles)
+            {
+                System.Numerics.Vector3 a = ch.Positions[t.A] + new System.Numerics.Vector3((float)o.X, (float)o.Y, (float)o.Z), b = ch.Positions[t.B] + new System.Numerics.Vector3((float)o.X, (float)o.Y, (float)o.Z), cc = ch.Positions[t.C] + new System.Numerics.Vector3((float)o.X, (float)o.Y, (float)o.Z);
+                var d = (b.Z - cc.Z) * (a.X - cc.X) + (cc.X - b.X) * (a.Z - cc.Z);
+                if (MathF.Abs(d) < 1e-9f) continue;
+                var u = ((b.Z - cc.Z) * (c[0] - cc.X) + (cc.X - b.X) * (c[1] - cc.Z)) / d;
+                var v = ((cc.Z - a.Z) * (c[0] - cc.X) + (a.X - cc.X) * (c[1] - cc.Z)) / d;
+                if (u < 0 || v < 0 || u + v > 1) continue;
+                hits.Add($"{a.Y * u + b.Y * v + cc.Y * (1 - u - v):0.00} ({ch.Name})");
+            }
+        }
+        Console.WriteLine($"{c[0]},{c[1]}: " + string.Join(", ", hits));
+    }
+    return;
+}
 if (args.Length >= 2 && args[0] == "--seam") { SeamLoops.Run(args[1], args.Length > 2 ? double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 12); return; }
 if (args.Length >= 3 && args[0] == "--map") { MapMode.Run(args[1], args[2]); return; }
 if (args.Length >= 3 && args[0] == "--check") { Check.Run(args[1], args[2], args.Length > 3 ? args[3] : "new", args.Length > 4 ? args[4] : null); return; }
