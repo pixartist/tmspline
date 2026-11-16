@@ -734,7 +734,10 @@ public static class StitchedTerrain
         /// <summary>For VoxelTerrain: the rooms alone (stations, sections, sky).</summary>
         public void BuildRooms() => Sections(sky: false);
 
-        public List<(Track Track, List<Vector3[]> Sections)> RoomPolygons() => roads.Select(r => (r.Track, r.S.Select(st => st.W).ToList())).ToList();
+        // (Split at the road's gaps: no room where the road is left out.)
+        public List<(Track Track, List<Vector3[]> Sections)> RoomPolygons() => roads
+            .SelectMany(r => BooleanSeam.SplitAtGaps(r.Track, r.S, st => st.R.Distance).Select(run => (r.Track, run.Select(st => st.W).ToList())))
+            .ToList();
 
         /// <summary>The lowest point of the rooms near a plan point (those in its bucket and the ones round it), or +infinity.</summary>
         public float RoomFloor(float x, float z, int around = 1)

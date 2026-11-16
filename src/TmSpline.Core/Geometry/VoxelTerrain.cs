@@ -273,6 +273,10 @@ public static class VoxelTerrain
     {
         using var mesher = Use(grid);
         SeamZipper.Stage("start");
+        // The roads' rooms cut the land, except in the boolean terrain built whole (its roads' solids and driving spaces
+        // take the land away exactly). Chunks built on their own after a dab of the brush are a quick preview until the
+        // whole is built again at the stroke's end: cut by the rooms, as the voxel terrain.
+        var roomCut = !(Boolean && !BooleanSeam.VoxelCut) || region is not null;
         var (v, tolerance, near) = Cells(grid.Quality);
         // Coarser than High: every cell's point is moved onto the surface (as those of grazing cells are). The mean of
         // a large cell's edge crossings can lie well off it, and then land stood in the roads' space.
@@ -460,7 +464,7 @@ public static class VoxelTerrain
         {
             var f = Blurred(landField, p, false);
             // (The boolean terrain without the voxel cut: the roads' solids and driving spaces alone take the land away.)
-            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse && !(Boolean && !BooleanSeam.VoxelCut))
+            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse && roomCut)
             {
                 var cut = -room(p);
                 // A soft cut over the road: where the land's surface and a room's wall come together (a tunnel's
@@ -728,7 +732,7 @@ public static class VoxelTerrain
             // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
             // back onto the floor.
             // (Not where land was worked into the road's space: that stays where it was put, and its floor shows.)
-            if (Painted(p, true) != 0 || Blur(p, true) > 0 || Boolean && !BooleanSeam.VoxelCut) return;
+            if (Painted(p, true) != 0 || Blur(p, true) > 0 || !roomCut) return;
             if (deck != default && d < 0 && d > -2 * v)
             {
                 p += deck * d;
@@ -753,7 +757,7 @@ public static class VoxelTerrain
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             // (The boolean terrain keeps the floors: the roads' solids take out what lies in them.)
-            if (!KeepFloor && !Boolean && ua != default && ub != default && uc != default)
+            if (!KeepFloor && (!Boolean || region is not null) && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;

@@ -1237,9 +1237,9 @@ export class Editor {
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     if (!this.sculpting) this.setQuickTerrain(true);
     // The solid's brushes build each dab into the land shown, when the server has it as it is here (the same roads).
-    // Not where the land comes out right only built whole: its chunks built again on their own had holes along their
-    // edges; the dabs are marked instead, and the whole is built again when the stroke ends.
-    this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.local && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
+    // Where the land comes out right only built whole (the seamless and boolean terrains), the chunks built on their own
+    // are a quick preview while painting, and the whole is built again when the stroke ends.
+    this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
     this.dab(at);
   }
 
@@ -1270,8 +1270,8 @@ export class Editor {
       }
     this.items.sync(this.map.items);
     this.onChange();
-    // The solid's dabs are in the land shown already (or on their way); else the whole is built again.
-    if (this.sculpting && this.liveDabs) this.terrainShown = this.map.terrain;
+    // The solid's dabs are in the land shown already (or on their way); else (or only previewed) the whole is built again.
+    if (this.sculpting && this.liveDabs && this.terrainKey?.local) this.terrainShown = this.map.terrain;
     else this.syncTerrain(true);
   }
 

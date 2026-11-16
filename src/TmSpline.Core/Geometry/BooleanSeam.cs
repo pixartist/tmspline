@@ -47,9 +47,84 @@ public static class BooleanSeam
                     indices.AddRange([a, b, c]);
                 }
             }
+            if (!keepOpen) SplitAtTJunctions(positions, indices);
             result.Add(new RoadMesh(track, positions, indices));
         }
         return result;
+    }
+
+    /// <summary>
+    /// Open edges with another open edge's vertex lying on them (a T-junction: a hole's wall is split wherever the top's
+    /// or the underside's triangles cross the hole's outline, the surface only where its own do) split there, the
+    /// triangle fanned from its third corner, so both sides share the same vertices and the solid closes. How many
+    /// triangles were split.
+    /// </summary>
+    internal static int SplitAtTJunctions(List<Vector3> positions, List<int> indices, float tolerance = 1e-3f)
+    {
+        var split = 0;
+        for (var pass = 0; pass < 4; pass++)
+        {
+            var edgeTriangle = new Dictionary<long, int>();
+            for (var t = 0; t + 2 < indices.Count; t += 3)
+                for (var k = 0; k < 3; k++) edgeTriangle[Key(indices[t + k], indices[t + (k + 1) % 3])] = t;
+            var open = edgeTriangle.Keys.Where(e => !edgeTriangle.ContainsKey(Key((int)(e & 0xffffffff), (int)(e >> 32)))).ToList();
+            if (open.Count == 0) break;
+            // The open edges' vertices, in plan buckets of a metre.
+            var boundary = new HashSet<int>();
+            foreach (var e in open) { boundary.Add((int)(e >> 32)); boundary.Add((int)(e & 0xffffffff)); }
+            var buckets = new Dictionary<(int, int, int), List<int>>();
+            static (int, int, int) Cell(Vector3 p) => ((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y), (int)MathF.Floor(p.Z));
+            foreach (var v in boundary)
+            {
+                var c = Cell(positions[v]);
+                if (!buckets.TryGetValue(c, out var list)) buckets[c] = list = [];
+                list.Add(v);
+            }
+            var replaced = new Dictionary<int, List<int>>();
+            foreach (var e in open)
+            {
+                int a = (int)(e >> 32), b = (int)(e & 0xffffffff);
+                Vector3 pa = positions[a], pb = positions[b], d = pb - pa;
+                var length2 = d.LengthSquared();
+                if (length2 < 1e-12f) continue;
+                var on = new List<(float T, int V)>();
+                Vector3 lo = Vector3.Min(pa, pb) - new Vector3(tolerance), hi = Vector3.Max(pa, pb) + new Vector3(tolerance);
+                var (c0, c1) = (Cell(lo), Cell(hi));
+                for (var x = c0.Item1; x <= c1.Item1; x++)
+                    for (var y = c0.Item2; y <= c1.Item2; y++)
+                        for (var z = c0.Item3; z <= c1.Item3; z++)
+                            if (buckets.TryGetValue((x, y, z), out var list))
+                                foreach (var v in list)
+                                {
+                                    if (v == a || v == b) continue;
+                                    var t = Vector3.Dot(positions[v] - pa, d) / length2;
+                                    if (t <= 1e-4f || t >= 1 - 1e-4f) continue;
+                                    if (Vector3.DistanceSquared(pa + d * t, positions[v]) > tolerance * tolerance) continue;
+                                    on.Add((t, v));
+                                }
+                if (on.Count == 0) continue;
+                var tri = edgeTriangle[e];
+                if (replaced.ContainsKey(tri)) continue;
+                // The corner opposite the edge.
+                int third = -1;
+                for (var k = 0; k < 3; k++) if (indices[tri + k] != a && indices[tri + k] != b) third = indices[tri + k];
+                var chain = new List<int> { a };
+                chain.AddRange(on.OrderBy(x => x.T).Select(x => x.V).Distinct());
+                chain.Add(b);
+                var fan = new List<int>();
+                for (var i = 0; i + 1 < chain.Count; i++) fan.AddRange([chain[i], chain[i + 1], third]);
+                replaced[tri] = fan;
+            }
+            if (replaced.Count == 0) break;
+            var rebuilt = new List<int>(indices.Count + replaced.Sum(r => r.Value.Count));
+            for (var t = 0; t + 2 < indices.Count; t += 3)
+                if (replaced.TryGetValue(t, out var fan)) rebuilt.AddRange(fan);
+                else rebuilt.AddRange([indices[t], indices[t + 1], indices[t + 2]]);
+            indices.Clear();
+            indices.AddRange(rebuilt);
+            split += replaced.Count;
+        }
+        return split;
     }
 
     /// <summary>
@@ -296,8 +371,10 @@ public static class BooleanSeam
             track.SyncSegments();
             var rings = TrackSampler.Sample(track, MeshQualities.Sampler(quality));
             if (rings.Count < 2 || track.Segments.Count == 0) continue;
+            foreach (var run in SplitAtGaps(track, rings, r => r.Distance))
+            {
             var list = new List<Vector3[]>();
-            foreach (var r in rings)
+            foreach (var r in run)
             {
                 var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
                 var section = new Vector3[points];
@@ -315,8 +392,45 @@ public static class BooleanSeam
                 list.Add(section);
             }
             result.Add((track, list));
+            }
         }
         return result;
+    }
+
+    /// <summary>
+    /// A road's stations in runs between its gaps (where the road is left out): no free space, embankment or cutting
+    /// there. The rings at a gap's ends (the sampler puts one exactly at each) end and start the runs beside it.
+    /// </summary>
+    internal static List<List<T>> SplitAtGaps<T>(Track track, IReadOnlyList<T> stations, Func<T, double> distance)
+    {
+        var gaps = TrackObjects.GapRanges(track, TrackSampler.SegmentStarts(track));
+        var runs = new List<List<T>>();
+        if (gaps.Count == 0) { runs.Add([.. stations]); return runs; }
+        var current = new List<T>();
+        const double eps = 1e-3;
+        for (var i = 0; i < stations.Count; i++)
+        {
+            var d = distance(stations[i]);
+            if (gaps.Any(g => d > g.Start + eps && d < g.End - eps))
+            {
+                if (current.Count >= 2) runs.Add(current);
+                current = [];
+                continue;
+            }
+            // (A gap lying between two stations outside it.)
+            if (current.Count > 0)
+            {
+                var before = distance(current[^1]);
+                if (gaps.Any(g => g.Start >= before - eps && g.End <= d + eps))
+                {
+                    if (current.Count >= 2) runs.Add(current);
+                    current = [];
+                }
+            }
+            current.Add(stations[i]);
+        }
+        if (current.Count >= 2) runs.Add(current);
+        return runs;
     }
 
     /// <summary>Embankments and cuttings: their slope (metres out per metre down or up), the most they fill or cut (metres; more: a bridge or a tunnel, left alone), the edge's anchor under the top of the land's contact on the road's side (metres).</summary>
