@@ -64,22 +64,16 @@ public static class BooleanSeam
         var split = 0;
         for (var pass = 0; pass < 4; pass++)
         {
-            var edgeTriangle = new Dictionary<long, int>();
+            var edgeTriangle = new Dictionary<long, int>(EdgeKeyComparer.Instance);
             for (var t = 0; t + 2 < indices.Count; t += 3)
                 for (var k = 0; k < 3; k++) edgeTriangle[Key(indices[t + k], indices[t + (k + 1) % 3])] = t;
             var open = edgeTriangle.Keys.Where(e => !edgeTriangle.ContainsKey(Key((int)(e & 0xffffffff), (int)(e >> 32)))).ToList();
             if (open.Count == 0) break;
-            // The open edges' vertices, in plan buckets of a metre.
+            // The open edges' vertices, by x (an edge looks only at those within its x range).
             var boundary = new HashSet<int>();
             foreach (var e in open) { boundary.Add((int)(e >> 32)); boundary.Add((int)(e & 0xffffffff)); }
-            var buckets = new Dictionary<(int, int, int), List<int>>();
-            static (int, int, int) Cell(Vector3 p) => ((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y), (int)MathF.Floor(p.Z));
-            foreach (var v in boundary)
-            {
-                var c = Cell(positions[v]);
-                if (!buckets.TryGetValue(c, out var list)) buckets[c] = list = [];
-                list.Add(v);
-            }
+            var byX = boundary.OrderBy(v => positions[v].X).ToArray();
+            var xs = byX.Select(v => positions[v].X).ToArray();
             var replaced = new Dictionary<int, List<int>>();
             foreach (var e in open)
             {
@@ -89,19 +83,19 @@ public static class BooleanSeam
                 if (length2 < 1e-12f) continue;
                 var on = new List<(float T, int V)>();
                 Vector3 lo = Vector3.Min(pa, pb) - new Vector3(tolerance), hi = Vector3.Max(pa, pb) + new Vector3(tolerance);
-                var (c0, c1) = (Cell(lo), Cell(hi));
-                for (var x = c0.Item1; x <= c1.Item1; x++)
-                    for (var y = c0.Item2; y <= c1.Item2; y++)
-                        for (var z = c0.Item3; z <= c1.Item3; z++)
-                            if (buckets.TryGetValue((x, y, z), out var list))
-                                foreach (var v in list)
-                                {
-                                    if (v == a || v == b) continue;
-                                    var t = Vector3.Dot(positions[v] - pa, d) / length2;
-                                    if (t <= 1e-4f || t >= 1 - 1e-4f) continue;
-                                    if (Vector3.DistanceSquared(pa + d * t, positions[v]) > tolerance * tolerance) continue;
-                                    on.Add((t, v));
-                                }
+                var first = Array.BinarySearch(xs, lo.X);
+                if (first < 0) first = ~first;
+                while (first > 0 && xs[first - 1] >= lo.X) first--;
+                for (var k = first; k < xs.Length && xs[k] <= hi.X; k++)
+                {
+                    var v = byX[k];
+                    var q = positions[v];
+                    if (v == a || v == b || q.Y < lo.Y || q.Y > hi.Y || q.Z < lo.Z || q.Z > hi.Z) continue;
+                    var t = Vector3.Dot(q - pa, d) / length2;
+                    if (t <= 1e-4f || t >= 1 - 1e-4f) continue;
+                    if (Vector3.DistanceSquared(pa + d * t, q) > tolerance * tolerance) continue;
+                    on.Add((t, v));
+                }
                 if (on.Count == 0) continue;
                 var tri = edgeTriangle[e];
                 if (replaced.ContainsKey(tri)) continue;
@@ -702,6 +696,39 @@ public static class BooleanSeam
         return (positions, indices);
     }
 
+    /// <summary>How deep a pit under a hole in the road reaches below the hole's lowest point on the driving surface, metres.</summary>
+    private const float PitDepth = 2;
+
+    /// <summary>
+    /// The pits under the roads' holes: each hole's outline on the driving surface straight down to a level floor
+    /// PitDepth under its lowest point, and up a metre over its highest (the free space takes the land above). Taken out of
+    /// the land like a free space: through a hole the land showed the free space's floor just under the road, bent with
+    /// it and simplified into fans.
+    /// </summary>
+    internal static List<(List<Vector3> Positions, List<int> Indices)> Pits(TrackMap map, MeshQuality quality)
+    {
+        var result = new List<(List<Vector3>, List<int>)>();
+        foreach (var track in map.Tracks)
+        {
+            if (!track.Objects.Any(o => o.Kind == TrackObjectKind.Hole)) continue;
+            track.SyncSegments();
+            var rings = TrackSampler.Sample(track, MeshQualities.Sampler(quality));
+            if (rings.Count < 2) continue;
+            foreach (var hole in TrackObjects.Holes(track, rings, TrackSampler.SegmentStarts(track)))
+            {
+                var outline = hole.Points.Select(q =>
+                {
+                    var (point, _) = TrackObjects.SurfacePoint(TrackObjects.RingAt(rings, q.D), q.S);
+                    return new Vector3((float)point.X, (float)point.Y, (float)point.Z);
+                }).ToList();
+                if (outline.Count < 3) continue;
+                float bottom = outline.Min(q => q.Y) - PitDepth, top = outline.Max(q => q.Y) + 1;
+                result.Add(Sweep([[.. outline.Select(q => q with { Y = bottom })], [.. outline.Select(q => q with { Y = top })]]));
+            }
+        }
+        return result;
+    }
+
     /// <summary>Debug lines for a free space: every other section's outline and lines along it at its rails, the driving surface's middle and the vault's top.</summary>
     private static void DrawVolume(List<float> lines, List<Vector3> positions, int sectionPoints, int sections, int kind)
     {
@@ -919,6 +946,16 @@ public static class BooleanSeam
                 var free = made2.AsOriginal();
                 freeIds.Add((uint)free.OriginalId);
                 solids.Add(free);
+            }
+            // The pits under the roads' holes, taken out as free spaces (their faces are the land's).
+            foreach (var (pp, pi) in Pits(map, quality))
+            {
+                using var madeP = ManifoldLib.Solid.Of(ToMesh(pp, pi, Land));
+                DrawVolume(volumeLines, pp, pp.Count / 2 - 1, 2, madeP.Status == ManifoldLib.Error.NoError ? 10 : 11);
+                if (madeP.Status != ManifoldLib.Error.NoError) { Console.WriteLine($"  [boolean] a hole's pit is invalid ({madeP.Status}): not cut out"); continue; }
+                var pit = madeP.AsOriginal();
+                freeIds.Add((uint)pit.OriginalId);
+                solids.Add(pit);
             }
             // Embankments and cuttings beside the roads (land added up to a road's edge, or cut down to it).
             var fillIds = new HashSet<uint>();

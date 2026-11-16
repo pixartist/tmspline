@@ -656,9 +656,9 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", boolean: "Boolean" });
       const mesherNow = editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher);
       if (mesherNow === "boolean")
-        hint(root, "The roads are cut out of the land exactly, with embankments and cuttings along them. Building it takes longer, and after each brush stroke the whole terrain is built again.");
+        hint(root, "The roads are cut out of the land exactly, with embankments and cuttings along them. Building it takes longer: while you paint you see a quick preview, and the exact terrain is built when the stroke ends.");
       else if (mesherNow === "seamless")
-        hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer, and after each brush stroke the whole terrain is built again.");
+        hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer: while you paint you see a quick preview, and the exact terrain is built when the stroke ends.");
       const size = Object.assign(document.createElement("p"), { className: "hint" });
       const showSize = () => {
         const s = editor.terrainSize();
