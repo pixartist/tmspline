@@ -13,9 +13,10 @@ public enum TerrainQuality { Fine, High, Medium, Low }
 /// <summary>
 /// How the own terrain is meshed: Voxel (the voxel terrain, strips from the roads' edges to it), or Seamless
 /// (experimental: the voxel land simplified and remeshed, cut back a little from the roads and zipped to their edges
-/// and undersides; built whole only, see VoxelTerrain.Seamless).
+/// and undersides; built whole only, see VoxelTerrain.Seamless), or Loops (experimental: the land near the roads taken
+/// out and joined to them along matching loops, see LoopSeam).
 /// </summary>
-public enum TerrainMesher { Voxel, Seamless }
+public enum TerrainMesher { Voxel, Seamless, Loops }
 
 /// <summary>
 /// Own terrain round the tracks: heights on a square grid of vertices (editor coordinates, metres), exported as custom

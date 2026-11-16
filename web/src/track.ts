@@ -337,7 +337,7 @@ export type TerrainQuality = (typeof TERRAIN_QUALITIES)[number];
  * (experimental: the land simplified and remeshed, cut back a little from the roads and zipped to their edges and
  * undersides; built whole only, so after a stroke of the brush the whole is built again).
  */
-export const TERRAIN_MESHERS = ["voxel", "seamless"] as const;
+export const TERRAIN_MESHERS = ["voxel", "seamless", "loops"] as const;
 export type TerrainMesher = (typeof TERRAIN_MESHERS)[number];
 
 /**

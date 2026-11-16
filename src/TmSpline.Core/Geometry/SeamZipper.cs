@@ -126,7 +126,7 @@ public static class SeamZipper
     }
 
     /// <summary>Debug: the last build's gaps for the editor (x, y, z, x, y, z, kind): 0 the land's edges near roads that meet none, 1 the seam on the road (where the land meets it), 2 the close-road holes (the loops found, filled or not), 3 the seam where land meets the road twice (the loops found, filled or not).</summary>
-    public static float[] LastOpen { get; private set; } = [];
+    public static float[] LastOpen { get; internal set; } = [];
 
     private sealed class Rail
     {

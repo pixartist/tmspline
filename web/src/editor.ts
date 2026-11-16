@@ -245,7 +245,7 @@ export class Editor {
    * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), the seam on
    * the road, where land attaches (yellow), the close-road holes (magenta).
    */
-  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00, 0x40ff60, 0xb060ff].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
+  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00, 0x40ff60, 0xb060ff, 0x00ff44, 0x3070ff, 0xff0000, 0x8a8a8a].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -253,6 +253,17 @@ export class Editor {
    * borders cancel out, their corners lie in the same places). The road's edges are its driving surface's outermost
    * vertices every 2 m along it.
    */
+  private readonly groupMaterials = new Map<number, LineMaterial>();
+  /** A group's line colour (debug): hues spread by the golden ratio, so neighbouring groups differ. */
+  private groupMaterial(kind: number): LineMaterial {
+    let m = this.groupMaterials.get(kind);
+    if (!m) {
+      m = new LineMaterial({ color: new THREE.Color().setHSL(((kind * 0.618034) % 1 + 1) % 1, 0.9, 0.55).getHex(), linewidth: 3, depthTest: false });
+      this.groupMaterials.set(kind, m);
+    }
+    return m;
+  }
+
   private updateSeamDebug(): void {
     if (this.seamDebug) {
       this.scene.remove(this.seamDebug);
@@ -264,18 +275,23 @@ export class Editor {
     // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
     void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
       if (!data || !this.gapsEnabled || this.terrainMesh !== group) return;
-      const points: number[][] = [[], [], [], [], [], []];
-      for (let i = 0; i + 6 < data.length + 1; i += 7) points[Math.min(5, Math.max(0, data[i + 6]))].push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      // Kinds 0–9 the fixed colours; from 16 on (groups) each kind a colour of its own.
+      const points = new Map<number, number[]>();
+      for (let i = 0; i + 6 < data.length + 1; i += 7) {
+        const k = data[i + 6] >= 16 ? Math.round(data[i + 6]) : Math.min(9, Math.max(0, data[i + 6]));
+        if (!points.has(k)) points.set(k, []);
+        points.get(k)!.push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
+      }
       if (this.seamDebug) { this.scene.remove(this.seamDebug); for (const c of this.seamDebug.children) (c as LineSegments2).geometry.dispose(); }
       const lines = new THREE.Group();
       points.forEach((list, kind) => {
         if (!list.length) return;
         const geo = new LineSegmentsGeometry();
         geo.setPositions(list);
-        const material = this.seamDebugMaterials[kind];
+        const material = kind < 16 ? this.seamDebugMaterials[kind] : this.groupMaterial(kind);
         material.resolution.set(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
         const segments = new LineSegments2(geo, material);
-        segments.renderOrder = 999 + kind;
+        segments.renderOrder = 999 + Math.min(kind, 16);
         segments.raycast = () => {};
         lines.add(segments);
       });

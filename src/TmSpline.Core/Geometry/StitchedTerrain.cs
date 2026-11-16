@@ -177,7 +177,9 @@ public static class StitchedTerrain
     public static (Func<Vector3, float> Distance, Func<float, float, float> Floor, Func<Vector3, (float Distance, Vector3 Deck)> Nearest, Func<Vector3, (float Edge, float Over, float Across, float Beyond)> Road, Func<Vector3, (float Distance, Vector3 Point, Vector3 Left, Vector3 Right)> Surface) Rooms(TerrainGrid grid, TrackMap map)
     {
         var b = new Builder(grid, map, 0);
-        deckTuck = 0.45f;
+        // (The loops terrain cuts deeper under the driving surface: land left inside the road's slab can reach no road
+        // vertex without passing through the road.)
+        deckTuck = VoxelTerrain.Loops ? LoopSeam.DeckCut : 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
         return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across, out var beyond), over, across, beyond), p => (b.SurfaceDistance(p, out var point, out var left, out var right), point, left, right));
     }

@@ -27,19 +27,21 @@ public static class VoxelTerrain
     /// cut back <see cref="SeamlessGap"/> from the roads and zipped to them (SeamZipper). While on, the settings below
     /// that make it are its own, not those of the environment.
     /// </summary>
-    public static bool Seamless => seamless.Value;
-    private static readonly AsyncLocal<bool> seamless = new();
+    public static bool Seamless => mesher.Value != TerrainMesher.Voxel;
+    /// <summary>The loops terrain (TerrainMesher.Loops): the seamless land, joined to the roads by LoopSeam instead of the cut and zipper.</summary>
+    public static bool Loops => mesher.Value == TerrainMesher.Loops;
+    private static readonly AsyncLocal<TerrainMesher> mesher = new();
     /// <summary>The seamless terrain's gap between land and road, metres (1.5 m was tried too: more holes and a larger map).</summary>
     public const float SeamlessGap = 3;
 
     /// <summary>The seamless terrain on for the map's terrain until disposed (or off, for a voxel one).</summary>
     public static IDisposable Use(TerrainGrid grid)
     {
-        var before = seamless.Value;
-        seamless.Value = grid.Mesher == TerrainMesher.Seamless;
+        var before = mesher.Value;
+        mesher.Value = grid.Mesher;
         return new Restore(before);
     }
-    private sealed class Restore(bool before) : IDisposable { public void Dispose() => seamless.Value = before; }
+    private sealed class Restore(TerrainMesher before) : IDisposable { public void Dispose() => mesher.Value = before; }
 
     /// <summary>The smallest cells' size, metres (TMSPLINE_VOXEL; seamless: 4, the simplifier and remesher make the land's triangles).</summary>
     public static float Voxel { get => Seamless ? 4 : voxel; set => voxel = value; }
@@ -77,13 +79,34 @@ public static class VoxelTerrain
     private static bool remesh = Environment.GetEnvironmentVariable("TMSPLINE_REMESH") == "on";
     public static float SimplifyError { get; set; } = Setting("TMSPLINE_SIMPLIFY_ERROR", 0.5f);
     /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
-    public static bool OpenSeam { get => Seamless || openSeam; set => openSeam = value; }
+    public static bool OpenSeam { get => !Loops && (Seamless || openSeam); set => openSeam = value; }
     private static bool openSeam = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
     /// <summary>
     /// Whether the land comes out right only built whole: simplified and remeshed all at once (a part built again, as
     /// after a dab of the brush, is neither, and its edges no longer meet those of the chunks round it) and zipped to
     /// the roads with all its rim. The editor then builds it whole again when a stroke of the brush ends.
     /// </summary>
+    /// <summary>Debug (TMSPLINE_VOXEL_STATS=on): a mesh's open edges, edges three or more triangles share, and edges two triangles run the same way.</summary>
+    private static void Health(AdaptiveMesh mesh, string stage)
+    {
+        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") != "on") return;
+        var directed = new Dictionary<(int, int), int>();
+        var undirected = new Dictionary<(int, int), int>();
+        int degenerate = 0;
+        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+        {
+            int a = mesh.Indices[t], b = mesh.Indices[t + 1], c = mesh.Indices[t + 2];
+            if (a == b || b == c || c == a) { degenerate++; continue; }
+            foreach (var (u, v) in new[] { (a, b), (b, c), (c, a) })
+            {
+                directed[(u, v)] = directed.GetValueOrDefault((u, v)) + 1;
+                var key = u < v ? (u, v) : (v, u);
+                undirected[key] = undirected.GetValueOrDefault(key) + 1;
+            }
+        }
+        Console.WriteLine($"  [health] {stage}: {mesh.Indices.Count / 3} triangles, {undirected.Count(e => e.Value == 1)} open edges, {undirected.Count(e => e.Value > 2)} shared by 3+, {directed.Count(e => e.Value > 1)} run the same way twice, {degenerate} degenerate");
+    }
+
     public static bool WholeOnly(TerrainGrid grid)
     {
         using var _ = Use(grid);
@@ -728,7 +751,8 @@ public static class VoxelTerrain
             if (smoothOutline ? MathF.Max(outline(a), MathF.Max(outline(b), outline(c))) < 0 : double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
-            if (!KeepFloor && ua != default && ub != default && uc != default)
+            // (The loops terrain keeps the floors: it is to have no holes of its own; LoopSeam decides what meets the road.)
+            if (!KeepFloor && !Loops && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
@@ -796,6 +820,7 @@ public static class VoxelTerrain
         if (SimplifyTo > 0 && region is null)
         {
             var before = kept.Indices.Count / 3;
+            Health(kept, "voxel mesh");
             SeamZipper.Stage("voxel field and meshing");
             long edgeCalls = 0, edgeTicks = 0, roomCalls = 0, roomTicks = 0;
             kept = MeshSimplifier.Simplify(kept, SimplifyTo, SimplifyError,
@@ -815,7 +840,9 @@ public static class VoxelTerrain
                 });
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                 Console.WriteLine($"  [simplify] road-edge checks {edgeCalls} ({edgeTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0} s), room checks {roomCalls} ({roomTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0} s)");
+            Health(kept, "simplified");
             if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
+            Health(kept, "flips");
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                 Console.WriteLine($"  simplified {before} triangles to {kept.Indices.Count / 3}");
             // Remeshing experiment (TMSPLINE_REMESH=on): the simplified land's triangles made even (MeshRemesher), its
@@ -840,10 +867,16 @@ public static class VoxelTerrain
                 }
                 SeamZipper.Stage("simplifying");
                 kept = MeshRemesher.Remesh(kept, Project);
+                Health(kept, "remeshed");
                 SeamZipper.Stage("remeshing");
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                     Console.WriteLine($"  remeshed to {kept.Indices.Count / 3} triangles");
             }
+        }
+        if (Loops && region is null)
+        {
+            SeamZipper.LastOpen = LoopSeam.Run(kept, map, roadQuality, room, nearest, surface);
+            SeamZipper.Stage("loops");
         }
         if (OpenSeam)
         {
