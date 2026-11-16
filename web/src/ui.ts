@@ -132,15 +132,15 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     let indices: number[] | undefined;
     if (!wholeTrack && s) {
       // Only points and segments are on the track; with blocks or an object selected, M does nothing.
-      if (s.kind !== "point" && s.kind !== "handle" && s.kind !== "segment") return;
-      const around = s.kind === "segment" ? [s.index, (s.index + 1) % n] : [s.index];
+      if (s.kind !== "point" && s.kind !== "points" && s.kind !== "handle" && s.kind !== "segment") return;
+      const around = s.kind === "segment" ? [s.index, (s.index + 1) % n] : s.kind === "points" ? s.indices : [s.index];
       indices = around.flatMap((i) => [i - 1, i, i + 1]).map((i) => (editor.track.closed ? (i + n) % n : i));
     }
     editor.edit((t) => smoothPoints(t, indices, smoothStrength() / 100));
   };
   const removePoint = () => {
     const s = editor.selection;
-    if (editor.deleteSelectedBlocks()) return;
+    if (editor.deleteSelectedBlocks() || editor.deleteSelectedPoints()) return;
     if (s?.kind === "object") {
       editor.edit((t) => void t.objects.splice(s.index, 1), true);
       editor.select(null);
@@ -163,6 +163,17 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   // Save: to the cloud (the desktop app); the map is also saved on this PC after every change, and uploaded shortly after.
   const saveButton = button("Save", "Save the map to your TMSpline account now (Ctrl+S); changes are also saved automatically", saveToCloud);
   saveButton.hidden = true;
+  const saveAsButton = button("Save as…", "Save a copy of the map under a new name and go on editing the copy (Ctrl+Shift+S)", async () => {
+    const name = await askName("Save as", `${editor.map.name || "Untitled"} copy`,
+      cloud ? "The map as it is stays saved under its old name; the copy becomes a new track in your account."
+        : "Downloads the map under the new name as a .track.json file.");
+    if (!name) return;
+    if (cloud) await cloud.saveAs(name, saveAsButton);
+    else {
+      editor.editMap((m) => (m.name = name));
+      download(editor.map);
+    }
+  });
   button("Download", "Download the map (all tracks) as a .track.json file", () => download(editor.map));
   button("Export map", "Generate a Trackmania .Map.Gbx", () => showExportDialog(editor.exportMap())).classList.add("primary");
   separator();
@@ -232,6 +243,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && key === "y") { e.preventDefault(); redo(); }
+    else if ((e.ctrlKey || e.metaKey) && key === "s" && e.shiftKey) { e.preventDefault(); saveAsButton.click(); }
     else if ((e.ctrlKey || e.metaKey) && key === "s") { e.preventDefault(); if (cloud) saveToCloud(); else download(editor.map); }
     else if (key === "n") addPoint();
     else if (key === "t") editor.addTrack();
@@ -256,16 +268,18 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     }
     else if (key === "[" || key === "]") {
       const s = editor.selection;
-      if (s?.kind === "point" || s?.kind === "handle") {
+      const indices = s?.kind === "handle" ? [s.index] : editor.selectedPoints();
+      if (indices.length > 0) {
         const step = (key === "[" ? -1 : 1) * (e.shiftKey ? 4 : 1);
-        editor.edit((t) => (t.points[s.index].width = clamp(t.points[s.index].width + step, 4, 512)), false, `width:${s.index}`);
+        editor.edit((t) => { for (const i of indices) t.points[i].width = clamp(t.points[i].width + step, 4, 512); }, false, `width:${indices.join(",")}`);
       }
     }
     else if (key === "q" || key === "e") {
       const s = editor.selection;
-      if (s?.kind === "point" || s?.kind === "handle") {
+      const indices = s?.kind === "handle" ? [s.index] : editor.selectedPoints();
+      if (indices.length > 0) {
         const step = (key === "q" ? -5 : 5) * (e.shiftKey ? 3 : 1);
-        editor.edit((t) => (t.points[s.index].bank = wrapBank(t.points[s.index].bank + step)), false, `bank:${s.index}`);
+        editor.edit((t) => { for (const i of indices) t.points[i].bank = wrapBank(t.points[i].bank + step); }, false, `bank:${indices.join(",")}`);
       }
     }
   });
@@ -561,7 +575,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${obj?.checkpointGroup ?? ""}:${editor.map.tracks.flatMap((tr) => tr.objects.map((q) => q.checkpointGroup ?? 0)).join(",")}:${t.closed}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${editor.map.terrain?.mesher ?? scenery.ownTerrain.mesher ?? ""}:${paint.brush}:${editor.map.environment ?? ""}`
-    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" ? s.indices.join(",") : ""}`;
+    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" || s?.kind === "points" ? `${s.kind}${s.indices.join(",")}` : ""}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
     return;
@@ -934,6 +948,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       : "Drag the selected block to move it by cells. R turns it (Shift+R back), PgUp / PgDn change its level (8 m), "
         + "Del removes it. Cells are 32 m from the map center; level 0 is the ground (the block's ground variant). "
         + "Tab (or Free) turns it into a free block, which can be anywhere and at any angle.");
+  } else if (s?.kind === "points") {
+    section(`${s.indices.length} points`);
+    buttonRow(root, [
+      { label: "Deselect", onClick: () => editor.select(null) },
+      { label: "Delete", onClick: removePoint },
+    ]);
+    hint(root, "Drag one of them to move them all (Shift: keep the height, Alt: height only). [ / ] change their width, "
+      + "Q / E their bank, M smooths around them, Del removes them. Shift+click a point to add or remove it, drag a "
+      + "rectangle to select (Shift: add, Ctrl: remove).");
   } else if (s?.kind === "blocks") {
     const blocks = s.indices.map((i) => editor.map.blocks[i]).filter(Boolean);
     section(`${blocks.length} blocks`);
@@ -1051,7 +1074,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
         + "(see the segment's bump detail).",
     }[obj.kind]);
   } else {
-    hint(root, "Drag a point to move it, click it to show its handles and banking ring. Click the road to edit a segment. "
+    hint(root, "Drag a point to move it, click it to show its handles and banking ring; Shift+click points or drag a rectangle to select several and move them together. Click the road to edit a segment. "
       + "Ctrl+click the ground to extend the track. Pillar, Hole and Gap place things on the road. "
       + "Start, checkpoints and finish are gates you place on the road (Gate), or add them later in the game's editor.");
   }
@@ -1225,6 +1248,35 @@ function hint(root: HTMLElement, text: string) {
 }
 
 // ---- files ------------------------------------------------------------------------------------
+
+/** A small dialog asking for a name; null when cancelled or left empty. */
+function askName(title: string, initial: string, note: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "export";
+    dialog.innerHTML = `<h2></h2><p class="hint"></p><div class="row"><label>Name</label><input /></div>
+      <div class="actions"><button class="cancel">Cancel</button><button class="primary ok">Save</button></div>`;
+    dialog.querySelector("h2")!.textContent = title;
+    dialog.querySelector(".hint")!.textContent = note;
+    const input = dialog.querySelector("input")!;
+    input.value = initial;
+    let result: string | null = null;
+    const ok = () => {
+      result = input.value.trim() || null;
+      dialog.close();
+    };
+    dialog.querySelector(".ok")!.addEventListener("click", ok);
+    dialog.querySelector(".cancel")!.addEventListener("click", () => dialog.close());
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") ok(); });
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      resolve(result);
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    input.select();
+  });
+}
 
 function download(track: TrackMap): void {
   const blob = new Blob([JSON.stringify(track, null, 2)], { type: "application/json" });

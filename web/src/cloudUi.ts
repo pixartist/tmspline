@@ -15,6 +15,8 @@ export interface CloudUi {
   replaced(): void;
   /** Save: to the cloud now (signs in first when needed); shows the outcome on the button. */
   save(button: HTMLButtonElement): Promise<void>;
+  /** Save as: the map so far stays saved as it is; under the new name it becomes a new cloud track, which stays open. */
+  saveAs(name: string, button: HTMLButtonElement): Promise<void>;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -336,10 +338,36 @@ export async function createCloudUi(editor: Editor, header: HTMLElement, storage
     }
   }
 
+  async function saveAs(name: string, button: HTMLButtonElement): Promise<void> {
+    if (!status?.signedIn) {
+      account.click();
+      return;
+    }
+    if (sync.state === "conflict") {
+      banner("This track was changed elsewhere: pick a version first.", [["OK", () => {}]]);
+      return;
+    }
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Saving…";
+    // The original keeps everything up to now; the copy is a new track from here on.
+    await sync.flushAndWait(mapJson());
+    sync.detach();
+    editor.editMap((m) => (m.name = name));
+    sync.flush(mapJson());
+    await waitUntil(() => sync.state !== "saving");
+    button.disabled = false;
+    button.textContent = sync.state === "saved" ? "Saved ✓" : label;
+    setTimeout(() => (button.textContent = label), 1800);
+    if (sync.state === "offline") banner(`Not connected: "${name}" is saved on this PC and goes up as a new track as soon as the server is reachable.`, [["OK", () => {}]]);
+    else if (sync.state === "error") banner(sync.message, [["OK", () => {}]]);
+  }
+
   return {
     sync,
     open,
     save,
+    saveAs,
     replaced: () => {
       sync.detach();
       sync.changed(mapJson());

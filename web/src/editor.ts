@@ -11,12 +11,14 @@ import { ItemLayer } from "./items";
 import { generateTerrain, terrainPieces, type TerrainDebug } from "./terrain";
 import { buildTerrainGrid, meshHeightAt, plantOnTerrain, terrainHeight } from "./ownTerrain";
 import {
-  add, appendPoint, GATES, gateLook, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
+  add, appendPoint, deletePoint, GATES, gateLook, gatePanel, bezierAt, BLOCK_CELL, BLOCK_LEVEL, closestOnSegment, MAP_HALF_EXTENT, WORLD_HALF_EXTENT, newObject, newTrack, segmentBezier, splitSegment, wrapBank, normalize, setHandle, sub, syncSegments,
   type ItemColor, type TerrainGrid, type TerrainSurface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint, type Vec3, type VanillaBlock,
 } from "./track";
 
 export type Selection =
   | { kind: "point"; index: number }
+  /** Several points of the active track (Shift+click, drag a rectangle): moved together. Always two or more. */
+  | { kind: "points"; indices: number[] }
   | { kind: "handle"; index: number; which: "in" | "out" }
   | { kind: "segment"; index: number }
   | { kind: "object"; index: number }
@@ -620,6 +622,32 @@ export class Editor {
   selectedBlocks(): number[] {
     const s = this.selection;
     return s?.kind === "block" ? [s.index] : s?.kind === "blocks" ? s.indices : [];
+  }
+
+  /** Indices of the selected points of the active track (none, one or several). */
+  selectedPoints(): number[] {
+    const s = this.selection;
+    return s?.kind === "point" ? [s.index] : s?.kind === "points" ? s.indices : [];
+  }
+
+  /** Selects points of the active track: replaces the selection, or adds to, removes from or toggles in the selected points. */
+  selectPoints(indices: Iterable<number>, mode: "replace" | "add" | "remove" | "toggle" = "replace"): void {
+    const set = new Set(mode === "replace" ? [] : this.selectedPoints());
+    for (const i of indices) {
+      if (mode === "remove" || (mode === "toggle" && set.has(i))) set.delete(i);
+      else set.add(i);
+    }
+    const list = [...set].sort((a, b) => a - b);
+    this.select(list.length === 0 ? null : list.length === 1 ? { kind: "point", index: list[0] } : { kind: "points", indices: list });
+  }
+
+  /** Deletes the selected points (one undo step; a track keeps at least two); returns whether there were any. */
+  deleteSelectedPoints(): boolean {
+    const doomed = this.selectedPoints();
+    if (doomed.length === 0) return false;
+    this.edit((t) => { for (const i of [...doomed].sort((a, b) => b - a)) deletePoint(t, i); }, true);
+    this.select(null);
+    return true;
   }
 
   /** Selects blocks: replaces the selection, or adds to, removes from or toggles in the selected blocks. */
@@ -1782,14 +1810,10 @@ export class Editor {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Camera keys: W/S along the view, A/D sideways, Space up, Shift down. */
+  /** Camera keys: W/S along the view, A/D sideways, Space up. */
   private onMoveKey(e: KeyboardEvent, down: boolean): void {
-    const key = e.code === "Space" ? "space" : e.key === "Shift" ? "shift" : e.key.toLowerCase();
-    if (!["w", "a", "s", "d", "space", "shift"].includes(key)) {
-      // Shift used with another key (Shift+M, Shift+[) is a modifier, not "down".
-      if (down) this.moveKeys.delete("shift");
-      return;
-    }
+    const key = e.code === "Space" ? "space" : e.key.toLowerCase();
+    if (!["w", "a", "s", "d", "space"].includes(key)) return;
     if (!down) {
       this.moveKeys.delete(key);
       if (key === "space" && this.isCameraKeyTarget(e)) e.preventDefault();
@@ -1822,8 +1846,6 @@ export class Editor {
     if (this.moveKeys.has("d")) move.add(right);
     if (this.moveKeys.has("a")) move.sub(right);
     if (this.moveKeys.has("space")) move.y += 1;
-    // Shift is also the "keep height" modifier while dragging a point.
-    if (this.moveKeys.has("shift") && !this.drag) move.y -= 1;
     if (move.lengthSq() === 0) return;
     const speed = Math.max(10, this.distanceAhead() * 0.9);
     move.normalize().multiplyScalar(speed * Math.min(dt, 0.1));
@@ -2133,11 +2155,12 @@ export class Editor {
     this.updateDropLines();
     this.updateCheckpointLinks();
     const s = this.selection;
+    const points = new Set(this.selectedPoints());
     this.track.points.forEach((p, i) => {
       const m = this.pointMeshes[i];
       if (!m) return;
       m.position.set(...p.position);
-      const selected = s?.kind === "point" && s.index === i;
+      const selected = points.has(i);
       (m.material as THREE.MeshBasicMaterial).color.setHex(
         selected ? COLORS.selected : i === 0 ? COLORS.start : COLORS.point);
     });
@@ -2317,7 +2340,12 @@ export class Editor {
     // Keep receiving moves when the cursor leaves the canvas. Fails for pointers that are not active (synthetic events).
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     this.renderer.domElement.style.cursor = "grabbing";
-    if (pick.kind === "point") this.select({ kind: "point", index: pick.index });
+    // A point already among several selected ones keeps the selection (dragging it moves them all; a click without a
+    // move selects it alone). Shift+click toggles a point in the selection on release, Shift+drag moves it level.
+    if (pick.kind === "point") {
+      const among = this.selectedPoints().includes(pick.index);
+      if (!among && !e.shiftKey) this.select({ kind: "point", index: pick.index });
+    }
     else if (pick.kind === "handle") this.select({ kind: "handle", index: pick.index, which: pick.which });
     else if (pick.kind === "object") this.select({ kind: "object", index: pick.index });
 
@@ -2432,14 +2460,19 @@ export class Editor {
       try { this.renderer.domElement.releasePointerCapture(marquee.pointerId); } catch { /* not captured */ }
       marquee.el.remove();
       this.clickStart = null;
-      const inside = this.blocksInRect(marquee.x, marquee.y, e.clientX, e.clientY);
-      this.selectBlocks(inside, e.ctrlKey || e.metaKey ? "remove" : e.shiftKey ? "add" : "replace");
+      // Points of the active track inside the rectangle win over blocks.
+      const mode = e.ctrlKey || e.metaKey ? "remove" : e.shiftKey ? "add" : "replace";
+      const points = this.pointsInRect(marquee.x, marquee.y, e.clientX, e.clientY);
+      if (points.length > 0 || (this.selectedPoints().length > 0 && mode !== "replace")) this.selectPoints(points, mode);
+      else this.selectBlocks(this.blocksInRect(marquee.x, marquee.y, e.clientX, e.clientY), mode);
       return;
     }
     marquee?.el.remove();
     if (this.drag) {
       try { this.renderer.domElement.releasePointerCapture(this.drag.pointerId); } catch { /* not captured */ }
+      const { pick, moved } = this.drag;
       this.drag = null;
+      if (pick.kind === "point" && !moved) this.selectPoints([pick.index], e.shiftKey ? "toggle" : "replace");
       this.orbit.enabled = true;
       this.label.hidden = true;
       this.renderer.domElement.style.cursor = this.hover && this.hover.kind !== "segment" ? "grab" : "";
@@ -2506,7 +2539,7 @@ export class Editor {
       return;
     }
     // Shift+click elsewhere keeps the selected blocks (a missed shift+click should not lose a large selection).
-    if (e.shiftKey && this.selection?.kind === "blocks") return;
+    if (e.shiftKey && (this.selection?.kind === "blocks" || this.selection?.kind === "points")) return;
     if (pick?.kind === "segment" && pick.track !== undefined) this.setActive(pick.track);
     this.select(pick?.kind === "segment" ? { kind: "segment", index: pick.index } : null);
   }
@@ -2517,6 +2550,20 @@ export class Editor {
     el.hidden = true;
     this.container.appendChild(el);
     return el;
+  }
+
+  /** Points of the active track inside a screen rectangle (client coordinates) and in front of the camera. */
+  private pointsInRect(x0: number, y0: number, x1: number, y1: number): number[] {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const [left, right] = [Math.min(x0, x1), Math.max(x0, x1)], [top, bottom] = [Math.min(y0, y1), Math.max(y0, y1)];
+    const result: number[] = [];
+    this.track.points.forEach((p, i) => {
+      const c = new THREE.Vector3(...p.position).project(this.camera);
+      if (c.z < -1 || c.z > 1) return;
+      const sx = r.left + (c.x + 1) / 2 * r.width, sy = r.top + (1 - c.y) / 2 * r.height;
+      if (sx >= left && sx <= right && sy >= top && sy <= bottom) result.push(i);
+    });
+    return result;
   }
 
   /** Blocks whose box centre is inside a screen rectangle (client coordinates) and in front of the camera. */
@@ -2662,6 +2709,14 @@ export class Editor {
     const pos: Vec3 = [clampMap(moved.x), clamp(moved.y, Y_MIN, Y_MAX), clampMap(moved.z)];
 
     if (drag.pick.kind === "point") {
+      // The other selected points follow by the same step.
+      const step = sub(pos, p.position);
+      const group = this.selectedPoints();
+      for (const i of group.includes(drag.pick.index) ? group : []) {
+        if (i === drag.pick.index) continue;
+        const q = this.track.points[i].position;
+        this.track.points[i].position = [clampMap(q[0] + step[0]), clamp(q[1] + step[1], Y_MIN, Y_MAX), clampMap(q[2] + step[2])];
+      }
       p.position = pos;
       this.showLabel(e, drag.mode === "horizontal" ? `Height locked ${pos[1].toFixed(1)} m` : `Height ${pos[1].toFixed(1)} m`);
     } else if (drag.pick.kind === "handle") {
@@ -2915,6 +2970,7 @@ export class Editor {
     if (s.kind === "object") return s.index < this.track.objects.length;
     if (s.kind === "block") return s.index < this.map.blocks.length;
     if (s.kind === "blocks") return s.indices.every((i) => i < this.map.blocks.length);
+    if (s.kind === "points") return s.indices.every((i) => i < this.track.points.length);
     return s.index < this.track.points.length;
   }
 

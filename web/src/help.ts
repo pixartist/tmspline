@@ -18,15 +18,17 @@ const CONTROLS: [string, string][] = [
   ["P / H, then click road", "Place a pillar (obstacle) / cut a hole there (Gap button: leave out the road); drag the diamond marker to move it"],
   ["B, then click map", "Place a vanilla game block (R rotate, PgUp/PgDn or Ctrl+wheel level, Tab grid / free, Esc or right click: done); drag the selected block"],
   ["Click / Shift+click block", "Select a block / add or remove it (several: drag one to move all, Del deletes, PgUp/PgDn raise)"],
-  ["Left drag empty space", "Select blocks in the rectangle (Shift: add, Ctrl: remove)"],
+  ["Shift+click point", "Add the point to the selection or remove it (several: drag one to move all, Del deletes)"],
+  ["Left drag empty space", "Select the active track's points in the rectangle, or else blocks (Shift: add, Ctrl: remove)"],
   ["X", "Snap mode: points and free blocks snap to the grid (step next to the Snap button; Ctrl while dragging ignores it)"],
   ["M / Shift+M", "Smooth selection / whole track (strength: slider next to Smooth)"],
   ["Alt + left drag", "Orbit (Alt+Shift: pan)"],
   ["Right drag / wheel", "Pan / zoom"],
   ["W S / A D", "Fly along the view / sideways (speed follows the distance to the road)"],
-  ["Space / Shift", "Camera up / down"],
+  ["Space", "Camera up"],
   ["F / G", "Frame track · axis gizmo (points, handles, selected blocks)"],
   ["Ctrl+Z / Ctrl+Y", "Undo / redo"],
+  ["Ctrl+S / Ctrl+Shift+S", "Save / save a copy under a new name"],
 ];
 
 /** Collapsible controls overview in the bottom-right corner of the viewport. */
