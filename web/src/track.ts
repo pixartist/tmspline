@@ -337,7 +337,7 @@ export type TerrainQuality = (typeof TERRAIN_QUALITIES)[number];
  * (experimental: the land simplified and remeshed, cut back a little from the roads and zipped to their edges and
  * undersides; built whole only, so after a stroke of the brush the whole is built again).
  */
-export const TERRAIN_MESHERS = ["voxel", "seamless", "loops", "boolean"] as const;
+export const TERRAIN_MESHERS = ["voxel", "seamless", "boolean"] as const;
 export type TerrainMesher = (typeof TERRAIN_MESHERS)[number];
 
 /**
@@ -745,6 +745,8 @@ export function parseMap(json: string): TrackMap {
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
       ...((TERRAIN_QUALITIES as readonly string[]).includes(t.quality as string) && t.quality !== "High" ? { quality: t.quality as TerrainQuality } : {}),
+      // The mesher (missing: voxel; the loops mesher is gone, its maps use the boolean one).
+      ...((t.mesher as string) === "loops" ? { mesher: "boolean" as TerrainMesher } : (TERRAIN_MESHERS as readonly string[]).includes(t.mesher as string) && t.mesher !== "voxel" ? { mesher: t.mesher as TerrainMesher } : {}),
       // The brushes' dabs (five numbers each).
       ...Object.fromEntries((["edits", "editsOver", "smooths", "smoothsOver"] as const).flatMap((k) =>
         Array.isArray(t[k]) && t[k].length > 0 && t[k].length % 5 === 0 && t[k].every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ? [[k, t[k] as number[]]] : [])),

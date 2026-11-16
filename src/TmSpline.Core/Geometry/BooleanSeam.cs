@@ -98,13 +98,14 @@ public static class BooleanSeam
     /// 2 m: rail, driving surface FreeUnder under it, rail, a vault over it from rail to rail; a pipe's whole inside)
     /// swept along each road, its ends closed. Land in it is cut away exactly; its faces left become the land's there.
     /// </summary>
-    internal static List<(List<Vector3> Positions, List<int> Indices)> FreeSpaces(TerrainGrid grid, TrackMap map)
+    internal static List<(List<Vector3> Positions, List<int> Indices)> FreeSpaces(List<(Track Track, List<Vector3[]> Sections)> rooms)
     {
         var result = new List<(List<Vector3>, List<int>)>();
-        foreach (var (track, all) in StitchedTerrain.RoomSections(grid, map, FreeUnder))
+        foreach (var (track, all) in rooms)
         {
             if (all.Count < 2) continue;
             var p = all[0].Length;
+
             foreach (var section in all) ContinueCurl(section);
             var sections = Thin(all, FreeTolerance);
             // A closed track: its last section is its first (all round, no ends).
@@ -264,6 +265,288 @@ public static class BooleanSeam
         return kept;
     }
 
+    /// <summary>Embankments and cuttings: their slope (metres out per metre down or up), the most they fill or cut (metres; more: a bridge or a tunnel, left alone), the edge's anchor under the top of the land's contact on the road's side (metres).</summary>
+    private const float EmbankSlope = 1.5f, MaxFill = 10, MaxCut = 10, EmbankAnchor = 0.3f;
+    private const int EmbankPoints = 5;
+    /// <summary>How much an embankment's weight may change from one station to the next, and the stations' spacing (metres, as the rooms').</summary>
+    private const float WeightStep = 0.12f, StationStep = 2;
+    /// <summary>How far along the road an embankment's anchor height is averaged either way (metres).</summary>
+    private const float AnchorReach = 6;
+
+    /// <summary>The land's heights where a vertical line meets it: its triangles in plan squares.</summary>
+    internal sealed class LandHeights
+    {
+        private const float Square = 8;
+        private readonly AdaptiveMesh mesh;
+        private readonly Dictionary<(int, int), List<int>> at = [];
+        public LandHeights(AdaptiveMesh mesh)
+        {
+            this.mesh = mesh;
+            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
+            {
+                Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
+                int x0 = (int)MathF.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X)) / Square), x1 = (int)MathF.Floor(MathF.Max(a.X, MathF.Max(b.X, c.X)) / Square);
+                int z0 = (int)MathF.Floor(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) / Square), z1 = (int)MathF.Floor(MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) / Square);
+                for (var x = x0; x <= x1; x++)
+                    for (var z = z0; z <= z1; z++)
+                    {
+                        if (!at.TryGetValue((x, z), out var list)) at[(x, z)] = list = [];
+                        list.Add(t);
+                    }
+            }
+        }
+        /// <summary>The heights of the land's surface over and under a plan point.</summary>
+        public IEnumerable<float> At(float x, float z)
+        {
+            if (!at.TryGetValue(((int)MathF.Floor(x / Square), (int)MathF.Floor(z / Square)), out var list)) yield break;
+            foreach (var t in list)
+            {
+                Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
+                var d = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
+                if (MathF.Abs(d) < 1e-9f) continue;
+                var u = ((b.Z - c.Z) * (x - c.X) + (c.X - b.X) * (z - c.Z)) / d;
+                var v = ((c.Z - a.Z) * (x - c.X) + (a.X - c.X) * (z - c.Z)) / d;
+                if (u < 0 || v < 0 || u + v > 1) continue;
+                yield return a.Y * u + b.Y * v + c.Y * (1 - u - v);
+            }
+        }
+        /// <summary>The highest of them (NaN: no land there).</summary>
+        public float Top(float x, float z) { var top = float.NaN; foreach (var y in At(x, z)) if (float.IsNaN(top) || y > top) top = y; return top; }
+        /// <summary>The highest at or under a height (NaN: none).</summary>
+        public float Below(float x, float z, float y0) { var best = float.NaN; foreach (var y in At(x, z)) if (y <= y0 && (float.IsNaN(best) || y > best)) best = y; return best; }
+    }
+
+    /// <summary>
+    /// Beside each road (the owner's idea, step 3 of the plan): where the land just outside an edge lies lower than it
+    /// (at most MaxFill), an embankment from the edge (EmbankAnchor under the land's contact on the road's side) down at
+    /// EmbankSlope until it meets the ground, reaching in under the road (two sides make a dam); where it lies higher
+    /// (at most MaxCut), a cutting from the edge up at that slope until it comes out of the land. Section by section
+    /// (the rooms' stations), swept where consecutive stations agree; banked roads (edges far apart in height) and roads
+    /// not facing up get neither. Returns the embankments (to add) and the cuttings (to take away).
+    /// </summary>
+    internal static (List<(List<Vector3>, List<int>)> Fills, List<(List<Vector3>, List<int>)> Cuts) Embankments(List<(Track Track, List<Vector3[]> Sections)> rooms, LandHeights land, List<float> debug)
+    {
+        var fills = new List<(List<Vector3>, List<int>)>();
+        var cuts = new List<(List<Vector3>, List<int>)>();
+        const int deckMid = 1 + (StitchedTerrain.RoomDeckPoints - 1) / 2, rightRail = StitchedTerrain.RoomRailRight;
+        foreach (var (_, sections) in rooms)
+            foreach (var side in new[] { 0, rightRail })
+            {
+                // Per station: the edge's anchor, the way out, how far under the road a fill reaches, and how deep a fill
+                // or how high a cutting would go there (NaN: none possible); the kind the land asks for (0 none, 1 fill,
+                // 2 cut).
+                var n = sections.Count;
+                var anchor = new Vector3[n];
+                var outward = new Vector3[n];
+                var half = new float[n];
+                var fillDepth = new float[n];
+                var cutHeight = new float[n];
+                var kinds = new int[n];
+                var valid = new bool[n];
+                // How much of an embankment or cutting the road's shape there allows (1 a level road, fading to 0 as it
+                // banks or its side curls up into a wall: there the rail climbs and twists, and slopes from it came out
+                // in saw-teeth and chunks round tubes).
+                var weight = new float[n];
+                static float Fade(float from, float to, float x) { var t = Math.Clamp((x - from) / (to - from), 0, 1); return 1 - t * t * (3 - 2 * t); }
+                for (var i = 0; i < n; i++)
+                {
+                    fillDepth[i] = cutHeight[i] = float.NaN;
+                    var sec = sections[i];
+                    Vector3 rail = sec[side], other = sec[side == 0 ? rightRail : 0], mid = sec[deckMid];
+                    var across = rail - other;
+                    if (across.LengthSquared() < 1) continue;
+                    // Facing up: the vault's top over the deck.
+                    if (sec[rightRail + 6].Y < mid.Y) continue;
+                    // A way out across the plan (a curled side's top rail still has one; a side curled right over not).
+                    var flat = new Vector3(across.X, 0, across.Z);
+                    if (flat.Length() < 0.3f * across.Length()) continue;
+                    outward[i] = Vector3.Normalize(flat);
+                    // Banking: the edges' height apart over their distance; curl: how far the surface at this edge turns
+                    // up (its last piece's direction, outwards).
+                    var edgeDir = side == 0 ? sec[1] - sec[2] : sec[StitchedTerrain.RoomDeckPoints] - sec[StitchedTerrain.RoomDeckPoints - 1];
+                    var curl = edgeDir.LengthSquared() > 1e-8f ? Vector3.Normalize(edgeDir).Y : 0;
+                    weight[i] = MathF.Min(Fade(0.08f, 0.3f, MathF.Abs(across.Y) / across.Length()), Fade(0.15f, 0.45f, curl));
+                    // Twist: how fast the driving surface's edge rises or falls against the road's middle from the station
+                    // before, per metre along (a road rolling over). The surface's own edge, not the rail: where a curb
+                    // grows out of the edge the rail climbs by the curb's height on a level road, and was taken for a twist.
+                    if (i > 0)
+                    {
+                        var prev = sections[i - 1];
+                        var edge = side == 0 ? 1 : StitchedTerrain.RoomDeckPoints;
+                        var along = Vector3.Distance(sec[deckMid], prev[deckMid]);
+                        if (along > 1e-3f)
+                            weight[i] = MathF.Min(weight[i], Fade(0.05f, 0.2f, MathF.Abs((sec[edge].Y - sec[deckMid].Y) - (prev[edge].Y - prev[deckMid].Y)) / along));
+                    }
+                    anchor[i] = rail - Vector3.UnitY * EmbankAnchor;
+                    half[i] = flat.Length() / 2 + 1;
+                    valid[i] = true;
+                }
+                // The anchors' heights over the road's middle smoothed along it (the mean of the stations within
+                // AnchorReach either way): where a curb starts or ends the land's contact jumps by its height, and the
+                // slopes from it left a step there.
+                {
+                    var over = new float[n];
+                    for (var i = 0; i < n; i++) if (valid[i]) over[i] = anchor[i].Y - sections[i][deckMid].Y;
+                    var reach = (int)MathF.Round(AnchorReach / StationStep);
+                    for (var i = 0; i < n; i++)
+                    {
+                        if (!valid[i]) continue;
+                        float sum = 0;
+                        var count = 0;
+                        for (var k = Math.Max(0, i - reach); k <= Math.Min(n - 1, i + reach); k++)
+                            if (valid[k]) { sum += over[k]; count++; }
+                        anchor[i].Y = sections[i][deckMid].Y + sum / count;
+                    }
+                }
+                for (var i = 0; i < n; i++)
+                {
+                    if (!valid[i]) continue;
+                    var e = anchor[i];
+                    // Up from the edge until the slope comes out of the land.
+                    for (var t = 0.5f; t <= MaxCut * EmbankSlope; t += 0.5f)
+                    {
+                        var q = e + outward[i] * t;
+                        var landTop = land.Top(q.X, q.Z);
+                        if (float.IsNaN(landTop) || landTop <= e.Y + t / EmbankSlope) { cutHeight[i] = t / EmbankSlope + 1; break; }
+                    }
+                    // Down from the edge until the slope meets the ground.
+                    for (var t = 0f; t <= MaxFill * EmbankSlope; t += 0.5f)
+                    {
+                        var q = e + outward[i] * t;
+                        var ground = land.Below(q.X, q.Z, e.Y + 0.05f);
+                        if (float.IsNaN(ground)) break;
+                        if (ground >= e.Y - t / EmbankSlope) { fillDepth[i] = t / EmbankSlope + 1; break; }
+                    }
+                    var probe = e + outward[i] * 0.5f;
+                    var top = land.Top(probe.X, probe.Z);
+                    if (float.IsNaN(top)) continue;
+                    kinds[i] = top > e.Y + 0.05f ? (float.IsNaN(cutHeight[i]) ? 0 : 2) : (float.IsNaN(fillDepth[i]) ? 0 : 1);
+                }
+                // The weight changes slowly along the road: by at most WeightStep a station either way (a dip spreads to
+                // the stations round it). Low weight only flattens a piece; it never splits one: the two ends' ramps
+                // left a hump of land between them.
+                for (var i = 1; i < n; i++) weight[i] = MathF.Min(weight[i], weight[i - 1] + WeightStep);
+                for (var i = n - 2; i >= 0; i--) weight[i] = MathF.Min(weight[i], weight[i + 1] + WeightStep);
+                // Smoothed along the road: each station the kind most of the five round it ask for (its own on a tie),
+                // where that kind is possible there; then pieces shorter than three stations dropped.
+                var smooth = new int[n];
+                for (var i = 0; i < n; i++)
+                {
+                    Span<int> votes = stackalloc int[3];
+                    for (var k = Math.Max(0, i - 2); k <= Math.Min(n - 1, i + 2); k++) votes[kinds[k]]++;
+                    var best = kinds[i];
+                    for (var kind = 0; kind < 3; kind++) if (votes[kind] > votes[best]) best = kind;
+                    if (best == 1 && float.IsNaN(fillDepth[i]) || best == 2 && float.IsNaN(cutHeight[i])) best = 0;
+                    smooth[i] = best;
+                }
+                for (var i = 0; i < n;)
+                {
+                    var j = i;
+                    while (j + 1 < n && smooth[j + 1] == smooth[i]) j++;
+                    if (smooth[i] != 0 && j - i + 1 < 3)
+                        for (var k = i; k <= j; k++) smooth[k] = 0;
+                    i = j + 1;
+                }
+                // Short gaps (up to three stations) between two pieces of the same kind bridged, their depth or height
+                // the straight line between the stations either side: the ramps of the two pieces' ends left a crease
+                // there.
+                for (var i = 1; i < n;)
+                {
+                    if (smooth[i] != 0 || smooth[i - 1] == 0) { i++; continue; }
+                    var j = i;
+                    while (j + 1 < n && smooth[j + 1] == 0) j++;
+                    var kind = smooth[i - 1];
+                    if (j + 1 < n && smooth[j + 1] == kind && j - i + 1 <= 3)
+                    {
+                        var amounts = kind == 1 ? fillDepth : cutHeight;
+                        float from = amounts[i - 1], to = amounts[j + 1];
+                        var bridged = true;
+                        for (var k = i; k <= j; k++) if (outward[k] == default) bridged = false;
+                        if (bridged && float.IsFinite(from) && float.IsFinite(to))
+                            for (var k = i; k <= j; k++)
+                            {
+                                smooth[k] = kind;
+                                amounts[k] = from + (to - from) * (k - i + 1) / (j - i + 2);
+                            }
+                    }
+                    i = j + 1;
+                }
+                // Debug lines: the rail (grey) and the smoothed anchor (green), station to station.
+                for (var k = 1; k < n; k++)
+                {
+                    Vector3 r0 = sections[k - 1][side], r1 = sections[k][side];
+                    debug.AddRange([r0.X, r0.Y, r0.Z, r1.X, r1.Y, r1.Z, 9]);
+                    if (valid[k - 1] && valid[k]) debug.AddRange([anchor[k - 1].X, anchor[k - 1].Y, anchor[k - 1].Z, anchor[k].X, anchor[k].Y, anchor[k].Z, 4]);
+                }
+                // Each piece: its depth or height the deepest of the stations round each (no dips), ramped down to the
+                // edge over its first and last three stations, swept.
+                for (var i = 0; i < n;)
+                {
+                    if (smooth[i] == 0) { i++; continue; }
+                    var j = i;
+                    while (j + 1 < n && smooth[j + 1] == smooth[i]) j++;
+                    var kind = smooth[i];
+                    var amounts = kind == 1 ? fillDepth : cutHeight;
+                    var polys = new List<Vector3[]>();
+                    for (var k = i; k <= j; k++)
+                    {
+                        var amount = 0f;
+                        for (var m = Math.Max(i, k - 2); m <= Math.Min(j, k + 2); m++) amount = MathF.Max(amount, amounts[m]);
+                        // Ramped over the piece's ends: as long along the road as its slope reaches out, and 2 m more.
+                        var ramp = MathF.Min(1, (Math.Min(k - i, j - k) + 0.5f) * StationStep / (amount * EmbankSlope + 2));
+                        // Less of it (the ramps at a piece's ends, a banked or curling road): the slope starts nearer the
+                        // ground (lower for a fill, higher for a cutting) and still reaches it, at the same slope; none
+                        // at all at the ground itself.
+                        var f = ramp * weight[k];
+                        // (A cutting shrinks to nothing as f does: a box of its least size at its ends notched the land.)
+                        var a = kind == 1 ? (amount - 1) * f + 1 : MathF.Max(0.05f, amount * f);
+                        var shift = (amount - 1) * (1 - f);
+                        Vector3 o = outward[k], u = Vector3.UnitY;
+                        var e = anchor[k] + (kind == 1 ? -u : u) * shift;
+                        polys.Add(kind == 1
+                            ? [e - o * half[k], e, e + o * (a * EmbankSlope) - u * a, e + o * (a * EmbankSlope) - u * (a + 1), e - o * half[k] - u * (a + 1)]
+                            : [e - o * f, e, e + o * (a * EmbankSlope) + u * a, e + o * (a * EmbankSlope) + u * (a + 2 * f + 0.05f), e - o * f + u * (a + 2 * f + 0.05f)]);
+                    }
+                    (kind == 1 ? fills : cuts).Add(Sweep(Thin(polys, FreeTolerance)));
+                    i = j + 1;
+                }
+            }
+        return (fills, cuts);
+    }
+
+    /// <summary>Sections (each the same number of points, a closed outline) swept into a closed solid, its ends fans round their middles, facing out.</summary>
+    private static (List<Vector3>, List<int>) Sweep(List<Vector3[]> sections)
+    {
+        var p = sections[0].Length;
+        var count = sections.Count;
+        var positions = new List<Vector3>();
+        var indices = new List<int>();
+        foreach (var sec in sections) positions.AddRange(sec);
+        for (var k = 0; k + 1 < count; k++)
+            for (var j = 0; j < p; j++)
+            {
+                int a = k * p + j, b = k * p + (j + 1) % p, c = (k + 1) * p + (j + 1) % p, d = (k + 1) * p + j;
+                indices.AddRange([a, b, c, a, c, d]);
+            }
+        foreach (var (k, flip) in new[] { (0, true), (count - 1, false) })
+        {
+            var middle = positions.Count;
+            var sum = Vector3.Zero;
+            for (var j = 0; j < p; j++) sum += positions[k * p + j];
+            positions.Add(sum / p);
+            for (var j = 0; j < p; j++)
+            {
+                int a = k * p + j, b = k * p + (j + 1) % p;
+                if (flip) indices.AddRange([middle, b, a]); else indices.AddRange([middle, a, b]);
+            }
+        }
+        var volume = 0.0;
+        for (var t = 0; t + 2 < indices.Count; t += 3) volume += Vector3.Dot(positions[indices[t]], Vector3.Cross(positions[indices[t + 1]], positions[indices[t + 2]]));
+        if (volume < 0)
+            for (var t = 0; t + 2 < indices.Count; t += 3) (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
+        return (positions, indices);
+    }
+
     /// <summary>Debug lines for a free space: every other section's outline and lines along it at its rails, the driving surface's middle and the vault's top.</summary>
     private static void DrawVolume(List<float> lines, List<Vector3> positions, int sectionPoints, int sections, int kind)
     {
@@ -273,7 +556,7 @@ public static class BooleanSeam
             if (true)
                 for (var j = 0; j < sectionPoints; j++) Line(positions[k * sectionPoints + j], positions[k * sectionPoints + (j + 1) % sectionPoints]);
             if (k + 1 < sections)
-                foreach (var j in new[] { 0, (sectionPoints - 12) / 2, sectionPoints - 12, sectionPoints - 6 })
+                foreach (var j in sectionPoints < 12 ? Enumerable.Range(0, sectionPoints).ToArray() : new[] { 0, (sectionPoints - 12) / 2, sectionPoints - 12, sectionPoints - 6 })
                     Line(positions[k * sectionPoints + j], positions[(k + 1) * sectionPoints + j]);
         }
     }
@@ -391,7 +674,7 @@ public static class BooleanSeam
         var clock = System.Diagnostics.Stopwatch.StartNew();
         void Time(string what) { if (Stats) Console.WriteLine($"  [boolean] {what}: {clock.ElapsedMilliseconds} ms"); clock.Restart(); }
 
-        var split = LoopSeam.MakeManifold(land);
+        var split = MakeManifold(land);
         // Only the vertices triangles use.
         var mesh = new AdaptiveMesh();
         {
@@ -412,6 +695,7 @@ public static class BooleanSeam
         if (up < 0)
             for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) (mesh.Indices[t + 1], mesh.Indices[t + 2]) = (mesh.Indices[t + 2], mesh.Indices[t + 1]);
 
+        if (Stats) Console.WriteLine($"  [boolean] folded triangles in the land before the cut: {Folded(mesh)}");
         var roads = RoadMeshes(map, quality);
         var floor = MathF.Min(mesh.Positions.Count > 0 ? mesh.Positions.Min(p => p.Y) : 0, roads.Count > 0 ? roads.Min(r => r.Positions.Count > 0 ? r.Positions.Min(p => p.Y) : 0) : 0) - 10;
         var closed = Close(mesh, floor, out var why);
@@ -469,7 +753,8 @@ public static class BooleanSeam
             var roadCount = solids.Count - 1;
             var freeIds = new HashSet<uint>();
             var volumeLines = new List<float>();
-            foreach (var (fp, fi) in FreeSpaces(grid, map))
+            var rooms = StitchedTerrain.RoomSections(grid, map, FreeUnder);
+            foreach (var (fp, fi) in FreeSpaces(rooms))
             {
                 var sectionPoints = StitchedTerrain.RoomSectionPoints;
                 var sectionCount = fp.Count / sectionPoints;
@@ -479,6 +764,34 @@ public static class BooleanSeam
                 var free = made2.AsOriginal();
                 freeIds.Add((uint)free.OriginalId);
                 solids.Add(free);
+            }
+            // Embankments and cuttings beside the roads (land added up to a road's edge, or cut down to it).
+            var fillIds = new HashSet<uint>();
+            var cutIds = new HashSet<uint>();
+            if (Environment.GetEnvironmentVariable("TMSPLINE_BOOL_EMBANK") != "off")
+            {
+                var heights = new LandHeights(mesh);
+                var (fills, cuts) = Embankments(rooms, heights, volumeLines);
+                var fillSolids = new List<ManifoldLib.Solid>();
+                foreach (var (kind, list, ids, lineKind) in new[] { (0, fills, fillIds, 12), (1, cuts, cutIds, 13) })
+                    foreach (var (ep, ei) in list)
+                    {
+                        using var madeE = ManifoldLib.Solid.Of(ToMesh(ep, ei, Land));
+                        DrawVolume(volumeLines, ep, EmbankPoints, (ep.Count - 2) / EmbankPoints, madeE.Status == ManifoldLib.Error.NoError ? lineKind : 11);
+                        if (madeE.Status != ManifoldLib.Error.NoError) continue;
+                        var e = madeE.AsOriginal();
+                        ids.Add((uint)e.OriginalId);
+                        if (kind == 0) fillSolids.Add(e); else solids.Add(e);
+                    }
+                if (fillSolids.Count > 0)
+                {
+                    // The land with its embankments, as one (each keeps its id).
+                    var grown = ManifoldLib.Solid.Batch(fillSolids.Prepend(ground), ManifoldLib.Op.Add);
+                    foreach (var f in fillSolids) f.Dispose();
+                    if (grown.Status == ManifoldLib.Error.NoError) solids[0] = grown;
+                    else { Console.WriteLine($"  [boolean] the embankments could not be added ({grown.Status})"); grown.Dispose(); }
+                }
+                Time($"embankments: {fillIds.Count} fills, {cutIds.Count} cuttings");
             }
             LastVolumes = [.. volumeLines];
             Time($"solids: land {ground.Triangles} triangles (genus {ground.Genus}), {roadCount} roads, {freeIds.Count} free spaces");
@@ -512,7 +825,8 @@ public static class BooleanSeam
             for (var r = 0; r + 1 < output.RunIndex.Length; r++)
             {
                 // (The free spaces' faces left are walls of land cut away: the land's.)
-                var isLand = output.RunOriginalId[r] == landId || freeIds.Contains(output.RunOriginalId[r]);
+                var id = output.RunOriginalId[r];
+                var isLand = id == landId || freeIds.Contains(id) || fillIds.Contains(id) || cutIds.Contains(id);
                 for (var t = (int)output.RunIndex[r]; t + 2 < (int)output.RunIndex[r + 1]; t += 3)
                 {
                     if (!isLand) { fromRoads++; continue; }
@@ -541,12 +855,19 @@ public static class BooleanSeam
             }
             if (Stats) SeamReport(cut);
             Time("split by origin");
+            // Small loose pieces (land left between a road and its free space, cut off from the rest) left out: the
+            // roads are whole, so no hole opens where they were.
+            var dropped = DropLoose(cut, SmallPiece);
+            if (Stats) Console.WriteLine($"  [boolean] left out {dropped} loose pieces of land under {SmallPiece} m2");
             // The land along the seam simplified: its cut ran through every road face it crossed, a vertex wherever it
             // crossed one of their edges. Seam vertices on a straight line between their neighbours (within
             // SeamTolerance) go, then the land inside as the land was simplified before.
             var before = cut.Indices.Count / 3;
+            if (Stats) Console.WriteLine($"  [boolean] folded triangles after the cut: {Folded(cut)}");
             cut = MeshSimplifier.Simplify(cut, 0, VoxelTerrain.SimplifyError, borderTolerance: SeamTolerance);
+            if (Stats) Console.WriteLine($"  [boolean] folded triangles after simplifying: {Folded(cut)}");
             MeshSimplifier.ImproveByFlips(cut, 35);
+            if (Stats) Console.WriteLine($"  [boolean] folded triangles after flips: {Folded(cut)}");
             if (Stats)
             {
                 var (o2, ov2, fl2, _) = Topology(cut.Indices);
@@ -557,7 +878,7 @@ public static class BooleanSeam
         }
         finally
         {
-            foreach (var s in solids.Skip(1)) s.Dispose();
+            foreach (var s in solids) if (!ReferenceEquals(s, ground)) s.Dispose();
         }
     }
 
@@ -684,6 +1005,172 @@ public static class BooleanSeam
         }
         string Band(Func<(int Edges, float Length, float Size), bool> f) { var l = loops.Where(f).ToList(); return $"{l.Count} loops, {l.Sum(x => x.Edges)} edges, {l.Sum(x => x.Length):0} m"; }
         Console.WriteLine($"  [boolean] seam loops: under 2 m across {Band(l => l.Size < 2)}; 2–10 m {Band(l => l.Size >= 2 && l.Size < 10)}; 10–50 m {Band(l => l.Size >= 10 && l.Size < 50)}; larger {Band(l => l.Size >= 50)}");
+    }
+
+    /// <summary>
+    /// The land made manifold where the voxel mesher left sheets touching (land thinner than a cell: one vertex for both
+    /// its sides): at an edge three or more triangles share, they are sorted round it and each joined to its neighbour
+    /// that runs the other way (the sheets paired up); a pair of triangles running the same way (one flipped) is not
+    /// joined. Then each vertex is split into one per fan of triangles joined round it, the copies at the same place:
+    /// nothing moves, and every edge has at most two triangles. Returns how many vertices were added.
+    /// </summary>
+    internal static int MakeManifold(AdaptiveMesh mesh)
+    {
+        var idx = mesh.Indices;
+        var pos = mesh.Positions;
+        var triangles = idx.Count / 3;
+        // Per undirected edge its triangles.
+        var edges = new Dictionary<long, List<int>>(EdgeKeyComparer.Instance);
+        for (var t = 0; t < triangles; t++)
+            for (var k = 0; k < 3; k++)
+            {
+                int a = idx[3 * t + k], b = idx[3 * t + (k + 1) % 3];
+                var key = a < b ? Key(a, b) : Key(b, a);
+                if (!edges.TryGetValue(key, out var list)) edges[key] = list = [];
+                list.Add(t);
+            }
+        bool Runs(int t, int a, int b)
+        {
+            for (var k = 0; k < 3; k++)
+                if (idx[3 * t + k] == a && idx[3 * t + (k + 1) % 3] == b) return true;
+            return false;
+        }
+        int Third(int t, int a, int b)
+        {
+            for (var k = 0; k < 3; k++)
+                if (idx[3 * t + k] != a && idx[3 * t + k] != b) return idx[3 * t + k];
+            return idx[3 * t];
+        }
+        // The joins: pairs of triangles across an edge, by corner (triangle, its corner vertex).
+        var parent = new int[3 * triangles];
+        for (var i = 0; i < parent.Length; i++) parent[i] = i;
+        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+        void Union(int x, int y) { x = Find(x); y = Find(y); if (x != y) parent[x] = y; }
+        int Corner(int t, int v)
+        {
+            for (var k = 0; k < 3; k++)
+                if (idx[3 * t + k] == v) return 3 * t + k;
+            return 3 * t;
+        }
+        void Join(int t1, int t2, int a, int b)
+        {
+            Union(Corner(t1, a), Corner(t2, a));
+            Union(Corner(t1, b), Corner(t2, b));
+        }
+        foreach (var (key, list) in edges)
+        {
+            int a = (int)(key >> 32), b = (int)(key & 0xffffffff);
+            if (list.Count < 2) continue;
+            if (list.Count == 2)
+            {
+                if (Runs(list[0], a, b) != Runs(list[1], a, b)) Join(list[0], list[1], a, b);
+                continue;
+            }
+            // Round the edge: each triangle's angle about it.
+            var axis = pos[b] - pos[a];
+            if (axis.LengthSquared() < 1e-12f) continue;
+            axis = Vector3.Normalize(axis);
+            var refDir = Vector3.Cross(axis, MathF.Abs(axis.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX);
+            refDir = Vector3.Normalize(refDir);
+            var other = Vector3.Cross(axis, refDir);
+            var round = list.Select(t =>
+            {
+                var w = pos[Third(t, a, b)] - pos[a];
+                w -= axis * Vector3.Dot(w, axis);
+                return (T: t, Angle: MathF.Atan2(Vector3.Dot(w, other), Vector3.Dot(w, refDir)), Forward: Runs(t, a, b));
+            }).OrderBy(x => x.Angle).ToList();
+            // Paired neighbour by neighbour, starting where that pairs every one with one running the other way.
+            for (var offset = 0; offset < 2; offset++)
+            {
+                if (round.Count % 2 != 0) break;
+                var ok = true;
+                for (var i = offset; i < round.Count + offset; i += 2)
+                    if (round[i % round.Count].Forward == round[(i + 1) % round.Count].Forward) { ok = false; break; }
+                if (!ok) continue;
+                for (var i = offset; i < round.Count + offset; i += 2) Join(round[i % round.Count].T, round[(i + 1) % round.Count].T, a, b);
+                break;
+            }
+        }
+        // Each vertex: one copy per fan of joined corners.
+        var copyOf = new Dictionary<(int Vertex, int Fan), int>();
+        var firstFan = new Dictionary<int, int>();
+        var added = 0;
+        for (var c = 0; c < 3 * triangles; c++)
+        {
+            var v = idx[c];
+            var fan = Find(c);
+            if (!firstFan.TryGetValue(v, out var f0)) { firstFan[v] = fan; continue; }
+            if (f0 == fan) continue;
+            if (!copyOf.TryGetValue((v, fan), out var copy))
+            {
+                copy = pos.Count;
+                pos.Add(pos[v]);
+                mesh.Pinned.Add(v < mesh.Pinned.Count && mesh.Pinned[v]);
+                copyOf[(v, fan)] = copy;
+                added++;
+            }
+            idx[c] = copy;
+        }
+        return added;
+    }
+
+    /// <summary>An edge's key (its two vertices).</summary>
+    private static long Key(int a, int b) => ((long)a << 32) | (uint)b;
+
+    /// <summary>Debug: triangles facing against a neighbour across an edge (folded over), counted.</summary>
+    private static int Folded(AdaptiveMesh mesh)
+    {
+        var idx = mesh.Indices;
+        var normals = new Vector3[idx.Count / 3];
+        for (var t = 0; t < normals.Length; t++)
+        {
+            var n = Vector3.Cross(mesh.Positions[idx[3 * t + 1]] - mesh.Positions[idx[3 * t]], mesh.Positions[idx[3 * t + 2]] - mesh.Positions[idx[3 * t]]);
+            normals[t] = n.LengthSquared() > 1e-12f ? Vector3.Normalize(n) : Vector3.Zero;
+        }
+        var byEdge = new Dictionary<long, int>(EdgeKeyComparer.Instance);
+        var folded = new HashSet<int>();
+        for (var t = 0; t < normals.Length; t++)
+            for (var k = 0; k < 3; k++)
+            {
+                int a = idx[3 * t + k], b = idx[3 * t + (k + 1) % 3];
+                var key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+                if (byEdge.TryGetValue(key, out var other)) { if (Vector3.Dot(normals[t], normals[other]) < -0.3f) { folded.Add(t); folded.Add(other); } }
+                else byEdge[key] = t;
+            }
+        return folded.Count;
+    }
+
+    /// <summary>Loose pieces of land smaller than this are left out (square metres).</summary>
+    private const float SmallPiece = 30;
+
+    /// <summary>Removes the pieces of the mesh (triangles joined by shared vertices) smaller than <paramref name="area"/>; how many.</summary>
+    private static int DropLoose(AdaptiveMesh mesh, float area)
+    {
+        var idx = mesh.Indices;
+        var parent = new int[mesh.Positions.Count];
+        for (var i = 0; i < parent.Length; i++) parent[i] = i;
+        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+        for (var t = 0; t + 2 < idx.Count; t += 3)
+        {
+            int a = Find(idx[t]), b = Find(idx[t + 1]);
+            parent[a] = b;
+            parent[Find(idx[t + 2])] = Find(b);
+        }
+        var areas = new Dictionary<int, float>();
+        for (var t = 0; t + 2 < idx.Count; t += 3)
+        {
+            var root = Find(idx[t]);
+            var tri = Vector3.Cross(mesh.Positions[idx[t + 1]] - mesh.Positions[idx[t]], mesh.Positions[idx[t + 2]] - mesh.Positions[idx[t]]).Length() / 2;
+            areas[root] = areas.GetValueOrDefault(root) + tri;
+        }
+        var small = areas.Where(x => x.Value < area).Select(x => x.Key).ToHashSet();
+        if (small.Count == 0) return 0;
+        var kept = new List<int>(idx.Count);
+        for (var t = 0; t + 2 < idx.Count; t += 3)
+            if (!small.Contains(Find(idx[t]))) kept.AddRange([idx[t], idx[t + 1], idx[t + 2]]);
+        idx.Clear();
+        idx.AddRange(kept);
+        return small.Count;
     }
 
     private static float Mark(ManifoldLib.Mesh mesh, uint v) => mesh.Props[(int)v * mesh.NumProp + 3];

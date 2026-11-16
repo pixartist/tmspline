@@ -384,7 +384,7 @@ export function buildTerrainGrid(roads: TerrainRoad[], options: SceneryLandOptio
     else if (h >= 0.05) heights[i] = h;
   }
   // No walls under the land's outer edge: they cost triangles and nobody drives there.
-  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle, ...(own.quality && own.quality !== "High" ? { quality: own.quality } : {}), ...(own.mesher && own.mesher !== "voxel" ? { mesher: own.mesher } : {}) };
+  return { surface: terrainSurface(options.theme), cell: CELL, x0, z0, columns, rows, heights, skirt: 0, rockAngle: own.rockAngle, ...(own.quality && own.quality !== "High" ? { quality: own.quality } : {}), ...((own.mesher ?? "boolean") !== "voxel" ? { mesher: own.mesher ?? "boolean" } : {}) };
 }
 
 /** The terrain's height at (x, z) on its grid's triangles (TerrainMeshBuilder.SurfaceHeight). */

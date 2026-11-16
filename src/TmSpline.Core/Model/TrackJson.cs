@@ -252,7 +252,8 @@ public static class TrackJson
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
                 Quality = Enum.TryParse<TerrainQuality>(t.Quality, true, out var quality) && Enum.IsDefined(quality) ? quality : TerrainQuality.High,
-                Mesher = Enum.TryParse<TerrainMesher>(t.Mesher, true, out var mesher) && Enum.IsDefined(mesher) ? mesher : TerrainMesher.Voxel,
+                // (The loops mesher is gone: its maps are built with the boolean one.)
+                Mesher = string.Equals(t.Mesher, "loops", StringComparison.OrdinalIgnoreCase) ? TerrainMesher.Boolean : Enum.TryParse<TerrainMesher>(t.Mesher, true, out var mesher) && Enum.IsDefined(mesher) ? mesher : TerrainMesher.Voxel,
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
                 Edits = t.Edits is { } edits && edits.Length % 5 == 0 && edits.All(double.IsFinite) ? edits : [],
                 EditsOver = t.EditsOver is { } over && over.Length % 5 == 0 && over.All(double.IsFinite) ? over : [],

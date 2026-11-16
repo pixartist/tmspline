@@ -28,8 +28,6 @@ public static class VoxelTerrain
     /// that make it are its own, not those of the environment.
     /// </summary>
     public static bool Seamless => mesher.Value != TerrainMesher.Voxel;
-    /// <summary>The loops terrain (TerrainMesher.Loops): the seamless land, joined to the roads by LoopSeam instead of the cut and zipper.</summary>
-    public static bool Loops => mesher.Value == TerrainMesher.Loops;
     /// <summary>The boolean terrain (TerrainMesher.Boolean): the seamless land, the roads' solids taken out of it exactly (BooleanSeam).</summary>
     public static bool Boolean => mesher.Value == TerrainMesher.Boolean;
     private static readonly AsyncLocal<TerrainMesher> mesher = new();
@@ -81,7 +79,7 @@ public static class VoxelTerrain
     private static bool remesh = Environment.GetEnvironmentVariable("TMSPLINE_REMESH") == "on";
     public static float SimplifyError { get; set; } = Setting("TMSPLINE_SIMPLIFY_ERROR", 0.5f);
     /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
-    public static bool OpenSeam { get => !Loops && !Boolean && (Seamless || openSeam); set => openSeam = value; }
+    public static bool OpenSeam { get => !Boolean && (Seamless || openSeam); set => openSeam = value; }
     private static bool openSeam = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
     /// <summary>
     /// Whether the land comes out right only built whole: simplified and remeshed all at once (a part built again, as
@@ -754,8 +752,8 @@ public static class VoxelTerrain
             if (smoothOutline ? MathF.Max(outline(a), MathF.Max(outline(b), outline(c))) < 0 : double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
-            // (The loops terrain keeps the floors: it is to have no holes of its own; LoopSeam decides what meets the road.)
-            if (!KeepFloor && !Loops && !Boolean && ua != default && ub != default && uc != default)
+            // (The boolean terrain keeps the floors: the roads' solids take out what lies in them.)
+            if (!KeepFloor && !Boolean && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
@@ -875,11 +873,6 @@ public static class VoxelTerrain
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                     Console.WriteLine($"  remeshed to {kept.Indices.Count / 3} triangles");
             }
-        }
-        if (Loops && region is null)
-        {
-            SeamZipper.LastOpen = LoopSeam.Run(kept, map, roadQuality, room, nearest, surface);
-            SeamZipper.Stage("loops");
         }
         if (Boolean && region is null)
         {

@@ -47,7 +47,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   // Maps saved before this option had no rise.
   t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
   t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
-  t.mesher = choice<TerrainMesher>(own.mesher, TERRAIN_MESHERS, "voxel");
+  t.mesher = choice<TerrainMesher>(own.mesher === ("loops" as string) ? "boolean" : own.mesher, TERRAIN_MESHERS, "boolean");
   // Maps saved before this option get the default bend when generated again.
   t.edgeDrop = number(own.edgeDrop, 0, 256, EDGE_DROP);
   t.seed = whole(own.seed, 0, 999999, 0);
@@ -645,7 +645,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
           });
       }, false, { Fine: "Fine (about 150%)", High: "High (100%)", Medium: "Medium (about 60%)", Low: "Low (about 45%)" });
       // How the mesh is made: the map's own (kept with its land), and changed at once, like the quality.
-      selectField(root, "Mesher", TERRAIN_MESHERS, () => editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher ?? "voxel"), (v) => {
+      selectField(root, "Mesher", TERRAIN_MESHERS, () => editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher ?? "boolean"), (v) => {
         t.mesher = v as TerrainMesher;
         if (editor.map.terrain && (editor.map.terrain.mesher ?? "voxel") !== v)
           editor.editMap((m) => {
@@ -653,8 +653,11 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
             m.terrain = v === "voxel" ? land : { ...land, mesher: v as TerrainMesher };
           });
         relayout();
-      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", loops: "Loops (experimental)", boolean: "Boolean (experimental)" });
-      if ((editor.map.terrain?.mesher ?? t.mesher) !== "voxel")
+      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", boolean: "Boolean" });
+      const mesherNow = editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher);
+      if (mesherNow === "boolean")
+        hint(root, "The roads are cut out of the land exactly, with embankments and cuttings along them. Building it takes longer, and after each brush stroke the whole terrain is built again.");
+      else if (mesherNow === "seamless")
         hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer, and after each brush stroke the whole terrain is built again.");
       const size = Object.assign(document.createElement("p"), { className: "hint" });
       const showSize = () => {
