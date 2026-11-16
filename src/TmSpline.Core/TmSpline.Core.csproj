@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- The Manifold boolean library (deploy/build-manifold.cmd), next to the assembly on Windows builds. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != 'browser-wasm'">
+    <None Include="runtimes\win-x64\native\*.dll;runtimes\win-x64\native\Manifold-LICENSE.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -16,7 +16,7 @@ public enum TerrainQuality { Fine, High, Medium, Low }
 /// and undersides; built whole only, see VoxelTerrain.Seamless), or Loops (experimental: the land near the roads taken
 /// out and joined to them along matching loops, see LoopSeam).
 /// </summary>
-public enum TerrainMesher { Voxel, Seamless, Loops }
+public enum TerrainMesher { Voxel, Seamless, Loops, Boolean }
 
 /// <summary>
 /// Own terrain round the tracks: heights on a square grid of vertices (editor coordinates, metres), exported as custom

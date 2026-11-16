@@ -30,6 +30,8 @@ public static class VoxelTerrain
     public static bool Seamless => mesher.Value != TerrainMesher.Voxel;
     /// <summary>The loops terrain (TerrainMesher.Loops): the seamless land, joined to the roads by LoopSeam instead of the cut and zipper.</summary>
     public static bool Loops => mesher.Value == TerrainMesher.Loops;
+    /// <summary>The boolean terrain (TerrainMesher.Boolean): the seamless land, the roads' solids taken out of it exactly (BooleanSeam).</summary>
+    public static bool Boolean => mesher.Value == TerrainMesher.Boolean;
     private static readonly AsyncLocal<TerrainMesher> mesher = new();
     /// <summary>The seamless terrain's gap between land and road, metres (1.5 m was tried too: more holes and a larger map).</summary>
     public const float SeamlessGap = 3;
@@ -79,7 +81,7 @@ public static class VoxelTerrain
     private static bool remesh = Environment.GetEnvironmentVariable("TMSPLINE_REMESH") == "on";
     public static float SimplifyError { get; set; } = Setting("TMSPLINE_SIMPLIFY_ERROR", 0.5f);
     /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
-    public static bool OpenSeam { get => !Loops && (Seamless || openSeam); set => openSeam = value; }
+    public static bool OpenSeam { get => !Loops && !Boolean && (Seamless || openSeam); set => openSeam = value; }
     private static bool openSeam = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
     /// <summary>
     /// Whether the land comes out right only built whole: simplified and remeshed all at once (a part built again, as
@@ -459,7 +461,8 @@ public static class VoxelTerrain
         float Cut(Vector3 p)
         {
             var f = Blurred(landField, p, false);
-            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse)
+            // (The boolean terrain without the voxel cut: the roads' solids and driving spaces alone take the land away.)
+            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse && !(Boolean && !BooleanSeam.VoxelCut))
             {
                 var cut = -room(p);
                 // A soft cut over the road: where the land's surface and a room's wall come together (a tunnel's
@@ -727,7 +730,7 @@ public static class VoxelTerrain
             // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
             // back onto the floor.
             // (Not where land was worked into the road's space: that stays where it was put, and its floor shows.)
-            if (Painted(p, true) != 0 || Blur(p, true) > 0) return;
+            if (Painted(p, true) != 0 || Blur(p, true) > 0 || Boolean && !BooleanSeam.VoxelCut) return;
             if (deck != default && d < 0 && d > -2 * v)
             {
                 p += deck * d;
@@ -752,7 +755,7 @@ public static class VoxelTerrain
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
             Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
             // (The loops terrain keeps the floors: it is to have no holes of its own; LoopSeam decides what meets the road.)
-            if (!KeepFloor && !Loops && ua != default && ub != default && uc != default)
+            if (!KeepFloor && !Loops && !Boolean && ua != default && ub != default && uc != default)
             {
                 var facing = Vector3.Cross(b - a, c - a);
                 if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
@@ -877,6 +880,12 @@ public static class VoxelTerrain
         {
             SeamZipper.LastOpen = LoopSeam.Run(kept, map, roadQuality, room, nearest, surface);
             SeamZipper.Stage("loops");
+        }
+        if (Boolean && region is null)
+        {
+            kept = BooleanSeam.Cut(kept, grid, map, roadQuality);
+            SeamZipper.LastOpen = BooleanSeam.LastVolumes;
+            SeamZipper.Stage("boolean");
         }
         if (OpenSeam)
         {

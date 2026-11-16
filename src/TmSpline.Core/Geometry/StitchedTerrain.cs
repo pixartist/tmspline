@@ -179,9 +179,26 @@ public static class StitchedTerrain
         var b = new Builder(grid, map, 0);
         // (The loops terrain cuts deeper under the driving surface: land left inside the road's slab can reach no road
         // vertex without passing through the road.)
-        deckTuck = VoxelTerrain.Loops ? LoopSeam.DeckCut : 0.45f;
+        deckTuck = VoxelTerrain.Loops ? LoopSeam.DeckCut : VoxelTerrain.Boolean ? BooleanSeam.DeckCut : 0.45f;
         try { b.BuildRooms(); } finally { deckTuck = 0; }
         return (p => b.RoomDistance(p, out _), (x, z) => b.RoomFloor(x, z, 0), p => (b.RoomDistance(p, out var deck), deck), p => (b.RoadDistance(p, out var over, out var across, out var beyond), over, across, beyond), p => (b.SurfaceDistance(p, out var point, out var left, out var right), point, left, right));
+    }
+
+    /// <summary>
+    /// The rooms' sections (world points: left rail, driving surface tucked <paramref name="tuck"/> under it, right rail,
+    /// vault back to the left rail), every StationStep metres along each road, with the road's track.
+    /// </summary>
+    /// <summary>How many points a room's section has.</summary>
+    internal const int RoomSectionPoints = SectionPoints;
+    /// <summary>In a room's section: the driving surface's points (1 to RoomDeckPoints), the right rail's index (the left's is 0; the vault follows it).</summary>
+    internal const int RoomDeckPoints = DeckN + 1, RoomRailRight = RailRight;
+
+    internal static List<(Track Track, List<Vector3[]> Sections)> RoomSections(TerrainGrid grid, TrackMap map, float tuck)
+    {
+        var b = new Builder(grid, map, 0);
+        deckTuck = tuck;
+        try { b.BuildRooms(); } finally { deckTuck = 0; }
+        return b.RoomPolygons();
     }
 
     private sealed class Builder(TerrainGrid grid, TrackMap map, int maxTriangles)
@@ -718,6 +735,8 @@ public static class StitchedTerrain
 
         /// <summary>For VoxelTerrain: the rooms alone (stations, sections, sky).</summary>
         public void BuildRooms() => Sections(sky: false);
+
+        public List<(Track Track, List<Vector3[]> Sections)> RoomPolygons() => roads.Select(r => (r.Track, r.S.Select(st => st.W).ToList())).ToList();
 
         /// <summary>The lowest point of the rooms near a plan point (those in its bucket and the ones round it), or +infinity.</summary>
         public float RoomFloor(float x, float z, int around = 1)

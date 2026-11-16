@@ -24,6 +24,18 @@ if (args[0] == "--sample")
     return 0;
 }
 
+if (args[0] == "--boolean-selftest")
+{
+    Console.WriteLine(BooleanSeam.SelfTest());
+    return 0;
+}
+if (args[0] == "--boolean-check")
+{
+    var checkMap = TrackJson.ParseMap(File.ReadAllText(args[1]));
+    Console.WriteLine(BooleanSeam.CheckRoads(checkMap, Opt("--quality") is { } cq ? Enum.Parse<MeshQuality>(cq, ignoreCase: true) : MeshQualities.Default));
+    return 0;
+}
+
 var gameDir = Opt("--game") ?? @"E:\SteamLibrary\steamapps\common\Trackmania";
 var userDir = Opt("--user") ?? @"I:\Dokumente\Trackmania";
 

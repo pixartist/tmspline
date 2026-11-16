@@ -22,8 +22,12 @@ public static class MeshSimplifier
     /// <param name="maxError">Stop when the next merge would move the surface further than this, metres (root of the quadric error).</param>
     /// <param name="maxEdge">The longest an edge may become at a place, metres (null: no limit).</param>
     /// <param name="allowed">Whether a vertex may be put at a place (null: anywhere).</param>
+    /// <param name="borderTolerance">
+    /// Above 0: a vertex on an open border with two border neighbours, lying within this distance (metres) of the line
+    /// between them, may be merged into one of them (the border then runs straight past it); else the borders stay.
+    /// </param>
     public static AdaptiveMesh Simplify(AdaptiveMesh mesh, int targetTriangles, float maxError,
-        Func<Vector3, float>? maxEdge = null, Func<Vector3, bool>? allowed = null)
+        Func<Vector3, float>? maxEdge = null, Func<Vector3, bool>? allowed = null, float borderTolerance = 0)
     {
         var n = mesh.Positions.Count;
         var pos = mesh.Positions.Select(p => new Vector3(p.X, p.Y, p.Z)).ToArray();
@@ -44,6 +48,31 @@ public static class MeshSimplifier
         var locked = new bool[n];
         foreach (var (key, count) in edgeCount)
             if (count != 2) { locked[(int)(key >> 32)] = true; locked[(int)(key & 0xffffffff)] = true; }
+        // Per border vertex its neighbours along the border (edges of exactly one triangle); a vertex with other than
+        // two (or on an edge of three or more triangles) never moves.
+        var borderOf = new Dictionary<int, List<int>>();
+        var fixedVertex = new bool[n];
+        foreach (var (key, count) in edgeCount)
+        {
+            int a = (int)(key >> 32), b = (int)(key & 0xffffffff);
+            if (count > 2) { fixedVertex[a] = fixedVertex[b] = true; continue; }
+            if (count != 1) continue;
+            if (!borderOf.TryGetValue(a, out var la)) borderOf[a] = la = [];
+            if (!borderOf.TryGetValue(b, out var lb)) borderOf[b] = lb = [];
+            la.Add(b);
+            lb.Add(a);
+        }
+        bool IsBorderEdge(int a, int b) => borderOf.TryGetValue(a, out var l) && l.Contains(b);
+        // How far b lies off the line from a to its other border neighbour (a border vertex merged into a); NaN: it may not.
+        float Off(int b, int a)
+        {
+            if (fixedVertex[b] || !borderOf.TryGetValue(b, out var l) || l.Count != 2) return float.NaN;
+            var c = l[0] == a ? l[1] : l[0];
+            if (c == a) return float.NaN;
+            var ac = pos[c] - pos[a];
+            var t = Math.Clamp(Vector3.Dot(pos[b] - pos[a], ac) / MathF.Max(ac.LengthSquared(), 1e-12f), 0, 1);
+            return Vector3.Distance(pos[b], pos[a] + ac * t);
+        }
 
         // Per vertex the quadric of the planes round it (weighted by the triangles' areas).
         var quadric = new Quadric[n];
@@ -65,7 +94,14 @@ public static class MeshSimplifier
         (double Cost, Vector3 At) Best(int a, int b)
         {
             var q = quadric[a] + quadric[b];
-            if (locked[a] && locked[b]) return (double.MaxValue, default);
+            if (locked[a] && locked[b])
+            {
+                // Along a border: the one of the two that lies on the line between its neighbours, into the other.
+                if (borderTolerance <= 0 || !IsBorderEdge(a, b)) return (double.MaxValue, default);
+                float offB = Off(b, a), offA = Off(a, b);
+                if (!(offB <= borderTolerance) && !(offA <= borderTolerance)) return (double.MaxValue, default);
+                return offB <= borderTolerance && !(offA < offB) ? ((double)offB * offB, pos[a]) : ((double)offA * offA, pos[b]);
+            }
             Span<Vector3> options = locked[a] ? [pos[a]] : locked[b] ? [pos[b]] : [pos[a], pos[b], (pos[a] + pos[b]) / 2];
             var best = (Cost: double.MaxValue, At: pos[a]);
             foreach (var p in options)
@@ -97,6 +133,9 @@ public static class MeshSimplifier
             if (dead[a] || dead[b] || version[a] != va || version[b] != vb) continue;
             var (cost, at) = Best(a, b);
             if (cost > limit) continue;
+            // (Merged the other way: b stays, a goes into it.)
+            var along = locked[a] && locked[b];
+            if (along && at == pos[b] && at != pos[a]) (a, b) = (b, a);
             // The link condition: the two share exactly the two vertices of the triangles on their edge (else the
             // surface would pinch).
             var ringA = Ring(a);
@@ -104,7 +143,7 @@ public static class MeshSimplifier
             if (!ringA.Contains(b)) continue;
             var common = 0;
             foreach (var u in ringA) if (ringB.Contains(u)) common++;
-            if (common != 2) continue;
+            if (common != (along ? 1 : 2)) continue;
             if (allowed is not null && !allowed(at)) continue;
             // No edge too long, no triangle flipped or squashed.
             var ok = true;
@@ -144,6 +183,21 @@ public static class MeshSimplifier
             }
             around[a].RemoveAll(f => !alive[f]);
             dead[b] = true;
+            if (along)
+            {
+                // The border now runs a – c past b.
+                var lb = borderOf[b];
+                var c = lb[0] == a ? lb[1] : lb[0];
+                var la = borderOf[a];
+                la.Remove(b);
+                la.Add(c);
+                var lc = borderOf[c];
+                lc.Remove(b);
+                lc.Add(a);
+                borderOf.Remove(b);
+                version[c]++;
+                foreach (var u in Ring(c)) Push(c, u);
+            }
             pos[a] = at;
             quadric[a] = quadric[a] + quadric[b];
             locked[a] |= locked[b];

@@ -653,7 +653,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
             m.terrain = v === "voxel" ? land : { ...land, mesher: v as TerrainMesher };
           });
         relayout();
-      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", loops: "Loops (experimental)" });
+      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", loops: "Loops (experimental)", boolean: "Boolean (experimental)" });
       if ((editor.map.terrain?.mesher ?? t.mesher) !== "voxel")
         hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer, and after each brush stroke the whole terrain is built again.");
       const size = Object.assign(document.createElement("p"), { className: "hint" });

@@ -245,7 +245,9 @@ export class Editor {
    * 3 px wide (WebGL's own lines are always 1 px): the land's edges near roads that meet none (cyan), the seam on
    * the road, where land attaches (yellow), the close-road holes (magenta).
    */
-  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00, 0x40ff60, 0xb060ff, 0x00ff44, 0x3070ff, 0xff0000, 0x8a8a8a].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }));
+  private readonly seamDebugMaterials = [0x00e5ff, 0xffd400, 0xff2d95, 0xff7a00, 0x40ff60, 0xb060ff, 0x00ff44, 0x3070ff, 0xff0000, 0x8a8a8a].map((color) => new LineMaterial({ color, linewidth: 3, depthTest: false }))
+    // 10, 11: the boolean terrain's free spaces (valid, refused), hidden behind what stands in front of them.
+    .concat([0x00e5ff, 0xff0000].map((color) => new LineMaterial({ color, linewidth: 1.5, depthTest: true })));
 
   /**
    * Marks the road edges the land's rim does not come near (within SEAM_REACH): there the seam finds nothing to join.
@@ -275,10 +277,10 @@ export class Editor {
     // The dev server's seam front: the edges its last build left open (land and road pieces), in red.
     void fetch("/api/terrain/open").then((r) => (r.ok ? r.json() : null)).then((data: number[] | null) => {
       if (!data || !this.gapsEnabled || this.terrainMesh !== group) return;
-      // Kinds 0–9 the fixed colours; from 16 on (groups) each kind a colour of its own.
+      // Kinds 0–11 the fixed colours; from 16 on (groups) each kind a colour of its own.
       const points = new Map<number, number[]>();
       for (let i = 0; i + 6 < data.length + 1; i += 7) {
-        const k = data[i + 6] >= 16 ? Math.round(data[i + 6]) : Math.min(9, Math.max(0, data[i + 6]));
+        const k = data[i + 6] >= 16 ? Math.round(data[i + 6]) : Math.min(11, Math.max(0, data[i + 6]));
         if (!points.has(k)) points.set(k, []);
         points.get(k)!.push(data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 4], data[i + 5]);
       }

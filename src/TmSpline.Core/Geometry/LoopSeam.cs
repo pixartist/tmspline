@@ -1097,7 +1097,7 @@ public static class LoopSeam
     /// joined. Then each vertex is split into one per fan of triangles joined round it, the copies at the same place:
     /// nothing moves, and every edge has at most two triangles. Returns how many vertices were added.
     /// </summary>
-    private static int MakeManifold(AdaptiveMesh mesh)
+    internal static int MakeManifold(AdaptiveMesh mesh)
     {
         var idx = mesh.Indices;
         var pos = mesh.Positions;
