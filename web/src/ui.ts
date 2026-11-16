@@ -1098,7 +1098,11 @@ function row(root: HTMLElement, label: string): HTMLLabelElement {
 
 function bindRefresh(input: HTMLInputElement | HTMLSelectElement, refresh: () => void) {
   input.dataset.refresh = "";
-  input.addEventListener("refresh", () => { if (document.activeElement !== input) refresh(); });
+  // A focused field still follows changes made elsewhere (PgUp, Ctrl+wheel, dragging), unless something typed into it
+  // is not committed yet.
+  input.addEventListener("input", () => (input.dataset.typed = "1"));
+  input.addEventListener("change", () => delete input.dataset.typed);
+  input.addEventListener("refresh", () => { if (document.activeElement !== input || !input.dataset.typed) refresh(); });
   refresh();
 }
 

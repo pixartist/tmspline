@@ -789,6 +789,8 @@ export class Editor {
         else b.y = clamp(b.y + step, 0, MAX_BLOCK_LEVEL);
       }
     }, `blockLevel:${selected.join(",")}`);
+    // Raised while being dragged (button held, Ctrl+wheel): the drag goes on from the new height, not the one it started at.
+    if (this.drag?.pick.kind === "block" && this.lastPointer) this.beginDragPlane(this.lastPointer);
     return true;
   }
 
@@ -1905,6 +1907,7 @@ export class Editor {
     // Ctrl+wheel: level of the block being placed or the selected block (wheel up = higher). Touchpads send many small
     // steps, so they add up to one level per notch-sized amount.
     if ((e.ctrlKey || e.metaKey) && (this.blockPlace || this.selectedBlocks().length > 0)) {
+      this.commitField();
       // A mouse wheel notch (one event of 50+ px) is one level; touchpad deltas add up to the same amount.
       if (Math.abs(delta) >= WHEEL_LEVEL_STEP / 2) {
         this.wheelLevel = 0;
@@ -2281,7 +2284,17 @@ export class Editor {
 
   // ---- pointer interaction -------------------------------------------------------------------
 
+  /**
+   * A field typed into but not yet committed (it commits on blur) goes in first: otherwise a drag or a level change
+   * starting now would work from the old value (e.g. a block's level), and the field would write it back later.
+   */
+  private commitField(): void {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLInputElement || focused instanceof HTMLSelectElement || focused instanceof HTMLTextAreaElement) focused.blur();
+  }
+
   private onPointerDown(e: PointerEvent): void {
+    this.commitField();
     if (e.button === 2) this.rightClickStart = { x: e.clientX, y: e.clientY };
     // The left button orbits only with Alt held (Alt+Shift pans), so plain left drags can select and move things.
     // Runs before OrbitControls' listener (capture phase), which reads the button mapping on pointer down.
