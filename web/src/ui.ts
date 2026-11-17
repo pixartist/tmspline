@@ -218,6 +218,8 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   const axisButton = button("Axis gizmo", "Show arrows for precise moves along one axis (G)", toggleAxis);
   const togglePins = () => editor.setPinMode(!editor.pinMode);
   const pinButton = button("Pin", "Pin exact spots on the road or the land, with a note, to point at them in a bug report (K)", togglePins);
+  // (The pin tool is for development: not in released builds.)
+  if (!import.meta.env.DEV) pinButton.remove();
   const wireButton = button("Mesh", "Show the triangles of the roads and the land (mesh debug view)", () => {
     editor.setWire(!editor.wireEnabled);
     wireButton.classList.toggle("active", editor.wireEnabled);
@@ -250,7 +252,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     else if (key === "n") addPoint();
     else if (key === "t") editor.addTrack();
     else if (key === "i") insertPoint();
-    else if (key === "k") togglePins();
+    else if (key === "k" && import.meta.env.DEV) togglePins();
     else if (key === "p") editor.setPlaceMode(editor.placeMode === "Pillar" ? null : "Pillar");
     else if (key === "h") editor.setPlaceMode(editor.placeMode === "Hole" ? null : "Hole");
     else if (key === "m") smooth(e.shiftKey);
