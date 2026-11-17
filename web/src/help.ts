@@ -27,6 +27,7 @@ const CONTROLS: [string, string][] = [
   ["W S / A D", "Fly along the view / sideways (speed follows the distance to the road)"],
   ["Space", "Camera up"],
   ["F / G", "Frame track · axis gizmo (points, handles, selected blocks)"],
+  ["K", "Pin mode: click spots on the road or land to pin them with a note (Copy: for a bug report)"],
   ["Ctrl+Z / Ctrl+Y", "Undo / redo"],
   ["Ctrl+S / Ctrl+Shift+S", "Save / save a copy under a new name"],
 ];

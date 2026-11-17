@@ -225,6 +225,39 @@ public sealed class TrackSegment
     public double SignSpacing { get; set; } = 16;
     /// <summary>The sign items' colour.</summary>
     public ItemColor SignColor { get; set; }
+
+    /// <summary>
+    /// How own terrain that rises beside this segment is cut back (boolean terrain): a slope from the edge, or straight up
+    /// beside the road like a tunnel's walls. Blended over the joints between segments; see BooleanSeam.CutProfileAt.
+    /// </summary>
+    public CutProfile CutProfile { get; set; }
+
+    /// <summary>
+    /// How own terrain lower than this segment is filled up to it (boolean terrain): an embankment where the ground is
+    /// near (deeper: a bridge, its ends abutments), a dam down to the ground however deep, or nothing (a bridge).
+    /// Blended over the joints between segments; see BooleanSeam.FillDepthAt.
+    /// </summary>
+    public FillProfile FillProfile { get; set; }
+}
+
+/// <summary>How own terrain lower than a road is filled up to it (TrackSegment.FillProfile).</summary>
+public enum FillProfile
+{
+    /// <summary>An embankment where the ground is at most 10 m under the edge; deeper, a bridge (abutments at its ends).</summary>
+    Embankment,
+    /// <summary>An embankment down to the ground however deep (a dam).</summary>
+    Dam,
+    /// <summary>No embankment: a bridge (abutments where it meets the segments round it).</summary>
+    None,
+}
+
+/// <summary>How own terrain rising beside a road is cut back (TrackSegment.CutProfile).</summary>
+public enum CutProfile
+{
+    /// <summary>A cutting sloping up from the edge (1:1.5): a smooth transition into the land.</summary>
+    Slope,
+    /// <summary>No cutting: the land rises straight up beside the road (the free space's walls), as in a tunnel.</summary>
+    Wall,
 }
 
 /// <summary>The game's road sign items (curve chevrons), by item name.</summary>

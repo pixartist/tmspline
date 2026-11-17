@@ -191,7 +191,7 @@ public static class StitchedTerrain
     /// <summary>In a room's section: the driving surface's points (1 to RoomDeckPoints), the right rail's index (the left's is 0; the vault follows it).</summary>
     internal const int RoomDeckPoints = DeckN + 1, RoomRailRight = RailRight;
 
-    internal static List<(Track Track, List<Vector3[]> Sections)> RoomSections(TerrainGrid grid, TrackMap map, float tuck)
+    internal static List<(Track Track, List<Vector3[]> Sections, List<double> Distances)> RoomSections(TerrainGrid grid, TrackMap map, float tuck)
     {
         var b = new Builder(grid, map, 0);
         deckTuck = tuck;
@@ -734,9 +734,10 @@ public static class StitchedTerrain
         /// <summary>For VoxelTerrain: the rooms alone (stations, sections, sky).</summary>
         public void BuildRooms() => Sections(sky: false);
 
-        // (Split at the road's gaps: no room where the road is left out.)
-        public List<(Track Track, List<Vector3[]> Sections)> RoomPolygons() => roads
-            .SelectMany(r => BooleanSeam.SplitAtGaps(r.Track, r.S, st => st.R.Distance).Select(run => (r.Track, run.Select(st => st.W).ToList())))
+        // (Split at the road's gaps: no room where the road is left out. Each section with its distance along the track.)
+        public List<(Track Track, List<Vector3[]> Sections, List<double> Distances)> RoomPolygons() => roads
+            .SelectMany(r => BooleanSeam.SplitAtGaps(r.Track, r.S, st => st.R.Distance)
+                .Select(run => (r.Track, run.Select(st => st.W).ToList(), run.Select(st => st.R.Distance).ToList())))
             .ToList();
 
         /// <summary>The lowest point of the rooms near a plan point (those in its bucket and the ones round it), or +infinity.</summary>

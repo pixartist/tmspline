@@ -68,6 +68,24 @@ const emptyView = (): TrackView => ({
 
 type MoveMode = "screen" | "horizontal" | "vertical";
 
+/**
+ * A spot on a mesh the user pinned (Pin mode) to point at it exactly: where the click hit, the triangle there, and what
+ * it belongs to. Meant for bug reports: copied as JSON, or read from the page (window.editor.pins) in development.
+ */
+export interface MeshPin {
+  n: number;
+  what: "road" | "terrain" | "ground" | "block";
+  point: Vec3;
+  normal?: Vec3;
+  triangle?: [Vec3, Vec3, Vec3];
+  /** Roads: the track (index in the map), its segment, and the spot along (m from the track's start) and across (m, + right). */
+  road?: { track: number; segment: number; along?: number; across?: number };
+  /** Terrain: the chunk's index in the terrain mesh and the terrain's mesher. */
+  terrain?: { chunk: number; mesher?: string };
+  block?: { index: number; name: string };
+  note: string;
+}
+
 /** A block being moved (mouse drag or axis gizmo) as it was when the move started; position only for free blocks. */
 interface MovedBlock { index: number; x: number; y: number; z: number; position?: Vec3 }
 
@@ -316,6 +334,10 @@ export class Editor {
   }
   /** Insert mode: hovering the road previews where a click inserts a point. */
   insertMode = false;
+  /** Pin mode: clicks pin spots on meshes (see MeshPin) instead of selecting or moving things. */
+  pinMode = false;
+  pins: MeshPin[] = [];
+  private pinGroup = new THREE.Group();
   /** Place mode: the next click on the road places an object of this kind there. */
   placeMode: TrackObjectKind | null = null;
   /** Block mode: clicks place this vanilla block (dir and level change with R and PgUp/PgDn). */
@@ -454,6 +476,8 @@ export class Editor {
     this.insertMarker.renderOrder = 11;
     this.insertMarker.visible = false;
     this.scene.add(this.insertMarker);
+    this.pinGroup.renderOrder = 20;
+    this.scene.add(this.pinGroup);
 
     this.hoverOverlay = this.createOverlay(COLORS.hoverTint, 0.18);
     this.selectOverlay = this.createOverlay(COLORS.segmentSelected, 0.3);
@@ -697,8 +721,106 @@ export class Editor {
     this.changed(structural);
   }
 
+  /** Pin mode on or off (K). The pins stay until cleared. */
+  setPinMode(enabled: boolean): void {
+    if (enabled) {
+      this.setInsertMode(false);
+      this.setPlaceMode(null);
+      this.setBlockPlaceMode(null);
+    }
+    this.pinMode = enabled;
+    this.renderer.domElement.style.cursor = enabled ? "crosshair" : "";
+    this.onChange();
+  }
+
+  /** Pins the spot under the pointer: the nearest road, terrain, block or ground hit. */
+  private addPin(e: PointerEvent): void {
+    const ray = this.rayFrom(e).ray;
+    const caster = new THREE.Raycaster(ray.origin, ray.direction, 0, 20000);
+    const roads = this.roadMeshes(), chunks = this.terrainChunks();
+    const hit = caster.intersectObjects([...roads, ...chunks, this.ground], false).sort((a, b) => a.distance - b.distance)[0];
+    const block = this.blockHit(ray);
+    const v3 = (p: THREE.Vector3): Vec3 => [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)];
+    let pin: MeshPin | null = null;
+    const n = (this.pins.at(-1)?.n ?? 0) + 1;
+    if (block && (!hit || block.distance < hit.distance)) {
+      pin = { n, what: "block", point: v3(block.point), block: { index: block.index, name: this.map.blocks[block.index]?.name ?? "" }, note: "" };
+    } else if (hit) {
+      const mesh = hit.object as THREE.Mesh;
+      pin = { n, what: mesh === this.ground ? "ground" : roads.includes(mesh) ? "road" : "terrain", point: v3(hit.point), note: "" };
+      if (hit.face && mesh !== this.ground) {
+        const pos = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+        const corner = (i: number) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+        const [a, b, c] = [corner(hit.face.a), corner(hit.face.b), corner(hit.face.c)];
+        pin.triangle = [v3(a), v3(b), v3(c)];
+        pin.normal = v3(new THREE.Triangle(a, b, c).getNormal(new THREE.Vector3()));
+        if (pin.what === "road") {
+          const track = this.map.tracks.findIndex((t) => this.views.get(t)?.road === mesh);
+          const view = this.views.get(this.map.tracks[track])!;
+          pin.road = { track, segment: view.roadSegments[hit.faceIndex!] };
+          const w = THREE.Triangle.getBarycoord(hit.point, a, b, c, new THREE.Vector3());
+          const sc = view.surfaceCoords, { a: ia, b: ib, c: ic } = hit.face;
+          if (w && sc.length > ic * 2 + 1) {
+            const along = w.x * sc[ia * 2] + w.y * sc[ib * 2] + w.z * sc[ic * 2];
+            const across = w.x * sc[ia * 2 + 1] + w.y * sc[ib * 2 + 1] + w.z * sc[ic * 2 + 1];
+            if (Number.isFinite(along) && Number.isFinite(across)) Object.assign(pin.road, { along: +along.toFixed(2), across: +across.toFixed(2) });
+          }
+        } else {
+          pin.terrain = { chunk: chunks.indexOf(mesh), mesher: this.map.terrain?.mesher };
+        }
+      }
+    }
+    if (!pin) return;
+    this.pins.push(pin);
+    this.syncPins();
+    if (import.meta.env.DEV) console.log("[pin]", JSON.stringify(pin));
+    this.onChange();
+  }
+
+  removePin(n: number): void {
+    this.pins = this.pins.filter((p) => p.n !== n);
+    this.syncPins();
+    this.onChange();
+  }
+
+  clearPins(): void {
+    this.pins = [];
+    this.syncPins();
+    this.onChange();
+  }
+
+  /** One numbered marker per pin, drawn over everything. */
+  private syncPins(): void {
+    for (const child of [...this.pinGroup.children]) {
+      this.pinGroup.remove(child);
+      const sprite = child as THREE.Sprite;
+      sprite.material.map?.dispose();
+      sprite.material.dispose();
+    }
+    for (const pin of this.pins) {
+      const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 64 });
+      const g = canvas.getContext("2d")!;
+      g.fillStyle = "#ff3fd2";
+      g.beginPath();
+      g.arc(32, 32, 28, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "#fff";
+      g.font = "bold 34px sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(String(pin.n), 32, 34);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false, sizeAttenuation: false }));
+      sprite.scale.setScalar(0.035);
+      sprite.center.set(0.5, 0);
+      sprite.renderOrder = 20;
+      sprite.position.set(...pin.point);
+      this.pinGroup.add(sprite);
+    }
+  }
+
   /** Insert mode: the next click on the road inserts a point there (Esc or toggling again cancels). */
   setInsertMode(enabled: boolean): void {
+    if (enabled) this.pinMode = false;
     this.placeMode = null;
     if (enabled) this.setBlockPlaceMode(null);
     this.placeTarget = null;
@@ -712,6 +834,7 @@ export class Editor {
 
   /** Place mode: the next click on the road places an object of this kind (null, Esc or the same kind again cancels). */
   setPlaceMode(kind: TrackObjectKind | null): void {
+    if (kind) this.pinMode = false;
     if (kind) this.setInsertMode(false);
     if (kind) this.setBlockPlaceMode(null);
     this.placeMode = kind;
@@ -728,6 +851,7 @@ export class Editor {
    */
   setBlockPlaceMode(name: string | null, like?: { free: boolean; dir?: number; yaw?: number; color?: ItemColor }): void {
     if (name) {
+      this.pinMode = false;
       this.placeMode = null;
       this.placeTarget = null;
       this.insertMode = false;
@@ -2323,7 +2447,7 @@ export class Editor {
     // The optional axis gizmo handles its own drags.
     if (this.axisGizmoEnabled && this.axisGizmo.axis) return;
     // Insert/place mode: clicks insert (handled on pointer up).
-    if (this.insertMode || this.placeMode || this.blockPlace) {
+    if (this.insertMode || this.placeMode || this.blockPlace || this.pinMode) {
       this.clickStart = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -2497,6 +2621,11 @@ export class Editor {
     this.clickStart = null;
     if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_THRESHOLD_PX) return;
     if (this.axisGizmoEnabled && this.axisGizmo.dragging) return;
+
+    if (this.pinMode) {
+      this.addPin(e);
+      return;
+    }
 
     if (this.insertMode) {
       this.updateInsertPreview(e);

@@ -146,7 +146,22 @@ export interface TrackSegment {
   signSide: SignSide;
   /** Meters between signs. */
   signSpacing: number;
+  /**
+   * How own terrain rising beside the segment is cut back (boolean terrain; missing: Slope): a slope from the edge, or
+   * straight up beside the road as a tunnel's walls. Blended over the joints between segments (CutProfile in the core).
+   */
+  cutProfile?: CutProfile;
+  /**
+   * How own terrain lower than the segment is filled up to it (boolean terrain; missing: Embankment): an embankment where
+   * the ground is near (deeper: a bridge, with abutments), a dam down to the ground however deep, or nothing (a bridge).
+   */
+  fillProfile?: FillProfile;
 }
+
+export const CUT_PROFILES = ["Slope", "Wall"] as const;
+export type CutProfile = (typeof CUT_PROFILES)[number];
+export const FILL_PROFILES = ["Embankment", "Dam", "None"] as const;
+export type FillProfile = (typeof FILL_PROFILES)[number];
 
 export const ROAD_SIGNS = ["None", "RoadSign", "RoadSignB", "RoadSignC"] as const;
 export type RoadSignKind = (typeof ROAD_SIGNS)[number];

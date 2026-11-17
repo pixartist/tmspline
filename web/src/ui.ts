@@ -53,7 +53,7 @@ function restoreScenery(saved: Record<string, unknown>): void {
   t.seed = whole(own.seed, 0, 999999, 0);
 }
 import {
-  appendPoint, MAP_ENVIRONMENTS, TERRAIN_MESHERS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainMesher, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, CUT_PROFILES, type CutProfile, FILL_PROFILES, type FillProfile, MAP_ENVIRONMENTS, TERRAIN_MESHERS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainMesher, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint,
 } from "./track";
 
@@ -216,6 +216,8 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
   button("Frame", "Show the whole map (F)", () => editor.frameTrack());
   const toggleAxis = () => editor.setAxisGizmo(!editor.axisGizmoEnabled);
   const axisButton = button("Axis gizmo", "Show arrows for precise moves along one axis (G)", toggleAxis);
+  const togglePins = () => editor.setPinMode(!editor.pinMode);
+  const pinButton = button("Pin", "Pin exact spots on the road or the land, with a note, to point at them in a bug report (K)", togglePins);
   const wireButton = button("Mesh", "Show the triangles of the roads and the land (mesh debug view)", () => {
     editor.setWire(!editor.wireEnabled);
     wireButton.classList.toggle("active", editor.wireEnabled);
@@ -248,6 +250,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     else if (key === "n") addPoint();
     else if (key === "t") editor.addTrack();
     else if (key === "i") insertPoint();
+    else if (key === "k") togglePins();
     else if (key === "p") editor.setPlaceMode(editor.placeMode === "Pillar" ? null : "Pillar");
     else if (key === "h") editor.setPlaceMode(editor.placeMode === "Hole" ? null : "Hole");
     else if (key === "m") smooth(e.shiftKey);
@@ -264,6 +267,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
       else if (editor.insertMode) editor.setInsertMode(false);
       else if (editor.placeMode) editor.setPlaceMode(null);
       else if (editor.blockPlace) editor.setBlockPlaceMode(null);
+      else if (editor.pinMode) editor.setPinMode(false);
       else editor.select(null);
     }
     else if (key === "[" || key === "]") {
@@ -325,6 +329,7 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
       if (editor.map.sceneryOptions) restoreScenery(editor.map.sceneryOptions);
     }
     axisButton.classList.toggle("active", editor.axisGizmoEnabled);
+    pinButton.classList.toggle("active", editor.pinMode);
     insertButton.classList.toggle("active", editor.insertMode);
     for (const [kind, b] of placeButtons) b.classList.toggle("active", editor.placeMode === kind);
     blocksButton.classList.toggle("active", !!editor.blockPlace || palette.isOpen);
@@ -575,7 +580,8 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${obj?.checkpointGroup ?? ""}:${editor.map.tracks.flatMap((tr) => tr.objects.map((q) => q.checkpointGroup ?? 0)).join(",")}:${t.closed}:${editor.map.blocks.length}:${!!editor.library}`
     + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${editor.map.terrain?.mesher ?? scenery.ownTerrain.mesher ?? ""}:${paint.brush}:${editor.map.environment ?? ""}`
-    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" || s?.kind === "points" ? `${s.kind}${s.indices.join(",")}` : ""}`;
+    + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" || s?.kind === "points" ? `${s.kind}${s.indices.join(",")}` : ""}`
+    + `:pins${editor.pinMode}:${editor.pins.map((p) => p.n).join(",")}`;
   if (key === lastInspectorKey) {
     root.querySelectorAll<HTMLInputElement>("[data-refresh]").forEach((el) => el.dispatchEvent(new Event("refresh")));
     return;
@@ -588,6 +594,27 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     h.textContent = title;
     root.appendChild(h);
   };
+
+  if (editor.pinMode || editor.pins.length > 0) {
+    section("Pins");
+    for (const pin of editor.pins) {
+      const where = pin.road ? `road, track ${pin.road.track + 1}, segment ${pin.road.segment + 1}${pin.road.along !== undefined ? ` at ${pin.road.along.toFixed(0)} m` : ""}`
+        : pin.block ? `block ${pin.block.name}` : pin.what;
+      const r = row(root, `#${pin.n}`);
+      const note = Object.assign(document.createElement("input"), { placeholder: where, value: pin.note, title: `${where} · ${pin.point.join(", ")}` });
+      note.addEventListener("input", () => (pin.note = note.value));
+      const remove = Object.assign(document.createElement("button"), { textContent: "×", type: "button", title: "Remove this pin" });
+      remove.addEventListener("click", () => editor.removePin(pin.n));
+      r.append(note, remove);
+    }
+    buttonRow(root, [
+      { label: editor.pinMode ? "Stop pinning" : "Pin more", onClick: () => editor.setPinMode(!editor.pinMode) },
+      { label: "Copy", onClick: () => void navigator.clipboard.writeText(JSON.stringify(editor.pins, null, 1)) },
+      { label: "Clear", onClick: () => editor.clearPins() },
+    ]);
+    hint(root, "Pin mode (K): click the road, the land or a block to pin that exact spot; a note says what is wrong there. "
+      + "Copy puts the pins (position, triangle, what it is) on the clipboard, to paste into a bug report.");
+  }
 
   const map = editor.map;
   section("Map");
@@ -860,6 +887,22 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (!seg().underside)
       hint(root, "Without underside this segment is only the driving surface and its borders: about half the triangles, "
         + "which helps with the game's 5 MB limit for custom items. Seen from below the road is invisible.");
+    if (editor.map.terrain) {
+      selectField(root, "Cut profile", CUT_PROFILES, () => seg().cutProfile ?? "Slope", (v) => editor.edit((tr) => {
+        if (v === "Slope") delete tr.segments[s.index].cutProfile;
+        else tr.segments[s.index].cutProfile = v as CutProfile;
+      }), false, { Slope: "Slope", Wall: "Wall (tunnel)" });
+      hint(root, "How the terrain is cut back where it rises beside this segment (boolean mesher): Slope cuts a slope from "
+        + "the road's edge, Wall lets it rise straight up beside the road, as a tunnel's walls (on a road banked into a "
+        + "wall, its high edge goes on up along it). Blended over the joints with the segments round it.");
+      selectField(root, "Fill profile", FILL_PROFILES, () => seg().fillProfile ?? "Embankment", (v) => editor.edit((tr) => {
+        if (v === "Embankment") delete tr.segments[s.index].fillProfile;
+        else tr.segments[s.index].fillProfile = v as FillProfile;
+      }), false, { Embankment: "Embankment", Dam: "Dam", None: "None (bridge)" });
+      hint(root, "How the terrain is filled up where it lies lower than this segment: Embankment where the ground is at most "
+        + "10 m below the road (deeper: a bridge, its ends abutments), Dam down to the ground however deep, None never "
+        + "(a bridge).");
+    }
 
     section("Effect");
     const supported = EFFECT_SURFACES.has(seg().surface);

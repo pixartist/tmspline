@@ -212,6 +212,10 @@ public static class TrackJson
         public double SignSpacing { get; set; } = 16;
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public ItemColor SignColor { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public CutProfile CutProfile { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public FillProfile FillProfile { get; set; }
     }
 
     public static TrackDto ParseDto(string json) =>
@@ -308,6 +312,7 @@ public static class TrackJson
                 Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -20, 20), BumpSize = Math.Clamp(s.BumpSize, 0.5, 512),
                 BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16), BumpSeed = s.BumpSeed,
                 Signs = s.Signs, SignSide = s.SignSide, SignSpacing = Math.Clamp(s.SignSpacing, 2, 256), SignColor = s.SignColor,
+                CutProfile = s.CutProfile, FillProfile = s.FillProfile,
             });
         foreach (var o in dto.Objects ?? new())
             track.Objects.Add(new TrackObject
@@ -341,6 +346,7 @@ public static class TrackJson
             Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
             Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail, BumpSeed = s.BumpSeed,
             Signs = s.Signs, SignSide = s.SignSide, SignSpacing = s.SignSpacing, SignColor = s.SignColor,
+            CutProfile = s.CutProfile, FillProfile = s.FillProfile,
         }).ToList(),
         Objects = track.Objects.Select(o => new ObjectDto
         {

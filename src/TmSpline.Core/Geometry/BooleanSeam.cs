@@ -170,88 +170,157 @@ public static class BooleanSeam
     /// 2 m: rail, driving surface FreeUnder under it, rail, a vault over it from rail to rail; a pipe's whole inside)
     /// swept along each road, its ends closed. Land in it is cut away exactly; its faces left become the land's there.
     /// </summary>
-    internal static List<(List<Vector3> Positions, List<int> Indices)> FreeSpaces(List<(Track Track, List<Vector3[]> Sections)> rooms)
+    internal static List<(List<Vector3> Positions, List<int> Indices)> FreeSpaces(List<(Track Track, List<Vector3[]> Sections, List<double> Distances)> rooms)
     {
         var result = new List<(List<Vector3>, List<int>)>();
-        foreach (var (track, all) in rooms)
+        foreach (var (track, all, distances) in rooms)
         {
             if (all.Count < 2) continue;
             var p = all[0].Length;
+            var starts = TrackSampler.SegmentStarts(track);
 
-            foreach (var section in all)
+            for (var si = 0; si < all.Count; si++)
             {
+                var section = all[si];
                 // The rails (the rooms tuck them 3 cm in from the road's edge) moved out past it by FreeBeyond: land in
                 // the strip along the edge stood over the driving surface and showed through it.
                 var midPoint = section[1 + (StitchedTerrain.RoomDeckPoints - 1) / 2];
+                // (The high edge of a steeply banked road: from its curb's inner top corner, so that land may cover the
+                // edge's top there; see HighEdgeTop.)
+                var tops = new[] { HighEdgeTop(section, 0), HighEdgeTop(section, StitchedTerrain.RoomRailRight) };
                 foreach (var rail in new[] { 0, StitchedTerrain.RoomRailRight })
                 {
+                    if ((rail == 0 ? tops[0] : tops[1]) is { } top) { section[rail] = top.Inner; continue; }
                     var outward = section[rail] - midPoint;
                     outward.Y = 0;
                     if (outward.LengthSquared() > 1e-4f) section[rail] += Vector3.Normalize(outward) * FreeBeyond;
                 }
-                ContinueCurl(section);
+                all[si] = ContinueCurl(section, CutProfileAt(track, starts, distances[si]));
             }
+            p = all[0].Length;
             var sections = Thin(all, FreeTolerance);
-            // A closed track: its last section is its first (all round, no ends).
+            // A closed track: its last section is its first (all round): the pieces go on round past it. In overlapping pieces
+            // (see Pieces): one sweep along the whole road overlapped itself where the road came back near itself (a road
+            // over another), and the land in the overlap was not cut at all.
             var round = track.Closed && Vector3.Distance(sections[0][0], sections[^1][0]) < 0.01f;
-            var count = round ? sections.Count - 1 : sections.Count;
-            var positions = new List<Vector3>();
-            var indices = new List<int>();
-            for (var k = 0; k < count; k++) positions.AddRange(sections[k]);
-            for (var k = 0; k < (round ? count : count - 1); k++)
-            {
-                int r0 = k * p, r1 = (k + 1) % count * p;
-                for (var j = 0; j < p; j++)
-                {
-                    int a = r0 + j, b = r0 + (j + 1) % p, c = r1 + (j + 1) % p, d = r1 + j;
-                    indices.AddRange([a, b, c, a, c, d]);
-                }
-            }
-            if (!round)
-                foreach (var (k, flip) in new[] { (0, true), (count - 1, false) })
-                {
-                    // Each end a fan round its section's middle.
-                    var middle = positions.Count;
-                    var sum = Vector3.Zero;
-                    for (var j = 0; j < p; j++) sum += positions[k * p + j];
-                    positions.Add(sum / p);
-                    for (var j = 0; j < p; j++)
-                    {
-                        int a = k * p + j, b = k * p + (j + 1) % p;
-                        if (flip) indices.AddRange([middle, b, a]); else indices.AddRange([middle, a, b]);
-                    }
-                }
-            // Facing out: turned over if its volume comes out negative.
-            var volume = 0.0;
-            for (var t = 0; t + 2 < indices.Count; t += 3) volume += Vector3.Dot(positions[indices[t]], Vector3.Cross(positions[indices[t + 1]], positions[indices[t + 2]]));
-            if (volume < 0)
-                for (var t = 0; t + 2 < indices.Count; t += 3) (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
-            result.Add((positions, indices));
+            foreach (var piece in Pieces(sections, round)) result.Add(Sweep(piece));
         }
         return result;
     }
 
     /// <summary>
-    /// The free space's vault continues the road's curl: a smooth arch (a cubic curve) from the right rail round the
-    /// open side to the left, leaving each rail the way the driving surface runs at that edge where the edge is curled
-    /// past upright (a wall, a half-pipe, a tube's lip: the arch goes on round, no second, smaller tube on top), and
-    /// straight away from the line between the rails where it is not (a flat road: about the old round vault, at least
-    /// 4.5 m high). The section is changed in place.
+    /// The high edge of a road banked steeper than EnvelopBank (the edges' height apart over their distance): the top of the
+    /// road's edge there, its inner corner (CurbClear off it, on the open side) and its outer one: a curb's top, or without
+    /// a curb the slab's own edge (the driving surface's edge, and SlabThickness behind it). The free space starts at the
+    /// inner corner and the land covers the edge from it, up over the outer corner (the owner's profile): along the slab's
+    /// own faces, land tucked under the edge left thin slivers that flickered with the road. Null elsewhere.
     /// </summary>
-    private static void ContinueCurl(Vector3[] section)
+    internal static (Vector3 Inner, Vector3 Outer)? HighEdgeTop(Vector3[] sec, int side)
+    {
+        const int rightRail = StitchedTerrain.RoomRailRight;
+        Vector3 rail = sec[side], other = sec[side == 0 ? rightRail : 0];
+        var across = rail - other;
+        if (across.LengthSquared() < 1 || across.Y <= EnvelopBank * across.Length()) return null;
+        var mid = sec[1 + (StitchedTerrain.RoomDeckPoints - 1) / 2];
+        var open = sec[rightRail + (sec.Length - rightRail) / 2] - mid;
+        var inward = -Vector3.Normalize(across);
+        open -= inward * Vector3.Dot(open, inward);
+        if (open.LengthSquared() < 1e-6f) return null;
+        open = Vector3.Normalize(open);
+        var deckEdge = sec[side == 0 ? 1 : StitchedTerrain.RoomDeckPoints];
+        var h = Vector3.Dot(rail - deckEdge, open);
+        // No curb: the rail is the driving surface's own edge (the free spaces' decks lie FreeUnder under the surface,
+        // their rails on it: from the deck the corner stood that far under the road and the cove started there).
+        if (h < 0.5f) return (rail + open * CurbClear, rail - open * SlabThickness);
+        return (deckEdge + open * (h + CurbClear), rail);
+    }
+
+    /// <summary>Over how many metres the cut profile blends at a joint between two segments (centred on it).</summary>
+    private const float CutBlend = 16;
+
+    /// <summary>
+    /// How much of the Wall cut profile (TrackSegment.CutProfile) a track has at a distance along it: 0 Slope, 1 Wall,
+    /// blended smoothly over CutBlend round the joints between segments with different profiles.
+    /// </summary>
+    internal static float CutProfileAt(Track track, double[] starts, double distance) =>
+        SegmentBlend(track, starts, distance, s => s.CutProfile == CutProfile.Wall ? 1 : 0);
+
+    /// <summary>
+    /// How deep a fill may reach down to the ground at a distance along a track, by its segments' fill profiles
+    /// (TrackSegment.FillProfile: Embankment MaxFill, Dam MaxDam, None 0), blended over CutBlend round the joints.
+    /// </summary>
+    internal static float FillDepthAt(Track track, double[] starts, double distance) =>
+        SegmentBlend(track, starts, distance, s => s.FillProfile switch { FillProfile.Dam => MaxDam, FillProfile.None => 0, _ => MaxFill });
+
+    /// <summary>A value of a track's segments at a distance along it, blended smoothly over CutBlend round the joints between them.</summary>
+    private static float SegmentBlend(Track track, double[] starts, double distance, Func<TrackSegment, float> value)
+    {
+        var n = starts.Length - 1;
+        if (n < 1 || track.Segments.Count == 0) return 0;
+        float Of(int s)
+        {
+            s = track.Closed ? ((s % n) + n) % n : Math.Clamp(s, 0, n - 1);
+            return value(track.Segments[Math.Clamp(s, 0, track.Segments.Count - 1)]);
+        }
+        var k = 0;
+        while (k + 1 < n && distance >= starts[k + 1]) k++;
+        float own = Of(k), half = CutBlend / 2;
+        static float Smooth(double t) { var x = (float)Math.Clamp(t, 0, 1); return x * x * (3 - 2 * x); }
+        var fromStart = distance - starts[k];
+        var toEnd = starts[k + 1] - distance;
+        if (fromStart < half && (k > 0 || track.Closed)) return float.Lerp(Of(k - 1), own, Smooth((fromStart + half) / CutBlend));
+        if (toEnd < half && (k < n - 1 || track.Closed)) return float.Lerp(own, Of(k + 1), Smooth((half - toEnd) / CutBlend));
+        return own;
+    }
+
+    /// <summary>
+    /// The Slope cut profile's cove at a road edge (metres): out from the edge and up to where it stands upright, a quarter
+    /// ellipse leaving the edge level (the owner's profile). The vault's arch starts at its top.
+    /// </summary>
+    private const float CoveOut = 10, CoveUp = 8;
+    /// <summary>The points of a free space's vault, from the right rail round to the left (evenly spaced along it).</summary>
+    private const int VaultPoints = 28;
+
+    /// <summary>
+    /// The free space's vault: from the right rail round the open side to the left. Where an edge curls past upright (a
+    /// wall, a half-pipe, a tube's lip) it leaves the edge the way the driving surface runs there (the arch goes on round,
+    /// no second, smaller tube on top). Elsewhere by the segment's cut profile (TrackSegment.CutProfile, wall 0 to 1):
+    /// Slope, a cove first (CoveOut out from the edge, CoveUp up; level at the edge, upright at its top: land higher than
+    /// the road is cut back to it), Wall none (the land rises straight up beside the road, a tunnel's walls; on a road
+    /// banked into a wall its high edge goes on up along it), blended by shrinking the cove; then straight up into the
+    /// arch, a cubic curve over the road (at least 4.5 m high). Not up where that turns in over the road (a steep bank's
+    /// low edge): there it leaves at right angles to the road as before. Returns the section with its new vault
+    /// (VaultPoints points after the right rail).
+    /// </summary>
+    private static Vector3[] ContinueCurl(Vector3[] section, float wall)
     {
         const int deckFirst = 1, deckLast = StitchedTerrain.RoomDeckPoints, rightRail = StitchedTerrain.RoomRailRight;
         var arch = section.Length - rightRail;
+        var result = new Vector3[rightRail + 1 + VaultPoints];
+        Array.Copy(section, result, rightRail + 1);
         Vector3 railR3 = section[rightRail], railL3 = section[0];
         var chord3 = railL3 - railR3;
-        if (chord3.LengthSquared() < 0.09f) return;
+        // (Degenerate: the rooms' own vault, spread over the points.)
+        Vector3[] AsItWas()
+        {
+            for (var k = 1; k <= VaultPoints; k++)
+            {
+                var x = (float)k / (VaultPoints + 1) * arch;
+                int i0 = (int)MathF.Floor(x), i1 = Math.Min(i0 + 1, arch);
+                Vector3 a = i0 == 0 ? railR3 : i0 >= arch ? railL3 : section[rightRail + i0], b = i1 >= arch ? railL3 : section[rightRail + i1];
+                result[rightRail + k] = Vector3.Lerp(a, b, x - i0);
+            }
+            return result;
+        }
+        if (chord3.LengthSquared() < 0.09f) return AsItWas();
         // The section's plane: along the chord and towards the vault's middle (the open side, as the rooms chose it).
         var e1 = Vector3.Normalize(chord3);
         var toTop = section[rightRail + arch / 2] - railR3;
         var e2 = toTop - e1 * Vector3.Dot(toTop, e1);
-        if (e2.LengthSquared() < 1e-6f) return;
+        if (e2.LengthSquared() < 1e-6f) return AsItWas();
         e2 = Vector3.Normalize(e2);
         Vector2 To2(Vector3 v) => new(Vector3.Dot(v - railR3, e1), Vector3.Dot(v - railR3, e2));
+        Vector2 Plane(Vector3 v) => new(Vector3.Dot(v, e1), Vector3.Dot(v, e2));
         Vector3 To3(Vector2 v) => railR3 + e1 * v.X + e2 * v.Y;
         var c = chord3.Length();
         Vector2 railR = Vector2.Zero, railL = new(c, 0), open = Vector2.UnitY;
@@ -265,24 +334,62 @@ public static class BooleanSeam
             angle = Math.Clamp(angle, MathF.PI / 2, MathF.PI * 1.1f);
             return outward * MathF.Cos(angle) + open * MathF.Sin(angle);
         }
-        var dirR = Out(To2(section[deckLast]) - To2(section[deckLast - 1]), new Vector2(-1, 0));
-        var dirL = Out(To2(section[deckFirst]) - To2(section[deckFirst + 1]), new Vector2(1, 0));
-        // Control lengths: a round vault over the chord (4/3 of half of it gives a half circle), at least 4.5 m high;
-        // shorter where a rail's way turns back over the road (a tube's lips facing each other).
-        var length = MathF.Max(c * 2 / 3, 6);
+        // A way in the section's plane that does not turn in over the road (inwardSign: +1 at the right rail, -1 at the
+        // left) nor back under it.
+        bool Fits(Vector2 d, float inwardSign) => d.LengthSquared() > 1e-6f && Vector2.Normalize(d).X * inwardSign < 0.5f && Vector2.Normalize(d).Y > -0.9f;
+        // The cove (its points after the rail) and the way on from its top.
+        (List<Vector2> Cove, Vector2 Dir) Edge(Vector2 dir, Vector3 rail, Vector3 otherRail, float inwardSign)
+        {
+            var cove = new List<Vector2>();
+            if (Vector2.DistanceSquared(dir, open) > 1e-6f) return (cove, dir);
+            var away = rail - otherRail;
+            away.Y = 0;
+            if (away.LengthSquared() < 1e-6f) return (cove, dir);
+            away = Vector3.Normalize(away);
+            var up = Plane(Vector3.UnitY);
+            var upFits = Fits(up, inwardSign);
+            float rx = (1 - wall) * CoveOut, ry = (1 - wall) * CoveUp;
+            if (rx > 0.05f && Fits(Plane(away * rx + Vector3.UnitY * ry), inwardSign))
+            {
+                // Leaving the edge along the road's own surface (its plane carried on outwards: on a banked road's high
+                // edge it starts tilted with the road; the owner's profile), level where that runs down (a low edge: it
+                // would dip under the edge and cut the fill there); arriving upright at its top. A cubic curve, about a
+                // quarter ellipse.
+                var start = Vector3.Normalize(rail - otherRail);
+                if (start.Y < 0) start = away;
+                var top = rail + away * rx + Vector3.UnitY * ry;
+                Vector3 c1 = rail + start * (rx * 0.55f), c2 = top - Vector3.UnitY * (ry * 0.55f);
+                const int steps = 12;
+                for (var s = 1; s <= steps; s++)
+                {
+                    var t = (float)s / steps;
+                    var u = 1 - t;
+                    cove.Add(To2(rail * (u * u * u) + c1 * (3 * u * u * t) + c2 * (3 * u * t * t) + top * (t * t * t)));
+                }
+            }
+            return (cove, upFits ? Vector2.Normalize(up) : dir);
+        }
+        var (coveR, dirR) = Edge(Out(To2(section[deckLast]) - To2(section[deckLast - 1]), new Vector2(-1, 0)), railR3, railL3, 1);
+        var (coveL, dirL) = Edge(Out(To2(section[deckFirst]) - To2(section[deckFirst + 1]), new Vector2(1, 0)), railL3, railR3, -1);
+        Vector2 startR = coveR.Count > 0 ? coveR[^1] : railR, startL = coveL.Count > 0 ? coveL[^1] : railL;
+        // The arch between the coves' tops. Control lengths: a round vault over the line between them (4/3 of half of it
+        // gives a half circle), at least 6 m; shorter where a way turns back over the road (a tube's lips facing each other).
+        var span = Vector2.Distance(startR, startL);
+        var length = MathF.Max(span * 2 / 3, 6);
         var lengthR = length * (1 - 0.5f * MathF.Max(0, dirR.X));
         var lengthL = length * (1 - 0.5f * MathF.Max(0, -dirL.X));
-        Vector2 p1 = railR + dirR * lengthR, p2 = railL + dirL * lengthL;
-        var points = new Vector2[arch];
-        for (var k = 1; k < arch; k++)
+        Vector2 p1 = startR + dirR * lengthR, p2 = startL + dirL * lengthL;
+        const int archSteps = 48;
+        var points = new Vector2[archSteps + 1];
+        for (var k = 0; k <= archSteps; k++)
         {
-            var t = (float)k / arch;
+            var t = (float)k / archSteps;
             var u = 1 - t;
-            points[k] = railR * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + railL * (t * t * t);
+            points[k] = startR * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + startL * (t * t * t);
         }
         // No higher over the driving surface's middle (along its normal there) than half the road's width, at least
-        // 4.5 m, and no less than 2 m over the higher rail: where one side rises into a wall, the line between the rails
-        // runs up it, and the arch over that line stood metres over the wall and the vaults round it (a hump).
+        // 4.5 m, and no less than 2 m over the higher of the arch's ends: where one side rises into a wall, the line between
+        // them runs up it, and the arch over that line stood metres over the wall and the vaults round it (a hump).
         var middle = (deckFirst + deckLast) / 2;
         var mid = To2(section[middle]);
         var tangent = To2(section[middle + 1]) - To2(section[middle - 1]);
@@ -293,27 +400,45 @@ public static class BooleanSeam
             var up = Vector2.Normalize(new Vector2(-tangent.Y, tangent.X));
             if (Vector2.Dot(up, open) < 0) up = -up;
             float Height(Vector2 v) => Vector2.Dot(v - mid, up);
-            var floor = MathF.Max(Height(railR), Height(railL));
+            var floor = MathF.Max(Height(startR), Height(startL));
             var cap = MathF.Max(MathF.Max(4.5f, width / 2), floor + 2);
             var top = float.MinValue;
-            for (var k = 1; k < arch; k++) top = MathF.Max(top, Height(points[k]));
+            for (var k = 1; k < archSteps; k++) top = MathF.Max(top, Height(points[k]));
             if (top < cap)
             {
-                // A road curving down (its middle over its rails): the arch over the line between the rails barely
-                // clears it. Raised to the same height over the middle, smoothly (most in the middle, none at the rails).
-                for (var k = 1; k < arch; k++) points[k] += up * (cap - top) * MathF.Sin(MathF.PI * k / arch);
+                // A road curving down (its middle over its rails): the arch over the line between its ends barely clears
+                // it. Raised to the same height over the middle, smoothly (most in the middle, none at the ends).
+                for (var k = 1; k < archSteps; k++) points[k] += up * (cap - top) * MathF.Sin(MathF.PI * k / archSteps);
             }
             else if (top > cap && top > floor + 1e-3f)
             {
                 var keep = (cap - floor) / (top - floor);
-                for (var k = 1; k < arch; k++)
+                for (var k = 1; k < archSteps; k++)
                 {
                     var h = Height(points[k]);
                     if (h > floor) points[k] -= up * (h - floor) * (1 - keep);
                 }
             }
         }
-        for (var k = 1; k < arch; k++) section[rightRail + k] = To3(points[k]);
+        // The whole vault (right rail, its cove, the arch, the left cove back down, left rail), evenly respaced.
+        var line = new List<Vector2> { railR };
+        line.AddRange(coveR);
+        line.AddRange(points.Skip(1).Take(archSteps - 1));
+        for (var k = coveL.Count - 1; k >= 0; k--) line.Add(coveL[k]);
+        line.Add(railL);
+        var along = new float[line.Count];
+        for (var k = 1; k < line.Count; k++) along[k] = along[k - 1] + Vector2.Distance(line[k - 1], line[k]);
+        var total = along[^1];
+        var seg = 1;
+        for (var k = 1; k <= VaultPoints; k++)
+        {
+            var target = total * k / (VaultPoints + 1);
+            while (seg < line.Count - 1 && along[seg] < target) seg++;
+            var piece = along[seg] - along[seg - 1];
+            var f = piece > 1e-6f ? (target - along[seg - 1]) / piece : 0;
+            result[rightRail + k] = To3(Vector2.Lerp(line[seg - 1], line[seg], f));
+        }
+        return result;
     }
 
     /// <summary>How far a free space's section may lie off the straight line between the sections kept round it (metres): sections within it are left out.</summary>
@@ -355,21 +480,26 @@ public static class BooleanSeam
     /// the same rings, at the same quality, as the roads cut out of the land, so an embankment's edge runs straight
     /// between the same points as the road's, exactly along it.
     /// </summary>
-    internal static List<(Track Track, List<Vector3[]> Sections)> RoadStations(TrackMap map, MeshQuality quality)
+    internal static List<(Track Track, List<Vector3[]> Sections, List<float> Wall, List<float> FillDepth)> RoadStations(TrackMap map, MeshQuality quality)
     {
         static Vector3 W(Vec3d v) => new((float)v.X, (float)v.Y, (float)v.Z);
-        var result = new List<(Track, List<Vector3[]>)>();
+        var result = new List<(Track, List<Vector3[]>, List<float>, List<float>)>();
         const int deck = StitchedTerrain.RoomDeckPoints, rightRail = StitchedTerrain.RoomRailRight, points = StitchedTerrain.RoomSectionPoints;
         foreach (var track in map.Tracks)
         {
             track.SyncSegments();
             var rings = TrackSampler.Sample(track, MeshQualities.Sampler(quality));
             if (rings.Count < 2 || track.Segments.Count == 0) continue;
+            var starts = TrackSampler.SegmentStarts(track);
             foreach (var run in SplitAtGaps(track, rings, r => r.Distance))
             {
             var list = new List<Vector3[]>();
+            var wall = new List<float>();
+            var fillDepth = new List<float>();
             foreach (var r in run)
             {
+                wall.Add(CutProfileAt(track, starts, r.Distance));
+                fillDepth.Add(FillDepthAt(track, starts, r.Distance));
                 var segment = track.Segments[Math.Clamp(r.Segment, 0, track.Segments.Count - 1)];
                 var section = new Vector3[points];
                 for (var j = 0; j < deck; j++)
@@ -385,7 +515,7 @@ public static class BooleanSeam
                 section[rightRail] = W(RoadMeshBuilder.EdgeContact(r, segment, 1));
                 list.Add(section);
             }
-            result.Add((track, list));
+            result.Add((track, list, wall, fillDepth));
             }
         }
         return result;
@@ -427,9 +557,42 @@ public static class BooleanSeam
         return runs;
     }
 
-    /// <summary>Embankments and cuttings: their slope (metres out per metre down or up), the most they fill or cut (metres; more: a bridge or a tunnel, left alone), the edge's anchor under the top of the land's contact on the road's side (metres).</summary>
-    private const float EmbankSlope = 1.5f, MaxFill = 10, MaxCut = 10, EmbankAnchor = 0.3f, EdgeAnchor = 0f, Berm = 0.25f, UnderSlab = 0.6f;
-    private const int EmbankPoints = 6;
+    /// <summary>Embankments: their slope (metres out per metre down), the most they fill (metres; deeper: a bridge, left alone), the edge's anchor under the top of the land's contact on the road's side (metres).</summary>
+    private const float EmbankSlope = 1.5f, MaxFill = 10, EmbankAnchor = 0.3f, EdgeAnchor = 0f, Berm = 0.25f, UnderSlab = 0.6f;
+    /// <summary>A fill's shoulder: how far it carries the road's surface on before rounding into the slope (metres; the owner's profile).</summary>
+    private const float FillShoulder = 1;
+    /// <summary>How far before and after the corner between a fill's shoulder and its face the rounding runs (metres).</summary>
+    private const float FillRounding = 0.6f;
+    /// <summary>
+    /// The rounded nose at the top of a steep fill face (the owner's sketch): points from the corner between the shoulder
+    /// and the face, as (along the shoulder, out from the face, down the face) in metres, the last one where the face
+    /// runs on back to its foot.
+    /// </summary>
+    private static readonly (float Along, float Out, float Down)[] Nose = [(-0.1f, 0, 0), (0.25f, 0, 0.17f), (0, 0.59f, 0.52f), (0, 0.71f, 1.17f), (0, 0.51f, 2.46f)];
+    /// <summary>How steep a fill face (its vertical over horizontal) starts getting the nose, and has all of it.</summary>
+    private const float NoseFrom = 1.5f, NoseFull = 4;
+    /// <summary>Over how many stations a fill's side changes from the rounded profile to the crest and back.</summary>
+    private const int CrestBlend = 5;
+    /// <summary>How far before and after the crest at a steep high edge its rounding runs (metres).</summary>
+    private const float CrestRound = 1.2f;
+    /// <summary>
+    /// A fill's face: how much steeper than the ground just outside the edge (radians), and the steepest it gets (metres
+    /// down per metre out; about upright).
+    /// </summary>
+    private const float FaceMargin = 10 * MathF.PI / 180, FaceSteepest = 20;
+    /// <summary>Where a fill's face starts, past its shoulder and rounding: how far out from the edge and how far under it (metres).</summary>
+    private const float FaceStart = 2 * FillShoulder, FaceTop = 0.3f;
+    /// <summary>How far a fill's bottom reaches down to the lowest ground under the road only where it banks less than this (the edges' height apart over their distance; about 30 degrees).</summary>
+    private const float LevelBank = 0.5f;
+    /// <summary>How deep the Dam fill profile reaches down to the ground at most (metres).</summary>
+    private const float MaxDam = 300;
+    /// <summary>
+    /// Steep banking's high edge (see HighEdgeTop): from about 45 degrees; the free space's start over the curb's top; the
+    /// fill's crest over the higher of the curb's top corners and out past the outer one (metres).
+    /// </summary>
+    private const float EnvelopBank = 0.7f, CurbClear = 0.03f, CrestOver = 0.5f, CrestOut = 0.2f;
+    /// <summary>The road slab's thickness under the driving surface (RoadMeshSettings.Thickness).</summary>
+    private const float SlabThickness = 0.5f;
     /// <summary>How much an embankment's weight may change from one station to the next.</summary>
     private const float WeightStep = 0.12f;
 
@@ -477,190 +640,561 @@ public static class BooleanSeam
     }
 
     /// <summary>
-    /// Beside each road (the owner's idea, step 3 of the plan): where the land just outside an edge lies lower than it
-    /// (at most MaxFill), an embankment from the edge (EmbankAnchor under the land's contact on the road's side) down at
-    /// EmbankSlope until it meets the ground, reaching in under the road (two sides make a dam); where it lies higher
-    /// (at most MaxCut), a cutting from the edge up at that slope until it comes out of the land. Section by section
-    /// (the rooms' stations), swept where consecutive stations agree; banked roads (edges far apart in height) and roads
-    /// not facing up get neither. Returns the embankments (to add) and the cuttings (to take away).
+    /// Embankments under each road (the owner's idea, step 3 of the plan): one continuous fill wherever the road runs over
+    /// land, from one edge's face under the road to the other's, its bottom 1 m under the lowest ground beneath it (a dam
+    /// under the road: where the land fell away under the road, a fill on one side alone stood out as a wedge). At each
+    /// edge (EmbankAnchor under the land's contact on the road's side) a shoulder carries the road's surface on
+    /// (FillShoulder), rounded into a face down into the ground, as steep as the ground there falls away (FillSide). Its
+    /// depth follows the ground station by station (smoothed); where the land is higher than an edge the fill shrinks
+    /// under the road there (the free spaces cut that land back). Where the ground lies deeper than the segment's fill
+    /// profile allows (FillDepthAt) the road is a bridge: no fill (the fills round it end there). Steep banking (except at
+    /// the high edge), curled edges and fast twist make a side smaller; roads not facing up get none. Returns the fills (to
+    /// add).
     /// </summary>
-    internal static (List<(List<Vector3>, List<int>)> Fills, List<(List<Vector3>, List<int>)> Cuts) Embankments(List<(Track Track, List<Vector3[]> Sections)> rooms, LandHeights land, List<float> debug)
+    internal static List<(List<Vector3> Positions, List<int> Indices, int SectionPoints)> Embankments(List<(Track Track, List<Vector3[]> Sections, List<float> Wall, List<float> FillDepth)> rooms, LandHeights land)
     {
-        var fills = new List<(List<Vector3>, List<int>)>();
-        var cuts = new List<(List<Vector3>, List<int>)>();
+        var fills = new List<(List<Vector3>, List<int>, int)>();
         const int deckMid = 1 + (StitchedTerrain.RoomDeckPoints - 1) / 2, rightRail = StitchedTerrain.RoomRailRight;
-        foreach (var (_, sections) in rooms)
-            foreach (var side in new[] { 0, rightRail })
+        foreach (var (_, sections, _, maxDepth) in rooms)
+        {
+            var n = sections.Count;
+            var left = FillSide.Of(sections, 0, land, maxDepth);
+            var right = FillSide.Of(sections, rightRail, land, maxDepth);
+            // A road along a hillside, one edge touching the land: its other edge is filled down to the ground however deep
+            // (straight down next to the road where the hillside falls away fast). A bridge is a road high over the ground
+            // on both sides; one over a valley still is.
+            for (var i = 0; i < n; i++)
+                foreach (var (side, other) in new[] { (left, right), (right, left) })
+                    if (other.Valid[i] && other.Depth[i] <= 1.001f && side.Valid[i] && !float.IsFinite(side.Depth[i]) && float.IsFinite(side.Hillside[i]))
+                    {
+                        side.Depth[i] = side.Hillside[i];
+                        if (side.HillsideUpright[i]) side.Face[i] = FaceSteepest;
+                    }
+            // A fill where both edges have one, and how low the ground lies under the road (its edges and middle; a little
+            // more than the profile allows at most).
+            var active = new bool[n];
+            var under = new float[n];
+            for (var i = 0; i < n; i++)
             {
-                // Per station: the edge's anchor, the way out, how far under the road a fill reaches, and how deep a fill
-                // or how high a cutting would go there (NaN: none possible); the kind the land asks for (0 none, 1 fill,
-                // 2 cut).
-                var n = sections.Count;
-                var anchor = new Vector3[n];
-                var outward = new Vector3[n];
-                var half = new float[n];
-                var fillDepth = new float[n];
-                var cutHeight = new float[n];
-                var kinds = new int[n];
-                var valid = new bool[n];
-                // How much of an embankment or cutting the road's shape there allows (1 a level road, fading to 0 as it
-                // banks or its side curls up into a wall: there the rail climbs and twists, and slopes from it came out
-                // in saw-teeth and chunks round tubes).
-                var weight = new float[n];
-                static float Fade(float from, float to, float x) { var t = Math.Clamp((x - from) / (to - from), 0, 1); return 1 - t * t * (3 - 2 * t); }
-                for (var i = 0; i < n; i++)
+                under[i] = float.NaN;
+                active[i] = left.Valid[i] && right.Valid[i] && float.IsFinite(left.Depth[i]) && float.IsFinite(right.Depth[i]);
+                if (!active[i]) continue;
+                var sec = sections[i];
+                foreach (var q in new[] { sec[1], sec[deckMid], sec[StitchedTerrain.RoomDeckPoints] })
                 {
-                    fillDepth[i] = cutHeight[i] = float.NaN;
-                    var sec = sections[i];
-                    Vector3 rail = sec[side], other = sec[side == 0 ? rightRail : 0], mid = sec[deckMid];
-                    var across = rail - other;
-                    if (across.LengthSquared() < 1) continue;
-                    // Facing up: the vault's top over the deck.
-                    if (sec[rightRail + 6].Y < mid.Y) continue;
-                    // A way out across the plan (a curled side's top rail still has one; a side curled right over not).
-                    var flat = new Vector3(across.X, 0, across.Z);
-                    if (flat.Length() < 0.3f * across.Length()) continue;
-                    outward[i] = Vector3.Normalize(flat);
-                    // Banking (a banked turn keeps its embankments; they fade only from about 58 to 76 degrees): the edges' height apart over their distance; curl: how far the surface at this edge turns
-                    // up (its last piece's direction, outwards).
-                    var edgeDir = side == 0 ? sec[1] - sec[2] : sec[StitchedTerrain.RoomDeckPoints] - sec[StitchedTerrain.RoomDeckPoints - 1];
-                    // (Against the road's own cross-section, the line between its rails: on a banked road the whole
-                    // surface is tilted, and its high edge rising in the world is no curl.)
-                    var curl = edgeDir.LengthSquared() > 1e-8f ? MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(edgeDir), Vector3.Normalize(across)), -1, 1)) : 0;
-                    weight[i] = MathF.Min(Fade(0.85f, 0.97f, MathF.Abs(across.Y) / across.Length()), Fade(1.2f, 1.9f, curl));
-                    // Twist: how fast the driving surface's edge rises or falls against the road's middle from the station
-                    // before, per metre along (a road rolling over). The surface's own edge, not the rail: where a curb
-                    // grows out of the edge the rail climbs by the curb's height on a level road, and was taken for a twist.
-                    if (i > 0)
-                    {
-                        var prev = sections[i - 1];
-                        var edge = side == 0 ? 1 : StitchedTerrain.RoomDeckPoints;
-                        var along = Vector3.Distance(sec[deckMid], prev[deckMid]);
-                        if (along > 1e-3f)
-                            weight[i] = MathF.Min(weight[i], Fade(0.25f, 0.5f, MathF.Abs((sec[edge].Y - sec[deckMid].Y) - (prev[edge].Y - prev[deckMid].Y)) / along));
-                    }
-                    // Under a curb's top (its outer face then holds the land), or, where the road has no curb (the rail is
-                    // the driving surface's own edge, near the deck's), just under that edge: 0.3 m down the slab's side
-                    // the land met it half way and left its edge standing out.
-                    var hasCurb = Vector3.Distance(rail, sec[side == 0 ? 1 : StitchedTerrain.RoomDeckPoints]) > 0.5f;
-                    anchor[i] = rail - Vector3.UnitY * (hasCurb ? EmbankAnchor : EdgeAnchor);
-                    half[i] = flat.Length() / 2 + 1;
-                    valid[i] = true;
+                    var g = land.Below(q.X, q.Z, q.Y);
+                    if (float.IsFinite(g)) under[i] = float.IsNaN(under[i]) ? g : MathF.Min(under[i], g);
                 }
-                // (Each anchor at its own station's edge, not smoothed along the road: the land is to meet the edge
-                // exactly, to be drivable.)
-                for (var i = 0; i < n; i++)
-                {
-                    if (!valid[i]) continue;
-                    var e = anchor[i];
-                    // Up from the edge until the slope comes out of the land.
-                    for (var t = 0.5f; t <= MaxCut * EmbankSlope; t += 0.5f)
-                    {
-                        var q = e + outward[i] * t;
-                        var landTop = land.Top(q.X, q.Z);
-                        if (float.IsNaN(landTop) || landTop <= e.Y + t / EmbankSlope) { cutHeight[i] = t / EmbankSlope + 1; break; }
-                    }
-                    // Down from the edge until the slope meets the ground.
-                    for (var t = 0f; t <= MaxFill * EmbankSlope; t += 0.5f)
-                    {
-                        var q = e + outward[i] * t;
-                        var ground = land.Below(q.X, q.Z, e.Y + 0.05f);
-                        if (float.IsNaN(ground)) break;
-                        if (ground >= e.Y - t / EmbankSlope) { fillDepth[i] = t / EmbankSlope + 1; break; }
-                    }
-                    var probe = e + outward[i] * 0.5f;
-                    var top = land.Top(probe.X, probe.Z);
-                    if (float.IsNaN(top)) continue;
-                    kinds[i] = top > e.Y + 0.05f ? (float.IsNaN(cutHeight[i]) ? 0 : 2) : (float.IsNaN(fillDepth[i]) ? 0 : 1);
-                }
-                // The weight changes slowly along the road: by at most WeightStep a station either way (a dip spreads to
-                // the stations round it). Low weight only flattens a piece; it never splits one: the two ends' ramps
-                // left a hump of land between them.
-                for (var i = 1; i < n; i++) weight[i] = MathF.Min(weight[i], weight[i - 1] + WeightStep);
-                for (var i = n - 2; i >= 0; i--) weight[i] = MathF.Min(weight[i], weight[i + 1] + WeightStep);
-                // Smoothed along the road: each station the kind most of the five round it ask for (its own on a tie),
-                // where that kind is possible there; then pieces shorter than three stations dropped.
-                var smooth = new int[n];
-                for (var i = 0; i < n; i++)
-                {
-                    Span<int> votes = stackalloc int[3];
-                    for (var k = Math.Max(0, i - 2); k <= Math.Min(n - 1, i + 2); k++) votes[kinds[k]]++;
-                    var best = kinds[i];
-                    for (var kind = 0; kind < 3; kind++) if (votes[kind] > votes[best]) best = kind;
-                    if (best == 1 && float.IsNaN(fillDepth[i]) || best == 2 && float.IsNaN(cutHeight[i])) best = 0;
-                    smooth[i] = best;
-                }
+                if (float.IsFinite(under[i])) under[i] = MathF.Max(under[i], sec[deckMid].Y - MathF.Min(maxDepth[i], MaxDam) - 1);
+            }
+            bool Valid(int k) => left.Valid[k] && right.Valid[k];
+            // Bridges and fills shorter than three stations go over to what is round them (a dip under a short bridge is
+            // filled at the depth round it; a short fill between bridges goes).
+            for (var pass = 0; pass < 2; pass++)
                 for (var i = 0; i < n;)
                 {
+                    if (!Valid(i)) { i++; continue; }
                     var j = i;
-                    while (j + 1 < n && smooth[j + 1] == smooth[i]) j++;
-                    if (smooth[i] != 0 && j - i + 1 < 3)
-                        for (var k = i; k <= j; k++) smooth[k] = 0;
+                    while (j + 1 < n && Valid(j + 1) && active[j + 1] == active[i]) j++;
+                    var bounded = i > 0 && Valid(i - 1) && j + 1 < n && Valid(j + 1);
+                    if (j - i + 1 < 3 && bounded && (pass == 1) == active[i])
+                        for (var k = i; k <= j; k++)
+                        {
+                            active[k] = !active[i];
+                            if (!active[k]) continue;
+                            foreach (var s in new[] { left, right })
+                                if (!float.IsFinite(s.Depth[k])) s.Depth[k] = MathF.Max(s.Depth[i - 1], s.Depth[j + 1]);
+                            if (!float.IsFinite(under[k])) under[k] = MathF.Min(under[i - 1], under[j + 1]);
+                        }
                     i = j + 1;
                 }
-                // Short gaps (up to three stations) between two pieces of the same kind bridged, their depth or height
-                // the straight line between the stations either side: the ramps of the two pieces' ends left a crease
-                // there.
-                for (var i = 1; i < n;)
+            // Smoothed along the road: each side as deep as the deepest of the five stations round it, the ground under the
+            // road the lowest of them (still reaching the ground everywhere, no steps).
+            var depthL = new float[n];
+            var depthR = new float[n];
+            var low = new float[n];
+            // (A station as deep as a neighbour going straight down goes straight down too: its own sloping face, made that
+            // deep, ran far out over the falling hillside and stood out of it as a wedge.)
+            var uprightL = new bool[n];
+            var uprightR = new bool[n];
+            for (var i = 0; i < n; i++)
+            {
+                if (!active[i]) continue;
+                float dl = left.Depth[i], dr = right.Depth[i], g = under[i];
+                bool ul = left.Face[i] >= FaceSteepest, ur = right.Face[i] >= FaceSteepest;
+                for (var k = Math.Max(0, i - 2); k <= Math.Min(n - 1, i + 2); k++)
                 {
-                    if (smooth[i] != 0 || smooth[i - 1] == 0) { i++; continue; }
-                    var j = i;
-                    while (j + 1 < n && smooth[j + 1] == 0) j++;
-                    var kind = smooth[i - 1];
-                    if (j + 1 < n && smooth[j + 1] == kind && j - i + 1 <= 3)
-                    {
-                        var amounts = kind == 1 ? fillDepth : cutHeight;
-                        float from = amounts[i - 1], to = amounts[j + 1];
-                        var bridged = true;
-                        for (var k = i; k <= j; k++) if (outward[k] == default) bridged = false;
-                        if (bridged && float.IsFinite(from) && float.IsFinite(to))
-                            for (var k = i; k <= j; k++)
-                            {
-                                smooth[k] = kind;
-                                amounts[k] = from + (to - from) * (k - i + 1) / (j - i + 2);
-                            }
-                    }
-                    i = j + 1;
+                    if (!active[k]) continue;
+                    if (left.Depth[k] > dl) (dl, ul) = (left.Depth[k], ul || left.Face[k] >= FaceSteepest);
+                    if (right.Depth[k] > dr) (dr, ur) = (right.Depth[k], ur || right.Face[k] >= FaceSteepest);
+                    if (float.IsFinite(under[k])) g = float.IsNaN(g) ? under[k] : MathF.Min(g, under[k]);
                 }
-                // Each piece: its depth or height its own station's (every station exact, not smoothed), ramped down to the
-                // edge over its first and last three stations, swept.
+                (depthL[i], depthR[i], low[i], uprightL[i], uprightR[i]) = (dl, dr, g, ul, ur);
+            }
+            for (var i = 0; i < n; i++)
+            {
+                if (uprightL[i]) left.Face[i] = FaceSteepest;
+                if (uprightR[i]) right.Face[i] = FaceSteepest;
+            }
+            // Each stretch of fill, swept; its ends bow in to the road's edges (see Bow): where the road stops allowing a
+            // fill (upside down, curled) and at a bridge. (Abutments carrying the end on along the road stood out of the
+            // land as wedges and blades wherever it fell away to the side.) The road's own ends stop with their section.
+            for (var i = 0; i < n;)
+            {
+                if (!active[i]) { i++; continue; }
+                var j = i;
+                while (j + 1 < n && active[j + 1]) j++;
+                var (from, to) = (i, j);
+                i = j + 1;
+                if (to - from < 1) continue;
+                bool Ramped(int k) => k >= 0 && k < n;
+                bool rampStart = Ramped(from - 1), rampEnd = Ramped(to + 1);
+                var polys = new List<Vector3[]>();
+                for (var k = from; k <= to; k++)
+                {
+                    var ramp = Bow(sections, k, from, to, rampStart, rampEnd, MathF.Max(depthL[k], depthR[k]), deckMid);
+                    var (underL, sideL) = left.Part(k, depthL[k], ramp);
+                    var (underR, sideR) = right.Part(k, depthR[k], ramp);
+                    // The bottom: under both feet and 1 m under the lowest ground beneath the road.
+                    var bottom = MathF.Min(sideL[^1].Y, sideR[^1].Y) - 0.5f;
+                    // (Only under a fairly level road: under one banked into a wall, "under the road" is the whole height
+                    // behind it, and the fill stood there as a block down to the ground that the free spaces cut into spikes.)
+                    var bank = sections[k][rightRail] - sections[k][0];
+                    if (float.IsFinite(low[k]) && MathF.Abs(bank.Y) < LevelBank * bank.Length()) bottom = MathF.Min(bottom, low[k] - 1);
+                    // (Bowing in at the ends, the bottom too rises to just under the road: kept at the lowest ground, the
+                    // body under the road ended as a square block.)
+                    var top = MathF.Min(underL.Y, underR.Y) - 0.5f;
+                    if (bottom < top) bottom = top + (bottom - top) * ramp;
+                    polys.Add([underL, .. sideL, sideL[^1] with { Y = bottom }, sideR[^1] with { Y = bottom }, .. sideR.Reverse(), underR]);
+                }
+                // (In overlapping pieces, as the free spaces: a long stretch could overlap itself.)
+                foreach (var piece in Pieces(polys, false)) { var (sp, si) = Sweep(piece); fills.Add((sp, si, polys[0].Length)); }
+            }
+            // Where only one edge can have a fill at all (the other one's way out turns under the road: a road banked into a
+            // wall, a curled side), that edge gets one of its own, reaching in under the road from it: the fill under the
+            // whole road needs both, and a wall's high edge stood bare.
+            // (So does the high edge of a road banked more than LevelBank where the road has no fill under it, its low edge
+            // high over the ground: the land hugs the wall's top. On a level road a fill on one side alone stood out as a
+            // wedge where the land fell away under the road.)
+            foreach (var (side, other, rail, otherRail) in new[] { (left, right, 0, rightRail), (right, left, rightRail, 0) })
                 for (var i = 0; i < n;)
                 {
-                    if (smooth[i] == 0) { i++; continue; }
+                    bool HighEdge(int k) { var across = sections[k][rail] - sections[k][otherRail]; return across.Y > LevelBank * across.Length(); }
+                    bool Alone(int k) => side.Valid[k] && float.IsFinite(side.Depth[k]) && (!other.Valid[k] || (!active[k] && HighEdge(k)));
+                    if (!Alone(i)) { i++; continue; }
                     var j = i;
-                    while (j + 1 < n && smooth[j + 1] == smooth[i]) j++;
-                    var kind = smooth[i];
-                    var amounts = kind == 1 ? fillDepth : cutHeight;
+                    while (j + 1 < n && Alone(j + 1)) j++;
+                    var (from, to) = (i, j);
+                    i = j + 1;
+                    // (One station on into a fill under the whole road either side, so that the two overlap.)
+                    bool Joins(int k) => k >= 0 && k < n && active[k] && side.Valid[k] && float.IsFinite(side.Depth[k]);
+                    if (Joins(from - 1)) from--;
+                    if (Joins(to + 1)) to++;
+                    if (to - from < 1) continue;
+                    var (first, last) = (from, to);
+                    // (Bowing in where it ends at a bridge or where the edge stops allowing a fill; where it runs on into a
+                    // fill under the whole road, or at the road's own end, not.)
+                    bool Bridge(int k) => k >= 0 && k < n && !Joins(k);
+                    bool bowStart = Bridge(first - 1), bowEnd = Bridge(last + 1);
+                    Vector3[] Section(int k, bool bowed = true)
+                    {
+                        var deepest = side.Depth[k];
+                        for (var m = Math.Max(first, k - 2); m <= Math.Min(last, k + 2); m++) deepest = MathF.Max(deepest, side.Depth[m]);
+                        var (behindSlab, part) = side.Part(k, deepest, bowed ? Bow(sections, k, first, last, bowStart, bowEnd, deepest, deckMid) : 1);
+                        // (In under the road by half its width seen from above, and 1 m: on a wall that is little, and the fill
+                        // does not reach down behind it.)
+                        var plan = sections[k][rightRail] - sections[k][0];
+                        plan.Y = 0;
+                        var reach = side.Anchor[k] + side.Inward[k] * (plan.Length() / 2 + 1) + side.Behind[k] * UnderSlab;
+                        var bottom = part[^1].Y - 0.5f;
+                        return [reach, behindSlab, .. part, part[^1] with { Y = bottom }, reach with { Y = bottom }];
+                    }
+                    // Where it ends at a bridge in a cliff (an end carried on down along the road would not find the ground on a
+                    // slope: the land under the wall a thin fin), the fill stops earlier, where it would (at most CliffTrim
+                    // stations), or there is none: a block of fill on a fin looked wrong however it ended.
+                    bool Cliff(int k, int inner) =>
+                        Abutment(Section(k, false), sections[k][deckMid] - sections[inner][deckMid], [SidePoints + 2, SidePoints + 3], land) is { Cliff: true };
+                    var dropped = false;
+                    if (bowStart)
+                    {
+                        var trim = 0;
+                        while (to - from >= 1 && Cliff(from, from + 1) && trim++ < CliffTrim) from++;
+                        dropped |= to - from < 1 || Cliff(from, from + 1);
+                    }
+                    if (bowEnd && !dropped)
+                    {
+                        var trim = 0;
+                        while (to - from >= 1 && Cliff(to, to - 1) && trim++ < CliffTrim) to--;
+                        dropped |= to - from < 1 || Cliff(to, to - 1);
+                    }
+                    if (dropped) continue;
+                    (first, last) = (from, to);
                     var polys = new List<Vector3[]>();
-                    for (var k = i; k <= j; k++)
-                    {
-                        var amount = MathF.Max(0, amounts[k]);
-                        // Ramped over the piece's ends: as long along the road as its slope reaches out, and 2 m more.
-                        // (By distance along the road: the road's rings are not evenly spaced.)
-                        var fromEnd = MathF.Min(Vector3.Distance(sections[k][deckMid], sections[i][deckMid]), Vector3.Distance(sections[k][deckMid], sections[j][deckMid]));
-                        var ramp = MathF.Min(1, (fromEnd + 1) / (amount * EmbankSlope + 2));
-                        // Less of it (the ramps at a piece's ends, a banked or curling road): the slope starts nearer the
-                        // ground (lower for a fill, higher for a cutting) and still reaches it, at the same slope; none
-                        // at all at the ground itself.
-                        var f = ramp * weight[k];
-                        // (A cutting shrinks to nothing as f does: a box of its least size at its ends notched the land.)
-                        var a = kind == 1 ? (amount - 1) * f + 1 : MathF.Max(0.05f, amount * f);
-                        var shift = (amount - 1) * (1 - f);
-                        Vector3 o = outward[k], u = Vector3.UnitY;
-                        var e = anchor[k] + (kind == 1 ? -u : u) * shift;
-                        // (A level strip of Berm before the slope: the land flush with the edge where it is seen.)
-                        var berm = o * (Berm * f);
-                        polys.Add(kind == 1
-                            // (Inside the edge it drops under the slab at once before reaching in under the road: level with the
-                            // edge it stood over the driving surface of a banked or curved road and poked through.)
-                            ? [e - o * half[k] - u * UnderSlab, e - o * 0.02f - u * UnderSlab, e, e + berm, e + berm + o * (a * EmbankSlope) - u * a, e - o * half[k] - u * MathF.Max(a + 1, UnderSlab + 0.5f)]
-                            : [e - o * f, e, e + berm, e + berm + o * (a * EmbankSlope) + u * a, e + berm + o * (a * EmbankSlope) + u * (a + 2 * f + 0.05f), e - o * f + u * (a + 2 * f + 0.05f)]);
-                    }
-                    (kind == 1 ? fills : cuts).Add(Sweep(polys));
-                    i = j + 1;
+                    for (var k = from; k <= to; k++) polys.Add(Section(k));
+                    foreach (var piece in Pieces(polys, false)) { var (sp, si) = Sweep(piece); fills.Add((sp, si, polys[0].Length)); }
+                }
+        }
+        return fills;
+    }
+
+    /// <summary>How far an abutment runs on along the road at most before it drops straight down instead (metres).</summary>
+    private const float AbutmentReach = 20;
+    /// <summary>How many stations a one-sided fill may be shortened by at most so that its abutment finds the ground on a slope.</summary>
+    private const int CliffTrim = 12;
+
+    /// <summary>How long a fill's end bows in at least (metres).</summary>
+    private const float BowLength = 8;
+
+    /// <summary>
+    /// How much of a fill's side a station of a stretch (from..to) has where the stretch's ends bow in (start, end: which
+    /// do): rising from nothing at the end along a quarter circle, whole once as far from it as the fill is deep at
+    /// EmbankSlope (and 2 m), at least BowLength, so that its end is rounded in to the road's edge seen from above (the owner's idea; an
+    /// abutment carried on along the road stood out of falling land).
+    /// </summary>
+    private static float Bow(List<Vector3[]> sections, int k, int from, int to, bool start, bool end, float depth, int mid)
+    {
+        var length = MathF.Max(BowLength, (float.IsFinite(depth) ? depth : 1) * EmbankSlope + 2);
+        var r = 1f;
+        if (start) r = MathF.Min(r, Vector3.Distance(sections[k][mid], sections[from][mid]) / length);
+        if (end) r = MathF.Min(r, Vector3.Distance(sections[k][mid], sections[to][mid]) / length);
+        r = Math.Clamp(r, 0, 1);
+        return MathF.Sqrt(1 - (1 - r) * (1 - r));
+    }
+
+    /// <summary>
+    /// An abutment: a fill's end section carried on along the road (along: out of the fill, levelled) and down at
+    /// EmbankSlope, each of its points until it meets the ground under it (its end follows the terrain: carried on as a
+    /// whole until its top met the lowest ground under any of it, an abutment ran far out over a hillside falling away to
+    /// one side and stood out of it as a wedge). A point that does not meet the ground within AbutmentReach (a cliff) drops
+    /// straight down to the ground under it instead (Cliff: the highest point did). Its bottom points (bottom: their
+    /// indices) go with their neighbours on the section, 1 m under them. Null
+    /// where there is no ground under it at all.
+    /// </summary>
+    private static ((List<Vector3>, List<int>, int) Solid, bool Cliff)? Abutment(Vector3[] end, Vector3 along, int[] bottom, LandHeights land)
+    {
+        along.Y = 0;
+        if (along.LengthSquared() < 1e-6f) return null;
+        along = Vector3.Normalize(along);
+        var carried = new Vector3[end.Length];
+        var lowest = float.NaN;
+        var highest = 0;
+        for (var j = 1; j < end.Length; j++) if (end[j].Y > end[highest].Y) highest = j;
+        var cliff = false;
+        for (var j = 0; j < end.Length; j++)
+        {
+            if (bottom.Contains(j)) continue;
+            var q = end[j];
+            var met = float.NaN;
+            for (var t = 0.5f; t <= AbutmentReach; t += 0.5f)
+            {
+                var at = q + along * t - Vector3.UnitY * (t / EmbankSlope);
+                var g = land.Below(at.X, at.Z, q.Y + 0.05f);
+                if (float.IsFinite(g)) lowest = float.IsNaN(lowest) ? g : MathF.Min(lowest, g);
+                if (float.IsFinite(g) && at.Y <= g) { met = t; break; }
+            }
+            if (float.IsFinite(met))
+            {
+                carried[j] = q + along * met - Vector3.UnitY * (met / EmbankSlope);
+                continue;
+            }
+            if (j == highest) cliff = true;
+            carried[j] = new Vector3(float.NaN);
+        }
+        // Points that met no ground: where the highest one did not (a cliff), straight down to the ground under each;
+        // otherwise they end next to where they start (the rest of the abutment on the ground; dropped straight down, a
+        // point at the edge of a thin fin stood out of its falling side as a wedge).
+        for (var j = 0; j < end.Length; j++)
+        {
+            if (bottom.Contains(j) || !float.IsNaN(carried[j].X)) continue;
+            var q = end[j];
+            if (!cliff) { carried[j] = q + along * 0.25f - Vector3.UnitY * 0.25f; continue; }
+            var under = land.Below(q.X, q.Z, q.Y + 0.05f);
+            if (float.IsNaN(under)) return null;
+            lowest = float.IsNaN(lowest) ? under : MathF.Min(lowest, under);
+            carried[j] = q with { Y = MathF.Min(q.Y - 0.5f, under - 1) };
+        }
+        if (float.IsNaN(lowest)) return null;
+        // Each bottom point goes with its neighbour on the section (the foot over it, or the point in under the road), as
+        // far along and 1 m under where that one ended, which is at or under the ground there. (All of them as far as the
+        // farthest point and under the lowest ground sampled anywhere, an abutment on a thin fin stood out of its side as
+        // a wedge down to the valley floor.)
+        foreach (var k in bottom)
+        {
+            var pair = !bottom.Contains((k + end.Length - 1) % end.Length) ? (k + end.Length - 1) % end.Length : (k + 1) % end.Length;
+            var shift = carried[pair] - end[pair];
+            shift.Y = 0;
+            carried[k] = (end[k] + shift) with { Y = MathF.Min(end[k].Y, carried[pair].Y) - 1 };
+        }
+        var (positions, indices) = Sweep([end, carried]);
+        return ((positions, indices, end.Length), cliff);
+    }
+
+    /// <summary>One edge of a road's stations, for its fill: where the fill starts, which way it goes out, how steep its face is and how deep it reaches.</summary>
+    private sealed class FillSide
+    {
+        public bool[] Valid = [];
+        public Vector3[] Anchor = [], Outward = [], Shoulder = [], Inward = [], Behind = [];
+        public float[] Weight = [], Face = [], Depth = [];
+        /// <summary>How deep the fill would reach however deep the ground (for a road along a hillside; see Embankments), and whether its face goes straight down.</summary>
+        public float[] Hillside = [];
+        public bool[] HillsideUpright = [];
+        /// <summary>The high edge of a steeply banked road: its curb's inner and outer top corners (the fill covers the curb's top from the inner one).</summary>
+        public (Vector3 Inner, Vector3 Outer)?[] CurbTop = [];
+        /// <summary>How much of the crest profile a station with a curb top takes: rising over CrestBlend stations from where the crest starts or ends, so that the side changes over smoothly (at once, the change stood as an edge).</summary>
+        public float[] CrestWeight = [];
+
+        public static FillSide Of(List<Vector3[]> sections, int side, LandHeights land, List<float> maxDepth)
+        {
+            const int deckMid = 1 + (StitchedTerrain.RoomDeckPoints - 1) / 2, rightRail = StitchedTerrain.RoomRailRight;
+            var n = sections.Count;
+            var s = new FillSide
+            {
+                Valid = new bool[n], Anchor = new Vector3[n], Outward = new Vector3[n], Shoulder = new Vector3[n],
+                Inward = new Vector3[n], Behind = new Vector3[n], Weight = new float[n], Face = new float[n], Depth = new float[n],
+                Hillside = new float[n], HillsideUpright = new bool[n],
+                CurbTop = new (Vector3, Vector3)?[n],
+                CrestWeight = new float[n],
+            };
+            Array.Fill(s.Face, 1 / EmbankSlope);
+            Array.Fill(s.Depth, float.NaN);
+            Array.Fill(s.Hillside, float.NaN);
+            static float Fade(float from, float to, float x) { var t = Math.Clamp((x - from) / (to - from), 0, 1); return 1 - t * t * (3 - 2 * t); }
+            for (var i = 0; i < n; i++)
+            {
+                var sec = sections[i];
+                Vector3 rail = sec[side], other = sec[side == 0 ? rightRail : 0], mid = sec[deckMid];
+                var across = rail - other;
+                if (across.LengthSquared() < 1) continue;
+                // Facing up: the vault's top over the deck.
+                if (sec[rightRail + 6].Y < mid.Y) continue;
+                // A way out across the plan (a curled side's top rail still has one; a side curled right over not). The high
+                // edge of a banked road (up to a wall): out is also away from the side driven on (behind the road), which
+                // stays level however steep it banks; the land hugs the wall up to its top edge. (The low edge's way out turns
+                // down under the road: as before.)
+                var flat = new Vector3(across.X, 0, across.Z);
+                var high = across.Y > 0.3f * across.Length();
+                var openSide = sec[rightRail + (sec.Length - rightRail) / 2] - mid;
+                if (high && openSide.LengthSquared() > 1e-6f)
+                {
+                    var back = -Vector3.Normalize(openSide);
+                    var way = flat / across.Length() + new Vector3(back.X, 0, back.Z);
+                    if (way.Length() < 0.3f) continue;
+                    s.Outward[i] = Vector3.Normalize(way);
+                }
+                else
+                {
+                    if (flat.Length() < 0.3f * across.Length()) continue;
+                    s.Outward[i] = Vector3.Normalize(flat);
+                }
+                // Banking (fading from about 58 to 76 degrees, not at the high edge): the edges' height apart over their
+                // distance; curl: how far the surface at this edge turns up (its last piece's direction, outwards), against
+                // the road's own cross-section (on a banked road the whole surface is tilted, and its high edge rising in the
+                // world is no curl).
+                var edgeDir = side == 0 ? sec[1] - sec[2] : sec[StitchedTerrain.RoomDeckPoints] - sec[StitchedTerrain.RoomDeckPoints - 1];
+                var curl = edgeDir.LengthSquared() > 1e-8f ? MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(edgeDir), Vector3.Normalize(across)), -1, 1)) : 0;
+                s.Weight[i] = MathF.Min(high ? 1 : Fade(0.85f, 0.97f, MathF.Abs(across.Y) / across.Length()), Fade(1.2f, 1.9f, curl));
+                // Twist: how fast the driving surface's edge rises or falls against the road's middle from the station before,
+                // per metre along (a road rolling over). The surface's own edge, not the rail: where a curb grows out of the
+                // edge the rail climbs by the curb's height on a level road, and was taken for a twist.
+                if (i > 0)
+                {
+                    var prev = sections[i - 1];
+                    var edge = side == 0 ? 1 : StitchedTerrain.RoomDeckPoints;
+                    var along = Vector3.Distance(sec[deckMid], prev[deckMid]);
+                    if (along > 1e-3f)
+                        s.Weight[i] = MathF.Min(s.Weight[i], Fade(0.25f, 0.5f, MathF.Abs((sec[edge].Y - sec[deckMid].Y) - (prev[edge].Y - prev[deckMid].Y)) / along));
+                }
+                // Under a curb's top (its outer face then holds the land), or, where the road has no curb (the rail is the
+                // driving surface's own edge, near the deck's), just under that edge: 0.3 m down the slab's side the land met
+                // it half way and left its edge standing out.
+                var hasCurb = Vector3.Distance(rail, sec[side == 0 ? 1 : StitchedTerrain.RoomDeckPoints]) > 0.5f;
+                s.Anchor[i] = rail - Vector3.UnitY * (hasCurb ? EmbankAnchor : EdgeAnchor);
+                s.Inward[i] = -Vector3.Normalize(across);
+                s.CurbTop[i] = HighEdgeTop(sec, side);
+                s.Behind[i] = openSide.LengthSquared() > 1e-6f ? -Vector3.Normalize(openSide - s.Inward[i] * Vector3.Dot(openSide, s.Inward[i])) : -Vector3.UnitY;
+                if (!float.IsFinite(s.Behind[i].X)) s.Behind[i] = -Vector3.UnitY;
+                // The shoulder carries the road's surface on outwards (level where that runs down: a low edge).
+                var on = -s.Inward[i];
+                s.Shoulder[i] = on.Y >= 0 && new Vector3(on.X, 0, on.Z).Length() > 0.3f ? on : s.Outward[i];
+                s.Valid[i] = true;
+                // The face: as steep as the ground falls away just outside the edge (from 2 to 10 m out) and FaceMargin more,
+                // at least EmbankSlope, at most upright (FaceSteepest): on a steep hillside a 1:1.5 slope met the ground only
+                // far out and stood out of it as a shelf; this way the fill hugs the road.
+                var e = s.Anchor[i];
+                Vector3 near = e + s.Outward[i] * 2, far = e + s.Outward[i] * 10;
+                float g2 = land.Below(near.X, near.Z, e.Y + 0.05f), g10 = land.Below(far.X, far.Z, e.Y + 0.05f);
+                if (float.IsFinite(g2) && float.IsFinite(g10))
+                {
+                    var angle = MathF.Atan((g2 - g10) / 8) + FaceMargin;
+                    s.Face[i] = angle >= MathF.Atan(FaceSteepest) ? FaceSteepest : MathF.Max(1 / EmbankSlope, MathF.Tan(angle));
                 }
             }
-        return (fills, cuts);
+            // The weight changes slowly along the road: by at most WeightStep a station either way (a dip spreads to the
+            // stations round it); the face's steepness is the mean of the five stations round each.
+            for (var i = 1; i < n; i++) s.Weight[i] = MathF.Min(s.Weight[i], s.Weight[i - 1] + WeightStep);
+            for (var i = n - 2; i >= 0; i--) s.Weight[i] = MathF.Min(s.Weight[i], s.Weight[i + 1] + WeightStep);
+            var face = new float[n];
+            for (var i = 0; i < n; i++)
+            {
+                float sum = 0, count = 0;
+                for (var k = Math.Max(0, i - 2); k <= Math.Min(n - 1, i + 2); k++)
+                    if (s.Valid[k]) { sum += s.Face[k]; count++; }
+                face[i] = count > 0 ? sum / count : 1 / EmbankSlope;
+            }
+            s.Face = face;
+            // The crest's blend: by stations to the nearest one without a curb top, eased.
+            for (var i = 0; i < n; i++)
+            {
+                if (s.CurbTop[i] is null) continue;
+                var gap = CrestBlend;
+                for (var d = 1; d < CrestBlend; d++)
+                    if (i - d < 0 || s.CurbTop[i - d] is null || i + d >= n || s.CurbTop[i + d] is null) { gap = d; break; }
+                var x = (float)gap / CrestBlend;
+                s.CrestWeight[i] = x * x * (3 - 2 * x);
+            }
+            // How deep: down the face (from its top, past the shoulder and the rounding) until it meets the ground, and 1 m
+            // into it, as far as the segment's fill profile allows (deeper: NaN, a bridge); land higher than the edge just
+            // outside it: the least fill. (From the edge itself, a steep face found the land still high under the road at
+            // once, and its fill hung in the air where the hillside fell away under it.)
+            for (var i = 0; i < n; i++)
+            {
+                // (The None fill profile: never a fill.)
+                if (!s.Valid[i] || maxDepth[i] < 0.5f) continue;
+                var e = s.Anchor[i];
+                var probe = e + s.Outward[i] * 0.5f;
+                var top = land.Top(probe.X, probe.Z);
+                if (float.IsFinite(top) && top > e.Y + 0.05f) { s.Depth[i] = 1; continue; }
+                // A bridge where the ground right next to the edge (where the face starts) lies deeper than the segment's
+                // fill profile allows; otherwise the fill reaches as deep as its face needs to meet the ground (Reach). The
+                // same down to any depth (Hillside): for a road along a hillside, its other edge touching the land.
+                (s.Depth[i], var upright) = Reach(i, MathF.Min(maxDepth[i], MaxDam));
+                // (Hillside: straight down next to the road to the ground there, however deep; followed down the face, it met
+                // a falling hillside tens of metres deep.)
+                var beside = e + s.Outward[i] * FaceStart;
+                var under = land.Below(beside.X, beside.Z, e.Y + 0.05f);
+                if (float.IsFinite(under) && e.Y - under <= MaxDam) (s.Hillside[i], s.HillsideUpright[i]) = (e.Y - under + 1, true);
+                if (upright) s.Face[i] = FaceSteepest;
+            }
+            return s;
+
+            (float Depth, bool Upright) Reach(int i, float limit)
+            {
+                var e = s.Anchor[i];
+                var start = e + s.Outward[i] * FaceStart;
+                var next = land.Below(start.X, start.Z, e.Y + 0.05f);
+                if (float.IsFinite(next) && e.Y - next > limit) return (float.NaN, false);
+                for (var t = FaceStart; (t - FaceStart) * s.Face[i] <= limit; t += 0.5f)
+                {
+                    var q = e + s.Outward[i] * t;
+                    var ground = land.Below(q.X, q.Z, e.Y + 0.05f);
+                    // (No land under the edge's height there: either it rises over it (the least fill, as next to the edge)
+                    // or there is none at all.)
+                    if (float.IsNaN(ground)) return land.Top(q.X, q.Z) > e.Y ? (1, false) : (float.NaN, false);
+                    if (ground >= e.Y - FaceTop - (t - FaceStart) * s.Face[i]) return (MathF.Max(0, e.Y - ground) + 1, false);
+                }
+                // Not met within that (a hillside falling away faster than the face): straight down next to the road to the
+                // ground there, filling only the gap between the road and the hillside beside it (followed down, the face
+                // met it tens of metres deep).
+                return float.IsFinite(next) ? (e.Y - next + 1, true) : (float.NaN, false);
+            }
+        }
+
+        /// <summary>
+        /// This edge's part of a fill's section (amount: its depth; ramp: how much of it, at a stretch's ramped ends): the
+        /// point behind the slab under the edge (where the section runs on under the road), and from the edge out: the
+        /// shoulder carrying the road's surface on (FillShoulder, less as the side fades), rounded into the face, the face's
+        /// foot (a under the anchor). At the high edge of a steep bank: over the curb's top from its inner corner to a crest
+        /// CrestOver over the higher of its top corners and CrestOut past the outer one, and down at EmbankSlope (the owner's
+        /// profile).
+        /// </summary>
+        public (Vector3 Under, Vector3[] Side) Part(int k, float amount, float ramp)
+        {
+            var f = MathF.Max(0.05f, ramp * Weight[k]);
+            var a = (MathF.Max(1, amount) - 1) * f + 1;
+            Vector3 o = Outward[k], u = Vector3.UnitY;
+            var e = Anchor[k] - u * ((MathF.Max(1, amount) - 1) * (1 - f));
+            var behindSlab = e + Inward[k] * 0.02f + Behind[k] * UnderSlab;
+            Vector3[]? crestSide = null;
+            if (CurbTop[k] is { } top)
+            {
+                var crest = top.Outer + o * CrestOut + u * (MathF.Max(top.Inner.Y - top.Outer.Y, 0) + CrestOver);
+                var slope = Vector3.Normalize(o * EmbankSlope - u);
+                var drop = crest.Y - e.Y + a;
+                var crestFoot = crest + o * (drop * EmbankSlope) - u * drop;
+                // (As many points as the rounded side below, so that both can follow each other along one fill; where the
+                // fill's end bows in, shrunk towards the curb's inner corner with it.)
+                Vector3 In(Vector3 q) => top.Inner + (q - top.Inner) * f;
+                // The crest itself rounded (the owner's wish): a curve from CrestRound before it, over it, to as far down
+                // the slope, its control a little over the crest so that the curve still clears the curb's top.
+                var rise = crest - top.Inner;
+                var before = crest - (rise.LengthSquared() > 1e-6f ? Vector3.Normalize(rise) : o) * MathF.Min(CrestRound, rise.Length() * 0.8f);
+                var after = crest + slope * CrestRound;
+                var control = crest + u * (CrestRound * 0.25f);
+                Vector3 Over(float q) => (1 - q) * (1 - q) * before + 2 * q * (1 - q) * control + q * q * after;
+                crestSide = [top.Inner, In(before), In(Over(1 / 3f)), In(Over(2 / 3f)), In(after),
+                    In(Vector3.Lerp(after, crestFoot, 0.5f)), In(crestFoot)];
+                if (CrestWeight[k] >= 1) return (behindSlab, crestSide);
+            }
+            var down = Vector3.Normalize(o - u * Face[k]);
+            var sh = Vector3.Normalize(Shoulder[k]);
+            // The corner where the shoulder meets the face, rounded (the owner's profiles; one cut corner stood out from an
+            // upright wall as a ledge). On a gentle face a curve from FillRounding before the corner to as far down the
+            // face; on a steep one a rounded nose standing out over the face below it (Nose), the face running back from
+            // it to its foot; in between, blended.
+            var corner = e + Shoulder[k] * (FillShoulder * f);
+            var t = FillRounding * f;
+            Vector3 from = corner - sh * t, to = corner + down * t;
+            Vector3 Round(float q) => (1 - q) * (1 - q) * from + 2 * q * (1 - q) * corner + q * q * to;
+            Vector3[] round = [from, Round(0.25f), Round(0.5f), Round(0.75f), to];
+            var outward = sh - down * Vector3.Dot(sh, down);
+            outward = outward.LengthSquared() > 1e-6f ? Vector3.Normalize(outward) : o;
+            var steep = Math.Clamp((Face[k] - NoseFrom) / (NoseFull - NoseFrom), 0, 1);
+            for (var j = 0; j < round.Length; j++)
+            {
+                var (along, outOf, downOf) = Nose[j];
+                var nose = corner + (sh * along + outward * outOf + down * downOf) * f;
+                round[j] = Vector3.Lerp(round[j], nose, steep);
+            }
+            // Down the face to the fill's depth (a under the anchor), at least a little: on the face's line from the corner.
+            var depthY = e.Y - a;
+            var foot = corner + down * (MathF.Max(0, corner.Y - depthY) / -down.Y);
+            if (foot.Y > round[^1].Y - 0.1f) foot = round[^1] + down * 0.1f;
+            Vector3[] side = [e, .. round, foot];
+            // (Where the crest starts or ends along the road, blended from the rounded side into it point by point.)
+            if (crestSide is not null)
+                for (var j = 0; j < side.Length; j++) side[j] = Vector3.Lerp(side[j], crestSide[j], CrestWeight[k]);
+            return (behindSlab, side);
+        }
+    }
+
+    /// <summary>How many points one side of a fill's section has (see FillSide.Part).</summary>
+    private const int SidePoints = 7;
+
+    /// <summary>How many sections a swept piece of free space or fill spans, and how many it shares with the next.</summary>
+    private const int PieceSections = 16, PieceOverlap = 2;
+
+    /// <summary>
+    /// Sections along a road in pieces of PieceSections + 1, each sharing PieceOverlap + 1 with the next (round: the last
+    /// ones run on past the first section). A piece is too short to overlap itself, so each makes a valid solid; the
+    /// boolean takes overlapping solids (subtracted or added one by one) as they are, while one solid overlapping itself
+    /// (a road passing near itself) left the land in the overlap uncut.
+    /// </summary>
+    internal static IEnumerable<List<Vector3[]>> Pieces(List<Vector3[]> sections, bool round)
+    {
+        var count = round ? sections.Count - 1 : sections.Count;
+        if (count < 2) yield break;
+        const int step = PieceSections - PieceOverlap;
+        if (!round)
+        {
+            for (var start = 0; ; start += step)
+            {
+                var end = Math.Min(start + PieceSections, count - 1);
+                yield return sections.GetRange(start, end - start + 1);
+                if (end == count - 1) yield break;
+            }
+        }
+        for (var start = 0; start < count; start += step)
+            yield return [.. Enumerable.Range(start, Math.Min(PieceSections, count) + 1).Select(k => sections[k % count])];
     }
 
     /// <summary>Sections (each the same number of points, a closed outline) swept into a closed solid, its ends fans round their middles, facing out.</summary>
@@ -738,7 +1272,7 @@ public static class BooleanSeam
             if (true)
                 for (var j = 0; j < sectionPoints; j++) Line(positions[k * sectionPoints + j], positions[k * sectionPoints + (j + 1) % sectionPoints]);
             if (k + 1 < sections)
-                foreach (var j in sectionPoints < 12 ? Enumerable.Range(0, sectionPoints).ToArray() : new[] { 0, (sectionPoints - 12) / 2, sectionPoints - 12, sectionPoints - 6 })
+                foreach (var j in sectionPoints <= 2 * SidePoints + 4 ? Enumerable.Range(0, sectionPoints).ToArray() : new[] { 0, (sectionPoints - 12) / 2, sectionPoints - 12, sectionPoints - 6 })
                     Line(positions[k * sectionPoints + j], positions[(k + 1) * sectionPoints + j]);
         }
     }
@@ -938,7 +1472,7 @@ public static class BooleanSeam
             var rooms = StitchedTerrain.RoomSections(grid, map, FreeUnder);
             foreach (var (fp, fi) in FreeSpaces(rooms))
             {
-                var sectionPoints = StitchedTerrain.RoomSectionPoints;
+                var sectionPoints = StitchedTerrain.RoomRailRight + 1 + VaultPoints;
                 var sectionCount = fp.Count / sectionPoints;
                 using var made2 = ManifoldLib.Solid.Of(ToMesh(fp, fi, Land));
                 DrawVolume(volumeLines, fp, sectionPoints, sectionCount, made2.Status == ManifoldLib.Error.NoError ? 10 : 11);
@@ -957,24 +1491,22 @@ public static class BooleanSeam
                 freeIds.Add((uint)pit.OriginalId);
                 solids.Add(pit);
             }
-            // Embankments and cuttings beside the roads (land added up to a road's edge, or cut down to it).
+            // Embankments beside the roads (land added up to a road's edge; land over it the free spaces cut back).
             var fillIds = new HashSet<uint>();
-            var cutIds = new HashSet<uint>();
             if (Environment.GetEnvironmentVariable("TMSPLINE_BOOL_EMBANK") != "off")
             {
                 var heights = new LandHeights(mesh);
-                var (fills, cuts) = Embankments(RoadStations(map, quality), heights, volumeLines);
+                var fills = Embankments(RoadStations(map, quality), heights);
                 var fillSolids = new List<ManifoldLib.Solid>();
-                foreach (var (kind, list, ids, lineKind) in new[] { (0, fills, fillIds, 12), (1, cuts, cutIds, 13) })
-                    foreach (var (ep, ei) in list)
-                    {
-                        using var madeE = ManifoldLib.Solid.Of(ToMesh(ep, ei, Land));
-                        DrawVolume(volumeLines, ep, EmbankPoints, (ep.Count - 2) / EmbankPoints, madeE.Status == ManifoldLib.Error.NoError ? lineKind : 11);
-                        if (madeE.Status != ManifoldLib.Error.NoError) continue;
-                        var e = madeE.AsOriginal();
-                        ids.Add((uint)e.OriginalId);
-                        if (kind == 0) fillSolids.Add(e); else solids.Add(e);
-                    }
+                foreach (var (ep, ei, sectionPoints) in fills)
+                {
+                    using var madeE = ManifoldLib.Solid.Of(ToMesh(ep, ei, Land));
+                    DrawVolume(volumeLines, ep, sectionPoints, (ep.Count - 2) / sectionPoints, madeE.Status == ManifoldLib.Error.NoError ? 12 : 11);
+                    if (madeE.Status != ManifoldLib.Error.NoError) continue;
+                    var e = madeE.AsOriginal();
+                    fillIds.Add((uint)e.OriginalId);
+                    fillSolids.Add(e);
+                }
                 if (fillSolids.Count > 0)
                 {
                     // The land with its embankments, as one (each keeps its id).
@@ -983,7 +1515,7 @@ public static class BooleanSeam
                     if (grown.Status == ManifoldLib.Error.NoError) solids[0] = grown;
                     else { Console.WriteLine($"  [boolean] the embankments could not be added ({grown.Status})"); grown.Dispose(); }
                 }
-                Time($"embankments: {fillIds.Count} fills, {cutIds.Count} cuttings");
+                Time($"embankments: {fillIds.Count} fills");
             }
             LastVolumes = [.. volumeLines];
             Time($"solids: land {ground.Triangles} triangles (genus {ground.Genus}), {roadCount} roads, {freeIds.Count} free spaces");
@@ -1018,7 +1550,7 @@ public static class BooleanSeam
             {
                 // (The free spaces' faces left are walls of land cut away: the land's.)
                 var id = output.RunOriginalId[r];
-                var isLand = id == landId || freeIds.Contains(id) || fillIds.Contains(id) || cutIds.Contains(id);
+                var isLand = id == landId || freeIds.Contains(id) || fillIds.Contains(id);
                 for (var t = (int)output.RunIndex[r]; t + 2 < (int)output.RunIndex[r + 1]; t += 3)
                 {
                     if (!isLand) { fromRoads++; continue; }
