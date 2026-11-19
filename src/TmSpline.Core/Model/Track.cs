@@ -33,6 +33,18 @@ public enum BorderMaterial
     Plastic,
 }
 
+/// <summary>What the road slab's underside and plain side walls are made of (its physics too, driven on upside down).</summary>
+public enum UndersideMaterial
+{
+    /// <summary>Near-black matte concrete, like the native roads.</summary>
+    Concrete,
+    PlatformTech,
+    PlatformDirt,
+    PlatformGrass,
+    PlatformIce,
+    PlatformPlastic,
+}
+
 /// <summary>Gameplay effect of a segment's driving surface (NadeoImporter GameplayId).</summary>
 /// <remarks>Names are the NadeoImporter GameplayId values.</remarks>
 public enum Effect
@@ -190,9 +202,11 @@ public sealed class TrackSegment
     public BorderMaterial BorderMaterial { get; set; } = BorderMaterial.Rubber;
     /// <summary>
     /// Whether the road slab is closed below (underside and side walls). Off saves about half the triangles where the
-    /// road is never seen from below.
+    /// road is never seen from below. (The land then is its floor: RoadMeshSettings.LandSolids.)
     /// </summary>
     public bool Underside { get; set; } = true;
+    /// <summary>The material of the slab's underside, plain side walls and end caps.</summary>
+    public UndersideMaterial UndersideMaterial { get; set; }
     /// <summary>
     /// The game's item color for this segment's pieces (works on our items, checked in game with tools/ColorLook).
     /// Default keeps each material's own look, e.g. the yellow plastic.
@@ -478,7 +492,7 @@ public sealed class Track
 
     private static TrackSegment Clone(TrackSegment s) => new()
     {
-        Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
+        Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, UndersideMaterial = s.UndersideMaterial, Color = s.Color,
         Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
         Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail, BumpSeed = s.BumpSeed,
         Signs = s.Signs, SignSide = s.SignSide, SignSpacing = s.SignSpacing, SignColor = s.SignColor,

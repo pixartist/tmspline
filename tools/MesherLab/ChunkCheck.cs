@@ -4,8 +4,9 @@ using TmSpline.Core.Geometry;
 using TmSpline.Core.Model;
 
 /// <summary>
-/// Whether chunks of the voxel terrain built on their own (TerrainMeshBuilder.BuildChunks, as after a dab of the
-/// brush) come out as in the whole: the same triangles, so they meet the chunks beside them. And how long that takes.
+/// How chunks of the terrain built on their own (TerrainMeshBuilder.BuildChunks, as after a dab of the brush) compare
+/// with the whole, and how long that takes. (Such chunks are a quick preview, neither simplified nor cut by the roads:
+/// they differ from the whole, which the editor builds again when the stroke ends.)
 /// Usage: MesherLab --chunks map.json
 /// </summary>
 static class ChunkCheck

@@ -26,8 +26,10 @@ public static class MeshSimplifier
     /// Above 0: a vertex on an open border with two border neighbours, lying within this distance (metres) of the line
     /// between them, may be merged into one of them (the border then runs straight past it); else the borders stay.
     /// </param>
+    /// <param name="carry">Per-vertex flags carried along (a merged vertex has a flag where either had it), each replaced
+    /// with the flags of the result's vertices.</param>
     public static AdaptiveMesh Simplify(AdaptiveMesh mesh, int targetTriangles, float maxError,
-        Func<Vector3, float>? maxEdge = null, Func<Vector3, bool>? allowed = null, float borderTolerance = 0)
+        Func<Vector3, float>? maxEdge = null, Func<Vector3, bool>? allowed = null, float borderTolerance = 0, List<bool[]>? carry = null)
     {
         var n = mesh.Positions.Count;
         var pos = mesh.Positions.Select(p => new Vector3(p.X, p.Y, p.Z)).ToArray();
@@ -46,6 +48,8 @@ public static class MeshSimplifier
         foreach (var f in faces)
             for (var k = 0; k < 3; k++) { var key = Key(f[k], f[(k + 1) % 3]); edgeCount[key] = edgeCount.GetValueOrDefault(key) + 1; }
         var locked = new bool[n];
+        // (And pinned vertices: BooleanSeam's land floor under roads without underside.)
+        for (var i = 0; i < n && i < mesh.Pinned.Count; i++) locked[i] = mesh.Pinned[i];
         foreach (var (key, count) in edgeCount)
             if (count != 2) { locked[(int)(key >> 32)] = true; locked[(int)(key & 0xffffffff)] = true; }
         // Per border vertex its neighbours along the border (edges of exactly one triangle); a vertex with other than
@@ -201,6 +205,7 @@ public static class MeshSimplifier
             pos[a] = at;
             quadric[a] = quadric[a] + quadric[b];
             locked[a] |= locked[b];
+            if (carry is not null) foreach (var flags in carry) flags[a] |= flags[b];
             version[a]++;
             version[b]++;
             // (Edges not at a keep their costs: their ends' quadrics are unchanged.)
@@ -225,6 +230,13 @@ public static class MeshSimplifier
                 result.Indices.Add(index[v]);
             }
         }
+        if (carry is not null)
+            for (var c = 0; c < carry.Count; c++)
+            {
+                var flags = new bool[result.Positions.Count];
+                for (var v = 0; v < n; v++) if (index[v] >= 0) flags[index[v]] = carry[c][v];
+                carry[c] = flags;
+            }
         return result;
     }
 

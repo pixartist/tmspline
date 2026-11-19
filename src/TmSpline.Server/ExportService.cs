@@ -167,14 +167,13 @@ public sealed partial class ExportService
     /// <summary>The map's own terrain as the export builds it, packed for the editor (TerrainMeshBuilder.Preview).</summary>
     public byte[] TerrainPreview(ExportRequestDto request, string? key = null) => TerrainPreview(request, key, out _);
 
-    /// <summary>As above; `wholeOnly`: the terrain comes out right only built whole (VoxelTerrain.WholeOnly: the editor builds it again when a stroke of the brush ends).</summary>
+    /// <summary>As above; `wholeOnly`: the terrain comes out right only built whole (always, now: parts built after a dab of the brush are an uncut preview, and the editor builds it whole again when a stroke ends).</summary>
     public byte[] TerrainPreview(ExportRequestDto request, string? key, out bool wholeOnly)
     {
         var (map, _) = Validate(request);
-        wholeOnly = false;
-        if (map.Terrain is not { } grid || !TerrainMeshBuilder.Voxel) return TerrainMeshBuilder.Preview(map);
-        wholeOnly = VoxelTerrain.WholeOnly(grid);
-        // The voxel terrain, chunk by chunk; kept under the editor's key, so that the brush's dabs can be built into it
+        wholeOnly = true;
+        if (map.Terrain is not { } grid) return TerrainMeshBuilder.Preview(map);
+        // The terrain, chunk by chunk; kept under the editor's key, so that the brush's dabs can be built into it
         // without the map being sent again (TerrainDab).
         var roads = VoxelTerrain.Prepare(grid, map);
         var bytes = TerrainMeshBuilder.PackChunks(grid, TerrainMeshBuilder.Build(grid, map, roads: roads));

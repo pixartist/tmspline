@@ -47,13 +47,12 @@ function restoreScenery(saved: Record<string, unknown>): void {
   // Maps saved before this option had no rise.
   t.rise = number(own.rise, -100, 100, OWN_TERRAIN_DEFAULTS.rise);
   t.quality = choice<TerrainQuality>(own.quality, TERRAIN_QUALITIES, "High");
-  t.mesher = choice<TerrainMesher>(own.mesher === ("loops" as string) ? "boolean" : own.mesher, TERRAIN_MESHERS, "boolean");
   // Maps saved before this option get the default bend when generated again.
   t.edgeDrop = number(own.edgeDrop, 0, 256, EDGE_DROP);
   t.seed = whole(own.seed, 0, 999999, 0);
 }
 import {
-  appendPoint, CUT_PROFILES, type CutProfile, FILL_PROFILES, type FillProfile, MAP_ENVIRONMENTS, TERRAIN_MESHERS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainMesher, type TerrainQuality, BORDER_MATERIALS, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
+  appendPoint, CUT_PROFILES, type CutProfile, FILL_PROFILES, type FillProfile, MAP_ENVIRONMENTS, TERRAIN_QUALITIES, type MapEnvironment, type TerrainQuality, BORDER_MATERIALS, UNDERSIDE_MATERIALS, type UndersideMaterial, clampShape, DEFAULT_GATE_HEIGHT, BUMP_PATTERNS, ROAD_SIGNS, ROAD_SIGN_LABELS, SIGN_SIDES, cloneMap, DIRECTIONAL_EFFECTS, EFFECT_LABELS, smoothPoints, wrapBank, deletePoint, EFFECT_SURFACES, EFFECTS, newMap, parseMap, SHAPE_PRESETS, SURFACES, syncSegments,
   GATE_HEIGHT, GATE_RING_HEIGHT, GATES, gateLook, type GateLook, ITEM_COLORS, OBJECT_KINDS, OBJECT_SHAPES, type ItemColor, type BorderMaterial, type BumpPattern, type RoadSignKind, type SignSide, type Effect, type ObjectShape, type Surface, type Track, type TrackMap, type TrackObjectKind, type TrackPoint,
 } from "./track";
 
@@ -241,6 +240,17 @@ export function createUi(editor: Editor, toolbar: HTMLElement, inspector: HTMLEl
     gapsButton.classList.toggle("active", editor.gapsEnabled);
     gapsLegend.hidden = !editor.gapsEnabled;
   });
+
+  const volumesButton = button("Volumes", "Show the boolean terrain's solids (dev server), half transparent: roads grey, free spaces blue, fills orange, abutments magenta", () => {
+    editor.setVolumes(!editor.volumesEnabled);
+    volumesButton.classList.toggle("active", editor.volumesEnabled);
+  });
+  if (!import.meta.env.DEV) volumesButton.remove();
+  const landButton = button("Land", "Hide the land, the ground and the trees (debug), e.g. to see the volumes", () => {
+    editor.setLandHidden(!editor.landHidden);
+    landButton.classList.toggle("active", editor.landHidden);
+  });
+  if (!import.meta.env.DEV) landButton.remove();
 
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || document.querySelector("dialog[open]")) return;
@@ -578,10 +588,10 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
   // Rebuild the DOM only when the selection changes; otherwise just refresh values so inputs keep focus.
   const seg = s?.kind === "segment" ? t.segments[s.index] : undefined;
   const obj = s?.kind === "object" ? t.objects[s.index] : undefined;
-  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.bumps}:${seg?.signs}`
+  const key = `${editor.active}/${editor.map.tracks.length}:${s?.kind}:${s && "index" in s ? s.index : ""}:${t.points.length}:${t.closed}:${seg?.surface}:${seg?.effect}:${seg?.borders}:${seg?.borderMaterial}:${seg?.underside}:${seg?.undersideMaterial}:${seg?.bumps}:${seg?.signs}`
     + `:${(s?.kind === "point" || s?.kind === "handle") ? `${t.points[s.index]?.borders}:${(t.points[s.index]?.edgeAnchor ?? 0) > 0}:${t.points[s.index]?.waypoint}:${editor.map.tracks.flatMap((tr) => tr.points.map((q) => q.checkpointGroup ?? 0)).join(",")}:${profileChoice}:${Object.keys(loadProfiles()).join("/")}` : ""}`
     + `:${t.objects.length}:${obj?.kind}:${obj?.shape}:${obj?.look ?? ""}:${obj?.gate ?? ""}:${obj?.checkpointGroup ?? ""}:${editor.map.tracks.flatMap((tr) => tr.objects.map((q) => q.checkpointGroup ?? 0)).join(",")}:${t.closed}:${editor.map.blocks.length}:${!!editor.library}`
-    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${editor.map.terrain?.mesher ?? scenery.ownTerrain.mesher ?? ""}:${paint.brush}:${editor.map.environment ?? ""}`
+    + `:${scenery.mode}:${scenery.hills}:${scenery.cliffs === 0}:${scenery.forest === "none"}:${!!editor.map.terrain}:${paint.brush}:${editor.map.environment ?? ""}`
     + `:${s?.kind === "block" ? !!editor.map.blocks[s.index]?.free : ""}:${s?.kind === "blocks" || s?.kind === "points" ? `${s.kind}${s.indices.join(",")}` : ""}`
     + `:pins${editor.pinMode}:${editor.pins.map((p) => p.n).join(",")}`;
   if (key === lastInspectorKey) {
@@ -687,21 +697,7 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
             m.terrain = v === "High" ? land : { ...land, quality: v as TerrainQuality };
           });
       }, false, { Fine: "Fine (about 150%)", High: "High (100%)", Medium: "Medium (about 60%)", Low: "Low (about 45%)" });
-      // How the mesh is made: the map's own (kept with its land), and changed at once, like the quality.
-      selectField(root, "Mesher", TERRAIN_MESHERS, () => editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher ?? "boolean"), (v) => {
-        t.mesher = v as TerrainMesher;
-        if (editor.map.terrain && (editor.map.terrain.mesher ?? "voxel") !== v)
-          editor.editMap((m) => {
-            const { mesher: _, ...land } = m.terrain!;
-            m.terrain = v === "voxel" ? land : { ...land, mesher: v as TerrainMesher };
-          });
-        relayout();
-      }, false, { voxel: "Voxel", seamless: "Seamless roads (experimental)", boolean: "Boolean" });
-      const mesherNow = editor.map.terrain?.mesher ?? (editor.map.terrain ? "voxel" : t.mesher);
-      if (mesherNow === "boolean")
-        hint(root, "The roads are cut out of the land exactly, with embankments and cuttings along them. Building it takes longer: while you paint you see a quick preview, and the exact terrain is built when the stroke ends.");
-      else if (mesherNow === "seamless")
-        hint(root, "Experimental: the land meets the roads' edges without strips standing out. Building it takes longer: while you paint you see a quick preview, and the exact terrain is built when the stroke ends.");
+      hint(root, "The roads are cut out of the land exactly, with embankments and cuttings along them. Building it takes a moment: while you paint you see a quick preview, and the exact terrain is built when the stroke ends.");
       const size = Object.assign(document.createElement("p"), { className: "hint" });
       const showSize = () => {
         const s = editor.terrainSize();
@@ -889,12 +885,18 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
     if (!seg().underside)
       hint(root, "Without underside this segment is only the driving surface and its borders: about half the triangles, "
         + "which helps with the game's 5 MB limit for custom items. Seen from below the road is invisible.");
+    else {
+      selectField(root, "Underside material", UNDERSIDE_MATERIALS, () => seg().undersideMaterial,
+        (v) => editor.edit((tr) => (tr.segments[s.index].undersideMaterial = v as UndersideMaterial)), false, { Concrete: "Dark concrete" });
+      if (seg().undersideMaterial !== "Concrete")
+        hint(root, "The underside and side walls get the platform's look and grip too: drivable upside down like the platform.");
+    }
     if (editor.map.terrain) {
       selectField(root, "Cut profile", CUT_PROFILES, () => seg().cutProfile ?? "Slope", (v) => editor.edit((tr) => {
         if (v === "Slope") delete tr.segments[s.index].cutProfile;
         else tr.segments[s.index].cutProfile = v as CutProfile;
       }), false, { Slope: "Slope", Wall: "Wall (tunnel)" });
-      hint(root, "How the terrain is cut back where it rises beside this segment (boolean mesher): Slope cuts a slope from "
+      hint(root, "How the terrain is cut back where it rises beside this segment: Slope cuts a slope from "
         + "the road's edge, Wall lets it rise straight up beside the road, as a tunnel's walls (on a road banked into a "
         + "wall, its high edge goes on up along it). Blended over the joints with the segments round it.");
       selectField(root, "Fill profile", FILL_PROFILES, () => seg().fillProfile ?? "Embankment", (v) => editor.edit((tr) => {

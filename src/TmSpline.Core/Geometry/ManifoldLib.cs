@@ -69,6 +69,7 @@ internal static class ManifoldLib
     [DllImport(Lib)] private static extern IntPtr manifold_meshgl_run_index(IntPtr mem, IntPtr m);
     [DllImport(Lib)] private static extern IntPtr manifold_meshgl_run_original_id(IntPtr mem, IntPtr m);
     [DllImport(Lib)] public static extern uint manifold_reserve_ids(uint n);
+    [DllImport(Lib)] private static extern IntPtr manifold_hull_pts(IntPtr mem, double[] ps, nuint length);
 
     [DllImport(Lib)] private static extern IntPtr manifold_alloc_simple_polygon();
     [DllImport(Lib)] private static extern IntPtr manifold_alloc_polygons();
@@ -181,6 +182,14 @@ internal static class ManifoldLib
 
         /// <summary>This solid as an original of its own (a new id its triangles are known by after booleans).</summary>
         public Solid AsOriginal() => new(manifold_as_original(manifold_alloc_manifold(), Handle));
+
+        /// <summary>The convex hull of points (empty where they span no volume).</summary>
+        public static Solid Hull(IReadOnlyList<Vector3> points)
+        {
+            var xyz = new double[points.Count * 3];
+            for (var i = 0; i < points.Count; i++) (xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]) = (points[i].X, points[i].Y, points[i].Z);
+            return new Solid(manifold_hull_pts(manifold_alloc_manifold(), xyz, (nuint)points.Count));
+        }
 
         public Solid Boolean(Solid other, Op op) => new(manifold_boolean(manifold_alloc_manifold(), Handle, other.Handle, op));
 

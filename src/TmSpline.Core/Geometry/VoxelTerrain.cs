@@ -4,88 +4,34 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The own terrain as a solid (prototype, TMSPLINE_TERRAIN=voxel): the editor's land (its height map: a landscape made
-/// as if there were no road, then painted by hand) is everything under its surface, and each road cuts its room
-/// (StitchedTerrain's: the space a car needs, the driving surface and a vault over it) out of it. The surface of what is
-/// left is the mesh: open ground, cuttings, tunnels and their mouths all come from the same subtraction; a road over the
-/// land stands free.
+/// The own terrain as a solid: the editor's land (its height map: a landscape made as if there were no road, then
+/// painted by hand with the 3D brushes) is everything under its surface. Built whole, it is simplified, remeshed and the
+/// roads cut out of it exactly (BooleanSeam); a part built after a dab of the brush is a quick, uncut preview.
 /// <list type="bullet">
-/// <item>Field: f(p) = max(p.y - land(x, z), -room(p)), negative in the solid.</item>
-/// <item>Octree: cells of Voxel metres within Near of a road's edge, twice the size for each doubling of the distance beyond
-/// (up to Coarsest); only cells the surface may pass through are split.</item>
+/// <item>Field: f(p) = p.y - land(x, z) less the dabs, negative in the solid.</item>
+/// <item>Octree: cells of Voxel metres at the roads (StitchedTerrain's rooms: the space a car needs), twice the size for
+/// each doubling of the distance beyond (up to Coarsest); only cells the surface may pass through are split.</item>
 /// <item>Mesh: dual contouring (one point per leaf the surface passes through, at the mean of its edge crossings; one
 /// quad, or a triangle where cells of different sizes meet, per smallest cell edge that changes sign): no cracks
 /// between sizes.</item>
 /// </list>
-/// Not yet: a triangle budget, sharp edges where the land meets a road, a least cover over shallow tunnels.
 /// </summary>
 public static class VoxelTerrain
 {
-    /// <summary>
-    /// The experimental seamless terrain (TerrainMesher.Seamless) for the build going on (set from the map's terrain by
-    /// <see cref="Use"/> round each build; it flows into the build's parallel work): the land simplified and remeshed,
-    /// cut back <see cref="SeamlessGap"/> from the roads and zipped to them (SeamZipper). While on, the settings below
-    /// that make it are its own, not those of the environment.
-    /// </summary>
-    public static bool Seamless => mesher.Value != TerrainMesher.Voxel;
-    /// <summary>The boolean terrain (TerrainMesher.Boolean): the seamless land, the roads' solids taken out of it exactly (BooleanSeam).</summary>
-    public static bool Boolean => mesher.Value == TerrainMesher.Boolean;
-    private static readonly AsyncLocal<TerrainMesher> mesher = new();
-    /// <summary>The seamless terrain's gap between land and road, metres (1.5 m was tried too: more holes and a larger map).</summary>
-    public const float SeamlessGap = 3;
-
-    /// <summary>The seamless terrain on for the map's terrain until disposed (or off, for a voxel one).</summary>
-    public static IDisposable Use(TerrainGrid grid)
-    {
-        var before = mesher.Value;
-        mesher.Value = grid.Mesher;
-        return new Restore(before);
-    }
-    private sealed class Restore(TerrainMesher before) : IDisposable { public void Dispose() => mesher.Value = before; }
-
-    /// <summary>The smallest cells' size, metres (TMSPLINE_VOXEL; seamless: 4, the simplifier and remesher make the land's triangles).</summary>
-    public static float Voxel { get => Seamless ? 4 : voxel; set => voxel = value; }
-    private static float voxel =
-        float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_VOXEL"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : 1.5f;
-
-    /// <summary>Within this of a road the cells are the smallest, and no cell is larger than Coarsest; metres (TMSPLINE_VOXEL_NEAR, TMSPLINE_VOXEL_COARSEST; seamless: 0).</summary>
-    public static float Near { get => Seamless ? 0 : near; set => near = value; }
-    private static float near = Setting("TMSPLINE_VOXEL_NEAR", 3);
-    public static float Coarsest { get; set; } = Setting("TMSPLINE_VOXEL_COARSEST", 32);
-
-    /// <summary>A triangle at a driving surface is the cut's floor under it (left out) when it faces within about 35 degrees of it.</summary>
-    private const float FloorAlike = 0.82f;
+    /// <summary>The smallest cells' size, metres (the simplifier and remesher make the land's triangles, see Build).</summary>
+    public const float Voxel = 4;
+    /// <summary>Within this of a road the cells are the smallest (none: the boolean cut makes the land meet the roads), and no cell is larger than Coarsest; metres.</summary>
+    private const float Near = 0;
+    private const float Coarsest = 32;
     /// <summary>How far the land may lie from a cell's one point before the cell is split, metres (TMSPLINE_VOXEL_TOLERANCE; 0: cells by the distance from the roads alone).</summary>
-    public static float Tolerance { get; set; } = Setting("TMSPLINE_VOXEL_TOLERANCE", 1);
+    private static readonly float Tolerance = Setting("TMSPLINE_VOXEL_TOLERANCE", 1);
 
-    /// <summary>Debug: TMSPLINE_VOXEL_FLOOR=keep leaves the cuts' floors under the roads in.</summary>
-    private static readonly bool KeepFloor = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_FLOOR") == "keep";
-    /// <summary>And when the land's own surface lies at least this far over it, metres.</summary>
-    private const float FloorCover = 2f;
-    /// <summary>Seam experiment: land between a road's edges up to this far over the line between them (under a road bent downwards) belongs to the road, metres.</summary>
-    private const float CrownMax = 4;
-    /// <summary>Seam experiment: the cut's field as one distance to the road's surface, without jumps (TMSPLINE_SEAM_FIELD=rules: the earlier rules for edges, end, crown and deck).</summary>
-    public static bool SeamSmooth { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_FIELD") != "rules";
-    /// <summary>Seam experiment: the edges cut only outwards, a half disc across the road (TMSPLINE_SEAM_HALF=off: all round).</summary>
-    public static bool SeamHalfDisc { get => !Seamless && seamHalfDisc; set => seamHalfDisc = value; }
-    private static bool seamHalfDisc = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_HALF") != "off";
-    /// <summary>Simplification experiment: the land simplified to this many triangles (TMSPLINE_SIMPLIFY; 0: not), and no further than this changes it, metres (TMSPLINE_SIMPLIFY_ERROR).</summary>
-    /// <summary>Seam experiment: vertices close to the cut line are moved onto it (TMSPLINE_SEAM_SNAP=off: not).</summary>
-    public static bool SeamSnap { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_SNAP") != "off";
-    public static int SimplifyTo { get => Seamless ? 30000 : simplifyTo; set => simplifyTo = value; }
-    private static int simplifyTo = (int)Setting("TMSPLINE_SIMPLIFY", 0);
-    /// <summary>Remeshing experiment: the simplified land's triangles made even (TMSPLINE_REMESH=on; seamless: on).</summary>
-    public static bool Remesh { get => Seamless || remesh; set => remesh = value; }
-    private static bool remesh = Environment.GetEnvironmentVariable("TMSPLINE_REMESH") == "on";
-    public static float SimplifyError { get; set; } = Setting("TMSPLINE_SIMPLIFY_ERROR", 0.5f);
-    /// <summary>Seam experiment: leave out the land the roads enclose (see the end of Build).</summary>
-    public static bool OpenSeam { get => !Boolean && (Seamless || openSeam); set => openSeam = value; }
-    private static bool openSeam = Environment.GetEnvironmentVariable("TMSPLINE_SEAM") == "open";
-    /// <summary>
-    /// Whether the land comes out right only built whole: simplified and remeshed all at once (a part built again, as
-    /// after a dab of the brush, is neither, and its edges no longer meet those of the chunks round it) and zipped to
-    /// the roads with all its rim. The editor then builds it whole again when a stroke of the brush ends.
-    /// </summary>
+    /// <summary>Where the land is cut along its outline, vertices close to the line are moved onto it (TMSPLINE_SEAM_SNAP=off: not).</summary>
+    private static readonly bool SeamSnap = Environment.GetEnvironmentVariable("TMSPLINE_SEAM_SNAP") != "off";
+    /// <summary>The whole land is simplified to this many triangles, and no further than this changes it, metres (TMSPLINE_SIMPLIFY_ERROR); then remeshed (MeshRemesher).</summary>
+    private const int SimplifyTo = 30000;
+    internal static readonly float SimplifyError = Setting("TMSPLINE_SIMPLIFY_ERROR", 0.5f);
+
     /// <summary>Debug (TMSPLINE_VOXEL_STATS=on): a mesh's open edges, edges three or more triangles share, and edges two triangles run the same way.</summary>
     private static void Health(AdaptiveMesh mesh, string stage)
     {
@@ -107,82 +53,8 @@ public static class VoxelTerrain
         Console.WriteLine($"  [health] {stage}: {mesh.Indices.Count / 3} triangles, {undirected.Count(e => e.Value == 1)} open edges, {undirected.Count(e => e.Value > 2)} shared by 3+, {directed.Count(e => e.Value > 1)} run the same way twice, {degenerate} degenerate");
     }
 
-    public static bool WholeOnly(TerrainGrid grid)
-    {
-        using var _ = Use(grid);
-        return SimplifyTo > 0;
-    }
-    /// <summary>
-    /// Seam experiment: pieces of land the cut left on their own (fewer than this many triangles, not joined to the
-    /// rest by a shared edge; a shared corner alone does not join them) are left out: bits of land the distance to the road's body did not quite reach, which
-    /// stood in the gap as islands.
-    /// </summary>
-    private const int SeamIsland = 64;
-
-    /// <summary>
-    /// Also left out: a piece of land whose area lies mostly under a road, between its edges (under: a function telling
-    /// that of a place): land under a road's deck that the cuts along both its edges left on its own, hanging under it.
-    /// The land a track loop encloses is cut off all round too, but lies beside the road, not under it.
-    /// </summary>
-    private static void DropIslands(AdaptiveMesh mesh, Func<Vector3, bool>? under = null)
-    {
-        // Pieces are triangles joined by shared edges, not corners: a bit of land hanging on to the rest by a single
-        // vertex (what a cut often leaves) is a piece of its own, and goes like any other small piece.
-        var triangles = mesh.Indices.Count / 3;
-        var parent = Enumerable.Range(0, triangles).ToArray();
-        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
-        var byEdge = new Dictionary<long, int>(EdgeKeyComparer.Instance);
-        for (var t = 0; t < triangles; t++)
-            for (var k = 0; k < 3; k++)
-            {
-                int a = mesh.Indices[3 * t + k], b = mesh.Indices[3 * t + (k + 1) % 3];
-                var key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
-                if (byEdge.TryGetValue(key, out var other)) parent[Find(t)] = Find(other);
-                else byEdge[key] = t;
-            }
-        var size = new Dictionary<int, int>();
-        for (var t = 0; t < triangles; t++)
-        {
-            var root = Find(t);
-            size[root] = size.GetValueOrDefault(root) + 1;
-        }
-        // Per piece, its area and how much of it lies under a road (the largest piece always stays).
-        var area = new Dictionary<int, (double All, double Under)>();
-        var where = new Dictionary<int, Vector3>();
-        if (under is not null)
-        {
-            var largest = size.MaxBy(kv => kv.Value).Key;
-            for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
-            {
-                var root = Find(t / 3);
-                if (root == largest) continue;
-                Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
-                var s = Vector3.Cross(b - a, c - a).Length() / 2;
-                var (all, below) = area.GetValueOrDefault(root);
-                area[root] = (all + s, below + (under((a + b + c) / 3) ? s : 0));
-                where.TryAdd(root, (a + b + c) / 3);
-            }
-        }
-        if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
-            foreach (var (root, x) in area.OrderByDescending(kv => kv.Value.All).Take(8))
-                Console.WriteLine($"  piece of {size[root]} triangles, {x.All:0} m2, {x.Under / Math.Max(x.All, 1e-9):P0} under a road, at {where[root]}");
-        bool Keep(int root) => size[root] >= SeamIsland && !(area.TryGetValue(root, out var x) && x.Under > x.All / 2);
-        var kept = new List<int>(mesh.Indices.Count);
-        for (var t = 0; t + 2 < mesh.Indices.Count; t += 3)
-            if (Keep(Find(t / 3)))
-                kept.AddRange([mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]]);
-        mesh.Indices.Clear();
-        mesh.Indices.AddRange(kept);
-    }
-
-    /// <summary>The land is cut back this far from a road's body (its edges, the back of its surface): the band the seam's strip will fill; metres (TMSPLINE_SEAM_GAP).</summary>
-    public static float SeamGap { get => Seamless ? SeamlessGap : seamGap; set => seamGap = value; }
-    private static float seamGap = Setting("TMSPLINE_SEAM_GAP", 6);
-    /// <summary>Under a road (between its edges) the land is cut back only this far from it, metres (TMSPLINE_UNDER_GAP; off by default: land beside and under a road then both meet its edge, which the strips do not handle yet).</summary>
-    public static float UnderGap { get; set; } = Setting("TMSPLINE_UNDER_GAP", 99);
-
-    /// <summary>How far the cut is softened where land and a room's wall meet, metres (TMSPLINE_VOXEL_SOFTEN; 0: hard).</summary>
-    public static float Soften { get; set; } = Setting("TMSPLINE_VOXEL_SOFTEN", 4);
+    /// <summary>Near a road's edge (within three times this) the simplifier keeps the land's edges no longer than this, metres.</summary>
+    private const float SeamGap = 3;
 
     /// <summary>
     /// The cells at a quality: the smallest ones' size, how far the land may bend away from a cell before it is split,
@@ -237,7 +109,6 @@ public static class VoxelTerrain
 
     public static Roads Prepare(TerrainGrid grid, TrackMap map)
     {
-        using var mesher = Use(grid);
         var rooms = StitchedTerrain.Rooms(grid, map);
         var roomFloor = rooms.Floor;
         double width = (grid.Columns - 1) * grid.Cell, depth = (grid.Rows - 1) * grid.Cell;
@@ -271,18 +142,16 @@ public static class VoxelTerrain
     /// <param name="region">Only this part of the land (plan: x0, z0, x1, z1), with Margin/2 round it for the normals; null: all.</param>
     public static AdaptiveMesh Build(TerrainGrid grid, TrackMap map, Roads? roads = null, (float X0, float Z0, float X1, float Z1)? region = null, MeshQuality roadQuality = MeshQuality.Low)
     {
-        using var mesher = Use(grid);
-        SeamZipper.Stage("start");
-        // The roads' rooms cut the land, except in the boolean terrain built whole (its roads' solids and driving spaces
-        // take the land away exactly). Chunks built on their own after a dab of the brush are a quick preview until the
-        // whole is built again at the stroke's end: cut by the rooms, as the voxel terrain.
-        var roomCut = !(Boolean && !BooleanSeam.VoxelCut) || region is not null;
+        BooleanSeam.Stage("start");
+        // The land is not cut here: built whole, the roads' solids and driving spaces take it away exactly (BooleanSeam).
+        // Chunks built on their own after a dab of the brush are a quick preview of the uncut land until the whole is
+        // built again at the stroke's end.
         var (v, tolerance, near) = Cells(grid.Quality);
         // Coarser than High: every cell's point is moved onto the surface (as those of grazing cells are). The mean of
         // a large cell's edge crossings can lie well off it, and then land stood in the roads' space.
         var settle = grid.Quality > TerrainQuality.High || Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_SETTLE") == "on";
         var prepared = roads ?? Prepare(grid, map);
-        var (room, _, nearest, road, surface) = prepared.Rooms;
+        var (room, _, _, road, _) = prepared.Rooms;
         // The land's heights, also beyond its outline (each place without land takes its nearest land's: the octree
         // needs a height everywhere; what lies outside the outline is left out of the mesh at the end).
         var heights = (double[])grid.Heights.Clone();
@@ -458,31 +327,12 @@ public static class VoxelTerrain
         }
 
         float Land(Vector3 p) => p.Y - LandAt(p.X, p.Z) - Painted(p, false);
-        Func<Vector3, float> landField = Land, cutField = Cut;
-        float Field(Vector3 p) => Blurred(cutField, p, true);
-        float Cut(Vector3 p)
+        Func<Vector3, float> landField = Land, paintedField = WithOver;
+        float Field(Vector3 p) => Blurred(paintedField, p, true);
+        // The land with all the dabs: those the roads would cut through blurred with it, then those that come after the cut.
+        float WithOver(Vector3 p)
         {
             var f = Blurred(landField, p, false);
-            // (The boolean terrain without the voxel cut: the roads' solids and driving spaces alone take the land away.)
-            if (f < 0 && Away(p.X, p.Z) < 2 * Coarse && roomCut)
-            {
-                var cut = -room(p);
-                // A soft cut over the road: where the land's surface and a room's wall come together (a tunnel's
-                // mouth, a cutting's rim, a thin roof over a shallow tunnel) the edge between them is rounded off, and
-                // land thinner than half of Soften goes altogether; as a hard cut it stood there in teeth and shards.
-                // Beside the road, at the height of its edges and under it, the cut stays hard: the land meets them
-                // exactly. Straight over the road it is soft from the edges' height on: a road coming out of the land
-                // comes out where its cover gets thin, not through a wedge of land thinning to nothing along it.
-                var (edge, over, across, _) = road(p);
-                var k = Soften * (edge < 100 ? MathF.Max(Ramp(0.5f, 3, over), (1 - Ramp(0.8f, 1, across)) * Ramp(0, 0.75f, over)) : 1);
-                if (k > 0.01f)
-                {
-                    var h = MathF.Max(k - MathF.Abs(f - cut), 0) / k;
-                    f = MathF.Max(f, cut) + h * h * k / 4;
-                }
-                else f = MathF.Max(f, cut);
-            }
-            // Land worked into the roads' space comes after their cut.
             if (firstOver < dabs.Length) f -= Painted(p, true);
             return f;
         }
@@ -721,27 +571,6 @@ public static class VoxelTerrain
             Probe(root);
         }
         // Only where the editor has land (its outline; the heights are not used): the rest is left out.
-        // Nor the cuts' floors under the driving surfaces (the road lies on them): triangles at a driving surface that
-        // face as it does. Land coming to the road from the side faces another way and stays, up to the road's edge.
-        var under = new Vector3[mesh.Positions.Count];
-        Parallel.For(0, under.Length, i =>
-        {
-            var p = mesh.Positions[i];
-            if (Away(p.X, p.Z) > 0) return;
-            var (d, deck) = nearest(p);
-            // A point of a large cell can lie over the floor it stands for, in the room (over the driving surface):
-            // back onto the floor.
-            // (Not where land was worked into the road's space: that stays where it was put, and its floor shows.)
-            if (Painted(p, true) != 0 || Blur(p, true) > 0 || !roomCut) return;
-            if (deck != default && d < 0 && d > -2 * v)
-            {
-                p += deck * d;
-                mesh.Positions[i] = p;
-            }
-            // Not near where the land's own surface comes down to the road (a road half sunk into it): there the floor
-            // shows through the slot between the land's edge and the driving surface.
-            if (MathF.Abs(d) < v && LandAt(p.X, p.Z) - p.Y > FloorCover + v) under[i] = deck;
-        });
         // The land's outline: how far inside it a place is (metres, negative outside), from the grid's places with and
         // without land, smoothed. The land is cut along its zero (below), not left out triangle by triangle where the
         // grid has no height: that left the outline as ragged as the triangles and the grid's cells.
@@ -753,15 +582,8 @@ public static class VoxelTerrain
         {
             Vector3 a = mesh.Positions[mesh.Indices[t]], b = mesh.Positions[mesh.Indices[t + 1]], c = mesh.Positions[mesh.Indices[t + 2]];
             var mid = (a + b + c) / 3;
-            if (smoothOutline ? MathF.Max(outline(a), MathF.Max(outline(b), outline(c))) < 0 : double.IsNaN(AdaptiveTerrainBuilder.SampleGrid(grid, mid.X, mid.Z))) continue;
+            if (smoothOutline ? MathF.Max(outline(a), MathF.Max(outline(b), outline(c))) < 0 : double.IsNaN(TerrainGrids.SampleGrid(grid, mid.X, mid.Z))) continue;
             if (region is { } part && (mid.X < part.X0 - Margin / 2 || mid.X > part.X1 + Margin / 2 || mid.Z < part.Z0 - Margin / 2 || mid.Z > part.Z1 + Margin / 2)) continue;
-            Vector3 ua = under[mesh.Indices[t]], ub = under[mesh.Indices[t + 1]], uc = under[mesh.Indices[t + 2]];
-            // (The boolean terrain keeps the floors: the roads' solids take out what lies in them.)
-            if (!KeepFloor && (!Boolean || region is not null) && ua != default && ub != default && uc != default)
-            {
-                var facing = Vector3.Cross(b - a, c - a);
-                if (facing.LengthSquared() > 1e-12f && Vector3.Dot(Vector3.Normalize(facing), Vector3.Normalize(ua + ub + uc)) > FloorAlike) continue;
-            }
             for (var k = 0; k < 3; k++)
             {
                 var i = mesh.Indices[t + k];
@@ -777,56 +599,14 @@ public static class VoxelTerrain
         }
         if (smoothOutline) kept = CutSeam(kept, outline);
 
-        // Seam experiment: how far a place is from a road's body, less SeamGap (negative: the land there goes). The body
-        // is the road's edges seen from outside them (the half of the plane across the road beyond each edge: never more
-        // than 90 degrees from the road's own outward direction, the owner's rule), an open road's end seen from past it,
-        // and the back of its driving surface (under an open road, round a closed tube).
-        float SeamField(Vector3 p)
-        {
-            // The smooth field: how far from the road's surface (its edges included, past an open end its end), less
-            // the gap, and inside a road's room how deep in it (negative); no jumps, so the cut's line is clean.
-            if (SeamSmooth)
-            {
-                // Under a road (between its edges, as seen across it) the gap narrows to UnderGap: nobody sees the seam
-                // there, and land under a road low over it (a loop's climb from the ground) stays right under it instead
-                // of going altogether. Full at the edges, the narrower one from a sixth of the width in (no jump in it).
-                var (distance, _, left, right) = surface(p);
-                var gapHere = SeamGap;
-                var lr = right - left;
-                if (UnderGap < SeamGap && lr.LengthSquared() > 1e-4f)
-                {
-                    var across = Vector3.Dot(p - left, lr) / lr.LengthSquared();
-                    var inside = Math.Clamp(MathF.Min(across, 1 - across) * 6, 0, 1);
-                    gapHere = SeamGap + (UnderGap - SeamGap) * inside;
-                }
-                return MathF.Min(distance - gapHere, room(p));
-            }
-            return SeamRules(p);
-        }
-        float SeamRules(Vector3 p)
-        {
-            var (toEdge, over, across, beyond) = road(p);
-            var (toRoom, deck) = nearest(p);
-            var body = across >= 1 || !SeamHalfDisc ? toEdge : float.MaxValue;
-            body = MathF.Min(body, beyond);
-            // Between the edges, outside the road's room: under the line between the edges, how far under it; over it
-            // (under a road bent downwards, whose middle stands over its edges) nothing, the road's own space. Land
-            // higher than that over the line (a tunnel's roof) does not count.
-            if (toEdge < 100 && across < 1 && toRoom > 0 && over < CrownMax) body = MathF.Min(body, MathF.Max(0, -over));
-            if (deck != default && toRoom > -1) body = MathF.Min(body, MathF.Max(toRoom, 0));
-            // Land inside a road's room (reaching into it where the voxels missed it) is always the road's: without
-            // this the field jumped back up to the edges' distance a metre inside, and the cut followed that jump.
-            if (toRoom <= 0) body = 0;
-            return body - SeamGap;
-        }
-
-        // Simplification experiment (TMSPLINE_SIMPLIFY=triangles): the whole land simplified first (quadric edge
-        // collapse), its edges near the roads kept no longer than the gap, and no vertex put inside a road's room.
-        if (SimplifyTo > 0 && region is null)
+        // The whole land simplified (quadric edge collapse), its edges near the roads kept no longer than SeamGap, and no
+        // vertex put inside a road's room; then remeshed and cut by the roads (BooleanSeam). Not a part built after a
+        // dab of the brush: that is a quick preview, and the editor builds the whole again when the stroke ends.
+        if (region is null)
         {
             var before = kept.Indices.Count / 3;
             Health(kept, "voxel mesh");
-            SeamZipper.Stage("voxel field and meshing");
+            BooleanSeam.Stage("voxel field and meshing");
             long edgeCalls = 0, edgeTicks = 0, roomCalls = 0, roomTicks = 0;
             kept = MeshSimplifier.Simplify(kept, SimplifyTo, SimplifyError,
                 p =>
@@ -850,9 +630,8 @@ public static class VoxelTerrain
             Health(kept, "flips");
             if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                 Console.WriteLine($"  simplified {before} triangles to {kept.Indices.Count / 3}");
-            // Remeshing experiment (TMSPLINE_REMESH=on): the simplified land's triangles made even (MeshRemesher), its
-            // vertices put back onto the land's surface (the field's zero, down its slope).
-            if (Remesh)
+            // The simplified land's triangles made even (MeshRemesher), its vertices put back onto the land's surface (the
+            // field's zero, down its slope).
             {
                 Vector3 Project(Vector3 p)
                 {
@@ -870,77 +649,18 @@ public static class VoxelTerrain
                     }
                     return p;
                 }
-                SeamZipper.Stage("simplifying");
+                BooleanSeam.Stage("simplifying");
                 kept = MeshRemesher.Remesh(kept, Project);
                 Health(kept, "remeshed");
-                SeamZipper.Stage("remeshing");
+                BooleanSeam.Stage("remeshing");
                 if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on")
                     Console.WriteLine($"  remeshed to {kept.Indices.Count / 3} triangles");
             }
         }
-        if (Boolean && region is null)
+        if (region is null)
         {
             kept = BooleanSeam.Cut(kept, grid, map, roadQuality);
-            SeamZipper.LastOpen = BooleanSeam.LastVolumes;
-            SeamZipper.Stage("boolean");
-        }
-        if (OpenSeam)
-        {
-            kept = CutSeam(kept, SeamField);
-            SeamZipper.Stage("cut");
-            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
-                Console.WriteLine($"  right after the cut: {kept.Indices.Distinct().Count(i => SeamField(kept.Positions[i]) < -0.1f)} used vertices inside it");
-            if (Environment.GetEnvironmentVariable("TMSPLINE_FLIPS") != "off") MeshSimplifier.ImproveByFlips(kept, float.TryParse(Environment.GetEnvironmentVariable("TMSPLINE_FLIP_DEG"), System.Globalization.CultureInfo.InvariantCulture, out var flipDeg) ? flipDeg : 35);
-            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
-            {
-                // Kept land under a road between its edges, close to its room: why the cut left it.
-                var rows = new List<string>();
-                foreach (var p in kept.Indices.Distinct().Select(i => kept.Positions[i]))
-                {
-                    var (toEdge, over, across, beyond) = road(p);
-                    var (toRoom, deck) = nearest(p);
-                    if (toEdge < 100 && across < 1 && over < 0 && toRoom < 8)
-                        rows.Add($"    at {p.X:0},{p.Y:0},{p.Z:0}: to room {toRoom:0.0}, deck {(deck != default ? "yes" : "no")}, edge {toEdge:0.0}, across {across:0.00}, over {over:0.0}, field {SeamField(p):0.0}");
-                }
-                Console.WriteLine($"  {rows.Count} kept vertices under a road within 8 m of its room");
-                foreach (var r in rows.Take(25)) Console.WriteLine(r);
-            }
-            DropIslands(kept, p => road(p) is var r && r.Edge < 100 && r.Across < 1 && r.Over < 0);
-            if (Environment.GetEnvironmentVariable("TMSPLINE_SEAM_DIAG") == "on")
-            {
-                // Land facing down under a road (its back to the sky): where, and the field there.
-                var rows = new List<(Vector3 Mid, float Area)>();
-                for (var t = 0; t + 2 < kept.Indices.Count; t += 3)
-                {
-                    Vector3 a = kept.Positions[kept.Indices[t]], b = kept.Positions[kept.Indices[t + 1]], c = kept.Positions[kept.Indices[t + 2]];
-                    var n = Vector3.Cross(b - a, c - a);
-                    if (n.LengthSquared() < 1e-8f || Vector3.Normalize(n).Y > -0.3f) continue;
-                    var mid = (a + b + c) / 3;
-                    if (surface(mid).Distance > 30) continue;
-                    rows.Add((mid, n.Length() / 2));
-                }
-                Console.WriteLine($"  {rows.Count} land triangles facing down within 30 m of a road, {rows.Sum(r => r.Area):0} m2");
-                foreach (var g in rows.GroupBy(r => ((int)MathF.Floor(r.Mid.X / 40), (int)MathF.Floor(r.Mid.Z / 40))).OrderByDescending(g => g.Sum(r => r.Area)).Take(8))
-                {
-                    var m = g.OrderByDescending(r => r.Area).First().Mid;
-                    Console.WriteLine($"    {g.Count()} near {m.X:0},{m.Y:0},{m.Z:0} ({g.Sum(r => r.Area):0} m2): road surface {surface(m).Distance:0.0} m away, room {room(m):0.0}, field {SeamField(m):0.0}, land field {Field(m):0.0}");
-                }
-            }
-            if (Environment.GetEnvironmentVariable("TMSPLINE_PROBE") is { Length: > 0 } probes)
-            foreach (var probeAt in probes.Split('|'))
-            {
-                var pv = probeAt.Split(';').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                var q = new Vector3(pv[0], pv[1], pv[2]);
-                var rd = road(q);
-                Console.WriteLine($"  probe {q}: edge {rd.Edge:0.0}, over {rd.Over:0.0}, across {rd.Across:0.00}, beyond {rd.Beyond:0.0}; surface {surface(q).Distance:0.0} at {surface(q).Point}; room {room(q):0.0}; field {SeamField(q):0.0}; land {Field(q):0.0} (no road {Land(q):0.0})");
-            }
-            // The zipper: the gap closed with strips from the land's rim to the road edges (TMSPLINE_ZIP=off: left open).
-            if (Environment.GetEnvironmentVariable("TMSPLINE_ZIP") != "off")
-            {
-                var strips = SeamZipper.Zip(kept, map, surface, room, SeamGap, roadQuality, p => p.Y <= LandAt(p.X, p.Z) + 2.5f, p => Blurred(landField, p, false));
-                SeamZipper.Stage("zipper: plugs and the rest");
-                if (Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on") Console.WriteLine($"  zipped {strips} strip triangles");
-            }
+            BooleanSeam.Stage("boolean");
         }
         return kept;
     }
@@ -1029,14 +749,14 @@ public static class VoxelTerrain
         }
         // (No place without a height: the land is whole, its outline the grid's own edge.)
         if (!outside.Any(float.IsFinite)) return _ => float.MaxValue;
-        var (_, toLand) = AdaptiveTerrainBuilder.NearestTransform(inside, columns, rows);
-        var (_, toEmpty) = AdaptiveTerrainBuilder.NearestTransform(outside, columns, rows);
+        var (_, toLand) = TerrainGrids.NearestTransform(inside, columns, rows);
+        var (_, toEmpty) = TerrainGrids.NearestTransform(outside, columns, rows);
         var cell = (float)grid.Cell;
         var signed = new float[n];
         for (var i = 0; i < n; i++)
             signed[i] = (double.IsNaN(grid.Heights[i]) ?-(toLand[i] - 0.5f) : toEmpty[i] - 0.5f) * cell;
         var radius = (int)Math.Round(OutlineSmoothing / grid.Cell);
-        if (radius > 0) signed = AdaptiveTerrainBuilder.Blur(signed, columns, rows, radius);
+        if (radius > 0) signed = TerrainGrids.Blur(signed, columns, rows, radius);
         return p =>
         {
             double fx = Math.Clamp((p.X - grid.X0) / grid.Cell, 0, columns - 1.001), fz = Math.Clamp((p.Z - grid.Z0) / grid.Cell, 0, rows - 1.001);

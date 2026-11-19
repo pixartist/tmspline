@@ -23,6 +23,16 @@ public static class Surfaces
     public static readonly TmMaterial Underside = new("Underside", "CustomConcrete", Color: "141416");
 
     /// <summary>
+    /// A segment's underside: the dark concrete, or a platform material with its physics (named "Under" + the surface,
+    /// so the editor's preview tells it from the driving surface: no grid there).
+    /// </summary>
+    public static TmMaterial UndersideOf(UndersideMaterial material) => material switch
+    {
+        UndersideMaterial.Concrete => Underside,
+        _ => Road(Enum.Parse<Surface>(material.ToString())) is var road ? road with { Name = "Under" + road.Name } : Underside,
+    };
+
+    /// <summary>
     /// Own terrain: the hill blocks' materials (grass; dirt with sand physics; ice), textured by world position like
     /// them (projection "pypxz", 32 m tiles), so the terrain looks like the DecoHill pieces.
     /// </summary>

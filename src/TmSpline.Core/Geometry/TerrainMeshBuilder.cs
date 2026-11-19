@@ -4,80 +4,26 @@ using TmSpline.Core.Model;
 namespace TmSpline.Core.Geometry;
 
 /// <summary>
-/// The terrain (TerrainGrid, the editor's height map) as items: the roads and the land go into a fine height map with
-/// pins along the edges the land meets, a cut and a fidelity map (AdaptiveTerrainBuilder); the mesh comes from those
-/// alone (AdaptiveTerrainMesher). Then normals, grass and rock, lightmap UVs, skirts under the outer edge, square chunks.
+/// The terrain (TerrainGrid, the editor's height map) as items: the land as a solid (VoxelTerrain), the roads' solids
+/// cut out of it exactly (BooleanSeam). Then normals, grass and rock, lightmap UVs, skirts under the outer edge, square
+/// chunks.
 /// </summary>
 public static class TerrainMeshBuilder
 {
     /// <summary>Size of a chunk (one item), metres.</summary>
     private const double ChunkSize = 128;
 
-    /// <summary>
-    /// The builder: StitchedTerrain (one land surface, rooms cut out, lining under covered road), or with the environment
-    /// variable TMSPLINE_TERRAIN=old the earlier AdaptiveTerrainBuilder.
-    /// </summary>
-    /// <summary>VoxelTerrain (the land as a solid the roads cut their rooms out of): this branch's builder; TMSPLINE_TERRAIN=stitched or old for the earlier ones.</summary>
-    public static bool Voxel { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") is null or "voxel";
-
-    public static bool Stitched { get; set; } = Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN") != "old";
-
-    /// <summary>
-    /// What the map may weigh in all (the game's limit is 5 MB of custom items), and the fewest triangles the land gets even
-    /// when the road leaves less room.
-    /// </summary>
-    private const double MapBudgetBytes = 4_750_000;
-    private const int MinTriangles = 30_000;
-
-    /// <summary>
-    /// The land's triangles that fit beside the road at Normal quality (by the size estimates); 0 (no limit) when budgets
-    /// are switched off with TMSPLINE_TERRAIN_BUDGET=off.
-    /// </summary>
-    public static int TriangleBudget(TerrainGrid grid, TrackMap? map)
-    {
-        if (Environment.GetEnvironmentVariable("TMSPLINE_TERRAIN_BUDGET") == "off") return 0;
-        var road = map is null ? 0 : MeshQualities.EstimateMapBytes(MeshQualities.BuildExport(map, MeshQualities.Default, 64).Meshes);
-        // Items: the chunks the land will cover.
-        var chunks = new HashSet<(int, int)>();
-        for (var r = 0; r < grid.Rows; r++)
-            for (var c = 0; c < grid.Columns; c++)
-                if (!double.IsNaN(grid.Height(c, r)))
-                    chunks.Add(((int)Math.Floor(c * grid.Cell / ChunkSize), (int)Math.Floor(r * grid.Cell / ChunkSize)));
-        var left = MapBudgetBytes - road - chunks.Count * 1_480.0;
-        return Math.Max(MinTriangles, (int)(left / 24.3));
-    }
-
-    /// <summary>The last stitched build's details (for the checker).</summary>
-    public static StitchedTerrainResult? LastStitched { get; private set; }
-
     /// <param name="roadQuality">The quality the roads are built at alongside (the land meets their edges exactly; the editor shows them at Low).</param>
     public static List<MeshChunk> Build(TerrainGrid grid, TrackMap? map = null, string namePrefix = "Terrain", VoxelTerrain.Roads? roads = null, MeshQuality roadQuality = MeshQuality.Low)
     {
         if (grid.Columns < 2 || grid.Rows < 2) return [];
-        AdaptiveMesh mesh;
-        StitchedTerrainResult? stitched = null;
-        if (Voxel)
-        {
-            LastStitched = null;
-            mesh = VoxelTerrain.Build(grid, map ?? new TrackMap(), roads, roadQuality: roadQuality);
-        }
-        else if (Stitched)
-        {
-            stitched = StitchedTerrain.Build(grid, map ?? new TrackMap(), TriangleBudget(grid, map));
-            LastStitched = stitched;
-            mesh = stitched.Land;
-        }
-        else
-        {
-            var (field, pins) = AdaptiveTerrainBuilder.Fields(grid, map ?? new TrackMap());
-            mesh = AdaptiveTerrainMesher.Build(field, pins);
-        }
+        var mesh = VoxelTerrain.Build(grid, map ?? new TrackMap(), roads, roadQuality: roadQuality);
         var xs = mesh.Positions.Select(p => (double)p.X).ToList();
         var ys = mesh.Positions.Select(p => (double)p.Y).ToList();
         var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
         var triangles = new List<(int A, int B, int C)>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
-        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, stitched, Voxel);
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix);
     }
 
     /// <summary>
@@ -85,48 +31,15 @@ public static class TerrainMeshBuilder
     /// grass and rock (cut along the rock angle), lightmap UVs, skirts under the outer edge, square chunks.
     /// </summary>
     internal static List<MeshChunk> Assemble(TerrainGrid grid, List<double> xs, List<double> ys, List<double> zs, List<bool> onEdge,
-        List<(int A, int B, int C)> triangles, string namePrefix, StitchedTerrainResult? stitched = null, bool solid = false, HashSet<(int, int)>? only = null)
+        List<(int A, int B, int C)> triangles, string namePrefix, HashSet<(int, int)>? only = null)
     {
-        // The lining's floors (the room over them, no steeper than the rock angle) are land like that beside them: their
-        // points on the land's edge are the land's own (one point, one normal: no crease along the join), the others new.
-        var floorOf = new Dictionary<int, int>();
-        var floors = new List<(int A, int B, int C)>();
-        var floorAt = new HashSet<int>();
-        if (stitched is { } sf && sf.LiningIndices.Count > 0)
-        {
-            static (long, long, long) Key(double x, double y, double z) => ((long)Math.Round(x * 500), (long)Math.Round(y * 500), (long)Math.Round(z * 500));
-            var landAt = new Dictionary<(long, long, long), int>();
-            for (var i = 0; i < xs.Count; i++) landAt[Key(xs[i], ys[i], zs[i])] = i;
-            var floorBelow = grid.RockAngle < 90 ? (float)Math.Cos(grid.RockAngle * Math.PI / 180) : 0.5f;
-            for (var t = 0; t + 2 < sf.LiningIndices.Count; t += 3)
-            {
-                Vector3 pa = sf.LiningVertices[sf.LiningIndices[t]].Position, pb = sf.LiningVertices[sf.LiningIndices[t + 1]].Position, pc = sf.LiningVertices[sf.LiningIndices[t + 2]].Position;
-                var facing = Vector3.Cross(pb - pa, pc - pa);
-                if (facing.LengthSquared() < 1e-12f || Vector3.Normalize(facing).Y < floorBelow) continue;
-                int Fv(int i)
-                {
-                    if (floorOf.TryGetValue(i, out var id)) return id;
-                    var p = sf.LiningVertices[i].Position;
-                    if (!landAt.TryGetValue(Key(p.X, p.Y, p.Z), out id))
-                    {
-                        xs.Add(p.X); ys.Add(p.Y); zs.Add(p.Z);
-                        onEdge.Add(false);
-                        id = xs.Count - 1;
-                    }
-                    return floorOf[i] = id;
-                }
-                floors.Add((Fv(sf.LiningIndices[t]), Fv(sf.LiningIndices[t + 1]), Fv(sf.LiningIndices[t + 2])));
-                floorAt.Add(t);
-            }
-        }
         // Normals: the triangles' round each point, by area.
         var normals = new Vector3[xs.Count];
-        foreach (var (a, b, c) in triangles.Concat(floors))
+        foreach (var (a, b, c) in triangles)
         {
             var n = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])),
                 new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
-            // (A height map's triangles all face up; a solid's keep their own side: ceilings and overhangs face down.)
-            if (!solid && n.Y < 0) n = -n;
+            // (The land is a solid: its triangles keep their own side, ceilings and overhangs face down.)
             normals[a] += n;
             normals[b] += n;
             normals[c] += n;
@@ -138,7 +51,6 @@ public static class TerrainMeshBuilder
         // land in teeth: there the flattest face counts. Only there: on a hillside of large faces the flattest of them
         // made grass of steep land.
         var flat = normalOf.Select(n => n.Y).ToList();
-        if (solid)
         {
             var flattest = Enumerable.Repeat(-1f, flat.Count).ToArray();
             var steepest = Enumerable.Repeat(1f, flat.Count).ToArray();
@@ -222,12 +134,8 @@ public static class TerrainMeshBuilder
             // (Building a part: the triangles round it are there for the normals only.)
             if (only is not null && !only.Contains(((int)Math.Floor(((xs[a] + xs[b] + xs[c]) / 3 - grid.X0) / ChunkSize), (int)Math.Floor(((zs[a] + zs[b] + zs[c]) / 3 - grid.Z0) / ChunkSize)))) continue;
             var chunk = ChunkAt((xs[a] + xs[b] + xs[c]) / 3, (zs[a] + zs[b] + zs[c]) / 3);
-            var facing = Vector3.UnitY;
-            if (solid)
-            {
-                facing = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])), new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
-                if (facing.LengthSquared() < 1e-12f) continue;
-            }
+            var facing = Vector3.Cross(new Vector3((float)(xs[b] - xs[a]), (float)(ys[b] - ys[a]), (float)(zs[b] - zs[a])), new Vector3((float)(xs[c] - xs[a]), (float)(ys[c] - ys[a]), (float)(zs[c] - zs[a])));
+            if (facing.LengthSquared() < 1e-12f) continue;
             void Emit(int p, int q, int r, bool stone) =>
                 MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, p, stone), Vertex(chunk, q, stone), Vertex(chunk, r, stone), stone ? chunk.MaterialIndex(rock) : 0), facing);
             bool Steep(int i) => flat[i] < rockBelow;
@@ -273,54 +181,6 @@ public static class TerrainMeshBuilder
                 MeshChunk.AddFacing(chunk, new Triangle(first, first + 3, first + 2, sm), outward);
             }
         }
-        // The lining (tunnel ceilings under land): rock, facing into the road's room; per chunk its own vertices.
-        var liningOf = new Dictionary<(MeshChunk, int), int>();
-        if (stitched is { } st && st.LiningIndices.Count > 0)
-            for (var t = 0; t + 2 < st.LiningIndices.Count; t += 3)
-            {
-                int a = st.LiningIndices[t], b = st.LiningIndices[t + 1], c = st.LiningIndices[t + 2];
-                LiningVertex A = st.LiningVertices[a], B = st.LiningVertices[b], C = st.LiningVertices[c];
-                var mid = (A.Position + B.Position + C.Position) / 3;
-                var chunk = ChunkAt(mid.X, mid.Z);
-                int Lv(int i)
-                {
-                    if (liningOf.TryGetValue((chunk, i), out var v)) return v;
-                    var lv = st.LiningVertices[i];
-                    var o = chunk.ItemOffset;
-                    chunk.Positions.Add(new Vector3((float)(lv.Position.X - o.X), (float)(lv.Position.Y - o.Y), (float)(lv.Position.Z - o.Z)));
-                    chunk.Normals.Add(lv.Normal);
-                    chunk.Uv0.Add(default);
-                    chunk.Uv1.Add(default);
-                    liningOf[(chunk, i)] = chunk.Positions.Count - 1;
-                    return chunk.Positions.Count - 1;
-                }
-                var facing = Vector3.Cross(B.Position - A.Position, C.Position - A.Position);
-                // A floor is land like that beside it: grass, on the land's maps and points (see above).
-                if (floorAt.Contains(t))
-                {
-                    MeshChunk.AddFacing(chunk, new Triangle(Vertex(chunk, floorOf[a], false), Vertex(chunk, floorOf[b], false), Vertex(chunk, floorOf[c], false), 0), facing);
-                    continue;
-                }
-                MeshChunk.AddFacing(chunk, new Triangle(Lv(a), Lv(b), Lv(c), chunk.MaterialIndex(rock)), facing);
-            }
-        // Its lightmap: the strip beside the land's, one band per track in the chunk, along by its chart.
-        foreach (var group in liningOf.GroupBy(kv => kv.Key.Item1))
-        {
-            var chunk = group.Key;
-            var byRoad = group.GroupBy(kv => stitched!.LiningVertices[kv.Key.Item2].Road).ToList();
-            for (var k = 0; k < byRoad.Count; k++)
-            {
-                var charts = byRoad[k].Select(kv => (kv.Value, stitched!.LiningVertices[kv.Key.Item2].Chart)).ToList();
-                float xa = charts.Min(c => c.Chart.X), xb = charts.Max(c => c.Chart.X), ya = charts.Min(c => c.Chart.Y), yb = charts.Max(c => c.Chart.Y);
-                float v0 = 0.02f + 0.96f * k / byRoad.Count, v1 = 0.02f + 0.96f * (k + 1) / byRoad.Count;
-                foreach (var (v, chart) in charts)
-                {
-                    var light = new Vector2(0.8f + 0.18f * (chart.Y - ya) / Math.Max(1e-3f, yb - ya), v0 + (v1 - v0) * (chart.X - xa) / Math.Max(1e-3f, xb - xa));
-                    chunk.Uv1[v] = light;
-                    chunk.Uv0[v] = light;
-                }
-            }
-        }
         // Lightmap: the land over most of the map of its chunk, the skirts in the strip beside it. By the chunk's real extent,
         // which is more than its square (a triangle belongs to the chunk of its middle): clamped to the square, pieces beyond
         // it fell flat, and a chunk whose rock was only such pieces was refused by the importer.
@@ -339,10 +199,6 @@ public static class TerrainMeshBuilder
             foreach (var surface in chunk.Triangles.GroupBy(t => t.Material))
                 EnsureLightmapArea(chunk, surface.Key, surface.ToList());
         }
-        var withLand = vertexOf.Keys.Select(k => k.Item1).ToHashSet();
-        foreach (var chunk in liningOf.Keys.Select(k => k.Item1).Distinct().Where(c => !withLand.Contains(c)))
-            foreach (var surface in chunk.Triangles.GroupBy(t => t.Material))
-                EnsureLightmapArea(chunk, surface.Key, surface.ToList());
         return byChunk.OrderBy(kv => kv.Key.Item2).ThenBy(kv => kv.Key.Item1).Select(kv => kv.Value).ToList();
     }
 
@@ -431,7 +287,7 @@ public static class TerrainMeshBuilder
         var zs = mesh.Positions.Select(p => (double)p.Z).ToList();
         var triangles = new List<(int A, int B, int C)>();
         for (var t = 0; t + 2 < mesh.Indices.Count; t += 3) triangles.Add((mesh.Indices[t], mesh.Indices[t + 1], mesh.Indices[t + 2]));
-        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, null, true, keys.Select(k => (k.X, k.Z)).ToHashSet());
+        return triangles.Count == 0 ? [] : Assemble(grid, xs, ys, zs, mesh.Pinned, triangles, namePrefix, keys.Select(k => (k.X, k.Z)).ToHashSet());
     }
 
     /// <summary>

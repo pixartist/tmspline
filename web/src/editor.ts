@@ -80,8 +80,8 @@ export interface MeshPin {
   triangle?: [Vec3, Vec3, Vec3];
   /** Roads: the track (index in the map), its segment, and the spot along (m from the track's start) and across (m, + right). */
   road?: { track: number; segment: number; along?: number; across?: number };
-  /** Terrain: the chunk's index in the terrain mesh and the terrain's mesher. */
-  terrain?: { chunk: number; mesher?: string };
+  /** Terrain: the chunk's index in the terrain mesh. */
+  terrain?: { chunk: number };
   block?: { index: number; name: string };
   note: string;
 }
@@ -320,6 +320,64 @@ export class Editor {
       this.seamDebug = lines;
       this.scene.add(lines);
     }).catch(() => {});
+  }
+
+  /**
+   * Volume debug view (dev server): the solids the last boolean build cut the land by and grew it with, half
+   * transparent with their creases drawn: roads grey, free spaces blue, fills orange, abutments magenta.
+   */
+  volumesEnabled = false;
+  private volumes: THREE.Group | null = null;
+  static readonly VOLUME_COLORS: Record<string, number> = {
+    road: 0x9aa0a8, free: 0x3d8bff, fill: 0xff9a1f, abutment: 0xff3df2,
+  };
+
+  setVolumes(on: boolean): void {
+    this.volumesEnabled = on;
+    this.updateVolumes();
+  }
+
+  private updateVolumes(): void {
+    if (this.volumes) {
+      this.scene.remove(this.volumes);
+      this.volumes.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+      this.volumes = null;
+    }
+    if (!this.volumesEnabled) return;
+    const group = this.terrainMesh;
+    void fetch("/api/terrain/volumes").then((r) => (r.ok ? r.json() : null)).then((data: { kind: string; p: number[]; t: number[] }[] | null) => {
+      if (!data || !this.volumesEnabled || this.terrainMesh !== group) return;
+      if (this.volumes) { this.scene.remove(this.volumes); this.volumes.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); }); }
+      const all = new THREE.Group();
+      for (const solid of data) {
+        if (!solid.t.length) continue;
+        const color = Editor.VOLUME_COLORS[solid.kind] ?? 0xffffff;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(solid.p, 3));
+        geo.setIndex(solid.t);
+        geo.computeVertexNormals();
+        const fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
+        fill.renderOrder = 990;
+        fill.raycast = () => {};
+        // The creases (faces meeting at over 20 degrees) and its open edges, if any.
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false }));
+        edges.renderOrder = 991;
+        edges.raycast = () => {};
+        all.add(fill, edges);
+      }
+      this.volumes = all;
+      this.scene.add(all);
+    }).catch(() => {});
+  }
+
+  /** Debug: the land (own terrain), the ground plane and the scenery items (trees) not drawn, e.g. to see the volumes. */
+  landHidden = false;
+
+  setLandHidden(hidden: boolean): void {
+    this.landHidden = hidden;
+    if (this.terrainMesh) this.terrainMesh.visible = !hidden;
+    this.ground.visible = !hidden;
+    this.items.group.visible = !hidden;
   }
 
   /** A mesh's triangles as lines on it (its "wire" child), there while the debug view is on. */
@@ -766,7 +824,7 @@ export class Editor {
             if (Number.isFinite(along) && Number.isFinite(across)) Object.assign(pin.road, { along: +along.toFixed(2), across: +across.toFixed(2) });
           }
         } else {
-          pin.terrain = { chunk: chunks.indexOf(mesh), mesher: this.map.terrain?.mesher };
+          pin.terrain = { chunk: chunks.indexOf(mesh) };
         }
       }
     }
@@ -1094,6 +1152,9 @@ export class Editor {
   private terrainKey: { key: string; tracks: string; local: boolean } | null = null;
   private terrainShown: TerrainGrid | undefined;
   private terrainBuild = 0;
+  /** A terrain build is running; another was asked for meanwhile (it starts when this one ends). */
+  private terrainRunning = false;
+  private terrainAgain = false;
   /** The triangles of each chunk of the land shown (by its name); null while it is being built. */
   private terrainTriangles: Map<string, number> | null = null;
   /** The land's size has changed (or is being measured again). */
@@ -1123,8 +1184,21 @@ export class Editor {
     this.onTerrainSize();
     if (!grid) { this.setTerrainMesh(null); this.setQuickTerrain(false); this.setBusy("terrain", null); return; }
     this.setBusy("terrain", "Meshing the terrain…");
+    // (One build at a time per tab: while one runs, the next waits and starts when it ends, with the map as it is then;
+    // changes in between make one build. Two at once on the server each took twice as long, and the older one's land
+    // could come back last.)
+    if (this.terrainRunning) { this.terrainAgain = true; return; }
+    this.terrainRunning = true;
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      this.terrainRunning = false;
+      if (this.terrainAgain) { this.terrainAgain = false; this.syncTerrain(true); }
+    };
     const tracks = JSON.stringify(this.map.tracks);
     void buildTerrain(this.map).then(({ chunks, key, local }) => {
+      done();
       if (build !== this.terrainBuild) return;
       this.setBusy("terrain", null);
       const textured = (name: string, fallback: number) => {
@@ -1144,6 +1218,7 @@ export class Editor {
       for (const chunk of chunks) if (chunk.mesh.indices.length) group.add(this.chunkMesh(chunk, materials));
       this.setTerrainMesh(group, materials);
       this.updateSeamDebug();
+      this.updateVolumes();
       this.terrainKey = key ? { key, tracks, local } : null;
       this.terrainTriangles = new Map(chunks.map((c) => [`${c.x},${c.z}`, c.mesh.indices.length / 3]));
       this.onTerrainSize();
@@ -1159,6 +1234,7 @@ export class Editor {
       }
       this.settleTrees({ positions, indices });
     }).catch((err) => {
+      done();
       if (build === this.terrainBuild) this.setBusy("terrain", null);
       console.error("Terrain preview failed", err);
     });
@@ -1237,6 +1313,7 @@ export class Editor {
     this.terrainKey = null;
     this.clearDabMarks();
     if (mesh) this.scene.add(mesh);
+    if (mesh && this.landHidden) mesh.visible = false;
     // Built from the painted land: the quick mesh is done, unless a stroke is on (then this one is already behind).
     if (mesh && this.stroke && !this.sculpting) mesh.visible = false;
     else this.setQuickTerrain(false);
@@ -1391,8 +1468,8 @@ export class Editor {
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     if (!this.sculpting) this.setQuickTerrain(true);
     // The solid's brushes build each dab into the land shown, when the server has it as it is here (the same roads).
-    // Where the land comes out right only built whole (the seamless and boolean terrains), the chunks built on their own
-    // are a quick preview while painting, and the whole is built again when the stroke ends.
+    // The land comes out right only built whole (the roads cut out of it exactly): the chunks built on their own are a
+    // quick preview while painting, and the whole is built again when the stroke ends.
     this.liveDabs = this.sculpting && !!this.terrainKey && this.terrainKey.tracks === JSON.stringify(this.map.tracks);
     this.dab(at);
   }
@@ -3261,7 +3338,10 @@ export class Editor {
   private roadMaterial(name: string): THREE.Material {
     let m = this.roadMaterials.get(name);
     if (!m) {
-      const [surface, effect] = name.split("_");
+      // A platform underside ("UnderPlatformTech", Surfaces.UndersideOf) looks like the platform, without the grid.
+      const [named, effect] = name.split("_");
+      const under = /^Under(Platform\w+)$/.exec(named);
+      const surface = under ? under[1] : named;
       // See-through plane inside checkpoint/finish gates.
       if (surface === "GateCurtain" || surface === "GateCurtainFinish" || surface === "GateFx") {
         // (An effect gate's plane, "GateFx_Turbo" ...: in its gate's colour.)
@@ -3293,7 +3373,7 @@ export class Editor {
         road.color.set(effect && EFFECT_COLORS[effect] !== undefined ? new THREE.Color(0xffffff).lerp(new THREE.Color(EFFECT_COLORS[effect]), 0.6) : 0xffffff);
       }
       // Only the driving surface gets a grid; it makes banking and the cross-section's curvature readable.
-      if (!(surface in NO_GRID_SURFACES)) addRoadGrid(road, surface.startsWith("Road") ? ROAD_TEXTURE_INSET : 0);
+      if (!under && !(surface in NO_GRID_SURFACES)) addRoadGrid(road, surface.startsWith("Road") ? ROAD_TEXTURE_INSET : 0);
       this.roadMaterials.set(name, road);
       m = road;
     }
@@ -3330,7 +3410,7 @@ function segmentTints(track: Track, mesh: PreviewMesh): Float32Array {
   const colors = new Float32Array(mesh.positions.length).fill(1);
   const c = new THREE.Color();
   for (let t = 0; t < mesh.triangleMaterial.length; t++) {
-    const surface = mesh.materials[mesh.triangleMaterial[t]].split("_")[0];
+    const surface = mesh.materials[mesh.triangleMaterial[t]].split("_")[0].replace(/^Under(?=Platform)/, "");
     if (!isTinted(surface)) continue;
     const tint = ITEM_TINTS[track.segments[mesh.triangleSegment[t]]?.color ?? "Default"];
     c.setHex(tint ?? SURFACE_COLORS[surface]);

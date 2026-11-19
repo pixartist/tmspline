@@ -19,8 +19,14 @@ namespace TmSpline.Core.Geometry;
 public static class MeshRemesher
 {
     /// <param name="project">Puts a place back onto the surface (null: it stays where it was moved).</param>
-    public static AdaptiveMesh Remesh(AdaptiveMesh mesh, Func<Vector3, Vector3>? project = null, int rounds = 5, float flatDegrees = 35)
+    /// <param name="keep">Per vertex whether it stays as it is, like the open borders (null: only those).</param>
+    /// <param name="carry">Per-vertex flags carried along (a vertex made on an edge, or two merged, has a flag where
+    /// either end had it), each replaced with the flags of the result's vertices.</param>
+    public static AdaptiveMesh Remesh(AdaptiveMesh mesh, Func<Vector3, Vector3>? project = null, int rounds = 5, float flatDegrees = 35,
+        bool[]? keep = null, List<bool[]>? carry = null)
     {
+        var kept = keep?.ToList();
+        var flags = carry?.Select(c => c.ToList()).ToList();
         // Timing (TMSPLINE_VOXEL_STATS=on): each step's time, and how often and how long the projection ran.
         var stats = Environment.GetEnvironmentVariable("TMSPLINE_VOXEL_STATS") == "on";
         var stepTime = new double[4];
@@ -76,6 +82,7 @@ public static class MeshRemesher
             foreach (var f in faces) for (var k = 0; k < 3; k++) { var key = Key(f[k], f[(k + 1) % 3]); count[key] = count.GetValueOrDefault(key) + 1; }
             var locked = new bool[pos.Count];
             foreach (var (key, c) in count) if (c != 2) { locked[(int)(key >> 32)] = true; locked[(int)(key & 0xffffffff)] = true; }
+            if (kept is not null) for (var i = 0; i < kept.Count; i++) locked[i] |= kept[i];
             return locked;
         }
         Vector3 Normal(int[] f) => Vector3.Cross(pos[f[1]] - pos[f[0]], pos[f[2]] - pos[f[0]]);
@@ -107,6 +114,8 @@ public static class MeshRemesher
                     var m = pos.Count;
                     pos.Add(mid);
                     target.Add((target[a] + target[b]) / 2);
+                    kept?.Add(false);
+                    if (flags is not null) foreach (var fl in flags) fl.Add(fl[a] || fl[b]);
                     foreach (var f in list)
                     {
                         var face = faces[f];
@@ -184,6 +193,7 @@ public static class MeshRemesher
                     }
                     dead[b] = true;
                     pos[a] = at;
+                    if (flags is not null) foreach (var fl in flags) fl[a] |= fl[b];
                     target[a] = (target[a] + target[b]) / 2;
                 }
                 faces = faces.Where((_, f) => alive[f]).ToList();
@@ -282,6 +292,13 @@ public static class MeshRemesher
             {
                 if (index[v] < 0) { index[v] = result.Positions.Count; result.Positions.Add(pos[v]); result.Pinned.Add(false); }
                 result.Indices.Add(index[v]);
+            }
+        if (carry is not null && flags is not null)
+            for (var c = 0; c < carry.Count; c++)
+            {
+                var out1 = new bool[result.Positions.Count];
+                for (var v = 0; v < pos.Count; v++) if (index[v] >= 0) out1[index[v]] = flags[c][v];
+                carry[c] = out1;
             }
         return result;
     }

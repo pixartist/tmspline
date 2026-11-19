@@ -12,6 +12,9 @@ export const SURFACES = [
 export type Surface = (typeof SURFACES)[number];
 
 export const BORDER_MATERIALS = ["Rubber", "Plastic"] as const;
+/** The slab's underside, plain side walls and end caps (mirrors UndersideMaterial in C#). */
+export const UNDERSIDE_MATERIALS = ["Concrete", "PlatformTech", "PlatformDirt", "PlatformGrass", "PlatformIce", "PlatformPlastic"] as const;
+export type UndersideMaterial = (typeof UNDERSIDE_MATERIALS)[number];
 export type BorderMaterial = (typeof BORDER_MATERIALS)[number];
 
 export const EFFECTS = [
@@ -124,6 +127,8 @@ export interface TrackSegment {
   borderMaterial: BorderMaterial;
   /** Whether the road slab is closed below (underside and side walls); off saves about half the triangles. */
   underside: boolean;
+  /** What the slab's underside, plain side walls and end caps are made of. */
+  undersideMaterial: UndersideMaterial;
   /** The game's item color for the segment's pieces: tints borders, side walls and plastic surfaces. */
   color: ItemColor;
   effect: Effect;
@@ -174,7 +179,7 @@ export const BUMP_PATTERNS = ["None", "Waves", "Noise", "Ridges"] as const;
 export type BumpPattern = (typeof BUMP_PATTERNS)[number];
 
 export const defaultSegment = (): TrackSegment => ({
-  surface: "RoadTech", borders: true, borderMaterial: "Rubber", underside: true, color: "Default", effect: "None", effectYaw: 0, effectPitch: 0,
+  surface: "RoadTech", borders: true, borderMaterial: "Rubber", underside: true, undersideMaterial: "Concrete", color: "Default", effect: "None", effectYaw: 0, effectPitch: 0,
   bumps: "None", bumpHeight: 0.5, bumpSize: 8, bumpDetail: 2,
   signs: "None", signSide: "Both", signSpacing: 16,
 });
@@ -340,20 +345,11 @@ export interface TerrainGrid {
   smoothsOver?: number[];
   /** How fine the mesh is (the cells at the roads' edges: 1, 1.5, 2, 2 m, and Low's grow sooner away from them); missing: High. */
   quality?: TerrainQuality;
-  /** How the mesh is made (see TERRAIN_MESHERS); missing: voxel. */
-  mesher?: TerrainMesher;
 }
 
 export const TERRAIN_QUALITIES = ["Fine", "High", "Medium", "Low"] as const;
 export type TerrainQuality = (typeof TERRAIN_QUALITIES)[number];
 
-/**
- * How the own terrain is meshed: voxel (the voxel terrain, strips from the roads' edges to it), or seamless
- * (experimental: the land simplified and remeshed, cut back a little from the roads and zipped to their edges and
- * undersides; built whole only, so after a stroke of the brush the whole is built again).
- */
-export const TERRAIN_MESHERS = ["voxel", "seamless", "boolean"] as const;
-export type TerrainMesher = (typeof TERRAIN_MESHERS)[number];
 
 /**
  * A vanilla item of the game's Stadium collection (e.g. "SpringTreeTall") standing at `position` (metres, its base),
@@ -760,8 +756,7 @@ export function parseMap(json: string): TrackMap {
       heights: t.heights.map((h: unknown) => (typeof h === "number" && Number.isFinite(h) ? h : null)),
       ...(typeof t.rockAngle === "number" && Number.isFinite(t.rockAngle) ? { rockAngle: Math.max(0, Math.min(90, t.rockAngle)) } : {}),
       ...((TERRAIN_QUALITIES as readonly string[]).includes(t.quality as string) && t.quality !== "High" ? { quality: t.quality as TerrainQuality } : {}),
-      // The mesher (missing: voxel; the loops mesher is gone, its maps use the boolean one).
-      ...((t.mesher as string) === "loops" ? { mesher: "boolean" as TerrainMesher } : (TERRAIN_MESHERS as readonly string[]).includes(t.mesher as string) && t.mesher !== "voxel" ? { mesher: t.mesher as TerrainMesher } : {}),
+      // (Older maps name a mesher, "mesher": there is only the boolean one now, and the field is dropped.)
       // The brushes' dabs (five numbers each).
       ...Object.fromEntries((["edits", "editsOver", "smooths", "smoothsOver"] as const).flatMap((k) =>
         Array.isArray(t[k]) && t[k].length > 0 && t[k].length % 5 === 0 && t[k].every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ? [[k, t[k] as number[]]] : [])),

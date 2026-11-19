@@ -229,8 +229,17 @@ public static class ServerApp
         .DisableAntiforgery();
 
         // The brush's dabs, built into the terrain last asked for under the key: only the chunks they reach come back.
-        // Development: the seam's front edges the last terrain build left open (the editor draws them with the mesh view).
-        if (app.Environment.IsDevelopment()) app.MapGet("/api/terrain/open", () => Results.Ok(TmSpline.Core.Geometry.SeamZipper.LastOpen));
+        // Development: the last boolean build's free spaces (the editor draws them with the Gaps view).
+        if (app.Environment.IsDevelopment()) app.MapGet("/api/terrain/open", () => Results.Ok(TmSpline.Core.Geometry.BooleanSeam.LastVolumes));
+        // Development: the last boolean build's solids themselves (the editor's Volumes view).
+        if (app.Environment.IsDevelopment())
+        {
+            TmSpline.Core.Geometry.BooleanSeam.KeepSolids = true;
+            app.MapGet("/api/terrain/volumes", () => Results.Ok(TmSpline.Core.Geometry.BooleanSeam.LastSolids
+                .Select(s => new { kind = s.Kind, p = s.Positions, t = s.Tris })));
+            // The abutment's section nearest a plan point, in its own frame (for comparing with a model).
+            app.MapGet("/api/debug/section", (float x, float z, int? offset) => TmSpline.Core.Geometry.BooleanSeam.DebugSection(x, z, offset ?? 0) is { } section ? Results.Ok(section) : Results.NotFound());
+        }
 
         app.MapPost("/api/terrain/dab", (ExportService.TerrainDabDto request, ExportService service) =>
         {

@@ -86,6 +86,14 @@ public sealed class MeshChunk
 
 public sealed class RoadMeshSettings
 {
+    /// <summary>
+    /// The roads as the solids the land is cut by (BooleanSeam), not for the export: a segment without underside has no
+    /// slab there, only its curbs (closed on their own; without borders nothing, as in a gap). The land under it is cut by
+    /// the road's free space alone, a little under the driving surface, so the land is its floor. (Cut by a slab, the
+    /// land's hollow round it showed where no underside covered it: on a curled edge's back.) Where it meets a segment
+    /// with underside, that one's slab is capped.
+    /// </summary>
+    public bool LandSolids { get; init; }
     public double Thickness { get; set; } = 0.5;
     /// <summary>
     /// Curb width, from the road's edge outwards: as the game's RoadTech curbs, which reach from x = 1.5 in the cell to
@@ -365,8 +373,8 @@ public static class RoadMeshBuilder
         ("top", 6), ("bottom_b", 1.5), ("bottom_n", 1.5),
         ("rb_out", 0.5), ("rb_top", 0.5), ("rb_in", 0.5),
         ("lb_in", 0.5), ("lb_top", 0.5), ("lb_out", 0.5),
-        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("decal", 0.25), ("mark_r", 0.1), ("mark_l", 0.1),
-        ("cap", 0.5), ("hole", 0.5),
+        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("rb_shut", 0.25), ("lb_shut", 0.25),
+        ("decal", 0.25), ("mark_r", 0.1), ("mark_l", 0.1), ("cap", 0.5), ("hole", 0.5),
     };
 
     public static List<MeshChunk> Build(Track track, IReadOnlyList<Ring> rings, Vec3d origin, string namePrefix, RoadMeshSettings? settings = null)
@@ -388,11 +396,14 @@ public static class RoadMeshBuilder
         var cutter = new HoleCutter(TrackObjects.Holes(track, rings, segmentStarts));
         var gaps = TrackObjects.GapRanges(track, segmentStarts);
         var intervals = rings.Count - 1;
+        // (For the land: a segment without underside or borders is nothing, as a gap; with borders only its curbs.)
+        bool Open(int k) => settings.LandSolids && !track.Segments[rings[k].Segment].Underside;
         var inGap = Enumerable.Range(0, intervals).Select(k =>
         {
             var mid = (rings[k].Distance + rings[k + 1].Distance) / 2;
-            return gaps.Any(g => mid > g.Start && mid < g.End);
+            return gaps.Any(g => mid > g.Start && mid < g.End) || (Open(k) && !track.Segments[rings[k].Segment].Borders);
         }).ToArray();
+        bool CurbsOnly(int k) => k >= 0 && k < intervals && !inGap[k] && Open(k);
         // The road ends (and gets a cap) before a gap and at an open track's own start and end.
         bool GapBefore(int k) => k > 0 ? inGap[k - 1] : !track.Closed || inGap[intervals - 1];
         bool GapAfter(int k) => k + 1 < intervals ? inGap[k + 1] : !track.Closed || inGap[0];
@@ -406,17 +417,20 @@ public static class RoadMeshBuilder
             var chunkLength = Math.Max(1e-6, rings[end].Distance - chunkStart);
             // Ends of the road at gaps and open track ends: (ring, segment, facing forward, only the curbs' end faces: where borders start or
             // end, grown down to a sliver).
-            var caps = new List<(int Ring, TrackSegment Segment, bool Forward, bool CurbsOnly)>();
+            var caps = new List<(int Ring, TrackSegment Segment, bool Forward, bool CurbsOnly, bool SlabOnly)>();
 
             for (var k = start; k < end; k++)
             {
                 if (inGap[k])
                     continue;
                 var segment = track.Segments[rings[k].Segment];
-                if (GapBefore(k)) caps.Add((k, segment, false, false));
-                else if (segment.Borders && rings[k].BorderScale <= 0) caps.Add((k, segment, false, true));
-                if (GapAfter(k)) caps.Add((k + 1, segment, true, false));
-                else if (segment.Borders && rings[k + 1].BorderScale <= 0) caps.Add((k + 1, segment, true, true));
+                var curbsOnly = CurbsOnly(k);
+                if (GapBefore(k)) caps.Add((k, segment, false, curbsOnly, false));
+                else if (segment.Borders && rings[k].BorderScale <= 0) caps.Add((k, segment, false, true, false));
+                else if (!curbsOnly && CurbsOnly(k > 0 ? k - 1 : track.Closed ? intervals - 1 : -1)) caps.Add((k, segment, false, false, true));
+                if (GapAfter(k)) caps.Add((k + 1, segment, true, curbsOnly, false));
+                else if (segment.Borders && rings[k + 1].BorderScale <= 0) caps.Add((k + 1, segment, true, true, false));
+                else if (!curbsOnly && CurbsOnly(k + 1 < intervals ? k + 1 : track.Closed ? 0 : -1)) caps.Add((k + 1, segment, true, false, true));
                 var range = segmentRanges[rings[k].Segment];
                 // Both rings of the interval use the interval's segment, so per-segment shape changes (borders) never
                 // tear a strip mid-interval; with the same segment both profiles list the same edges in the same order.
@@ -477,7 +491,7 @@ public static class RoadMeshBuilder
                 var band = bands["cap"];
                 var slice = (band.U1 - band.U0) / caps.Count;
                 AddCap(chunk, rings[caps[i].Ring], caps[i].Segment, caps[i].Forward, ringColumns[caps[i].Ring], itemOrigin,
-                    (band.U0 + slice * i, band.U0 + slice * (i + 1)), settings, caps[i].CurbsOnly);
+                    (band.U0 + slice * i, band.U0 + slice * (i + 1)), settings, caps[i].CurbsOnly, caps[i].SlabOnly);
             }
             chunks.Add(chunk);
         }
@@ -528,7 +542,7 @@ public static class RoadMeshBuilder
     /// curbs' cross-sections (where borders start or end on running road).
     /// </summary>
     private static void AddCap(MeshChunk chunk, Ring ring, TrackSegment segment, bool forward, int topColumns, Vec3d itemOrigin,
-        (double U0, double U1) band, RoadMeshSettings s, bool curbsOnly = false)
+        (double U0, double U1) band, RoadMeshSettings s, bool curbsOnly = false, bool slabOnly = false)
     {
         // As in Profile: the curbs stand on the road's edges, outside the width.
         var (bh, bt) = segment.Borders ? BorderSize(ring, s) : (0, 0);
@@ -550,7 +564,7 @@ public static class RoadMeshBuilder
                 triangles.Add((i, i + 3, i + 2));
             }
         }
-        if (segment.Borders)
+        if (segment.Borders && !slabOnly)
         {
             // Cross-sections of the curbs (as built in Profile): convex pentagons round the surface's end.
             var arc = SurfaceArc.For(ring, 0, 0, 0, 1, s);
@@ -570,7 +584,7 @@ public static class RoadMeshBuilder
         var normalF = new Vector3((float)normal.X, (float)normal.Y, (float)normal.Z);
         var (minX, maxX) = (points.Min(p => p.X), points.Max(p => p.X));
         var (minY, maxY) = (points.Min(p => p.Y), points.Max(p => p.Y));
-        var m = chunk.MaterialIndex(Surfaces.Underside);
+        var m = chunk.MaterialIndex(Surfaces.UndersideOf(segment.UndersideMaterial));
         var baseIndex = chunk.Positions.Count;
         foreach (var (x, y) in points)
         {
@@ -729,8 +743,10 @@ public static class RoadMeshBuilder
         Edge Surface(string key, double lift, double sign, TmMaterial material, double s0, double s1) =>
             new(key, 0, 0, 0, 0, topColumns, material) { Arc = SurfaceArc.For(ring, s0, s1, lift, sign, s) };
 
-        yield return Surface("top", 0, 1, road, half, -half);
-        if (road.GameplayId is not null && Surfaces.Decal(segment.Effect) is { } decal)
+        var curbsOnly = s.LandSolids && !segment.Underside;
+        if (!curbsOnly)
+            yield return Surface("top", 0, 1, road, half, -half);
+        if (!curbsOnly && road.GameplayId is not null && Surfaces.Decal(segment.Effect) is { } decal)
         {
             // Whole pads per segment: about one road width each, stretched slightly to fit exactly.
             var length = Math.Max(1e-6, range.End - range.Start);
@@ -740,14 +756,16 @@ public static class RoadMeshBuilder
                 DecalYaw = segment.EffectYaw * Math.PI / 180, DecalStart = range.Start, DecalPadLength = length / pads,
             };
         }
-        if (segment.Surface == Model.Surface.RoadWood && half > 2 * WoodLineWidth)
+        if (!curbsOnly && segment.Surface == Model.Surface.RoadWood && half > 2 * WoodLineWidth)
         {
             // The wooden road's white lines: a strip of the game's line decal along each edge (as on its SnowRoad blocks).
             yield return new Edge("mark_r", 0, 0, 0, 0, 1, Surfaces.RoadWoodLine) { Arc = SurfaceArc.For(ring, half, half - WoodLineWidth, DecalLift, 1, s) };
             yield return new Edge("mark_l", 0, 0, 0, 0, 1, Surfaces.RoadWoodLine) { Arc = SurfaceArc.For(ring, -half + WoodLineWidth, -half, DecalLift, 1, s) };
         }
-        if (segment.Underside)
-            yield return Surface(segment.Borders ? "bottom_b" : "bottom_n", -h, -1, Surfaces.Underside, -half, half);
+        var under = Surfaces.UndersideOf(segment.UndersideMaterial);
+        var closed = segment.Underside;
+        if (closed)
+            yield return Surface(segment.Borders ? "bottom_b" : "bottom_n", -h, -1, under, -half, half);
 
         // Curbs and sides are built in the local frame of each surface end: outward along the tangent,
         // up along the normal. Straight edges are ordered so that the outward normal is (dy, -dx).
@@ -767,19 +785,23 @@ public static class RoadMeshBuilder
             yield return Line("rb_out", rOut, At(er, tr, bt, nr, bh), border);
             yield return Line("rb_top", At(er, tr, bt, nr, bh), At(er, tr, 0, nr, bh), border);
             yield return Line("rb_in", At(er, tr, 0, nr, bh), er, border);
-            if (segment.Underside)
-                yield return Line("rb_bot", rIn, rOut, Surfaces.Underside);
+            // (Closed underneath also without underside, along the slab's edge from the surface's edge down to its corner:
+            // as the land is cut round them (the curbs alone, see curbsOnly), else the land showed a slit below them.)
+            yield return Line("rb_bot", rIn, rOut, under);
+            if (!closed)
+                yield return Line("rb_shut", er, rIn, under);
             yield return Line("lb_in", el, At(el, tl, 0, nl, bh), border);
             yield return Line("lb_top", At(el, tl, 0, nl, bh), At(el, tl, -bt, nl, bh), border);
             yield return Line("lb_out", At(el, tl, -bt, nl, bh), lOut, border);
-            if (segment.Underside)
-                yield return Line("lb_bot", lOut, lIn, Surfaces.Underside);
+            yield return Line("lb_bot", lOut, lIn, under);
+            if (!closed)
+                yield return Line("lb_shut", lIn, el, under);
         }
-        else if (segment.Underside)
+        else if (closed)
         {
             // Plain sides close the slab along the surface's own normal, also with upright borders.
-            yield return Line("rs", CurbBottom(ring, arc, half, 1, 0, h).Inner, er, Surfaces.Underside);
-            yield return Line("ls", el, CurbBottom(ring, arc, -half, -1, 0, h).Inner, Surfaces.Underside);
+            yield return Line("rs", CurbBottom(ring, arc, half, 1, 0, h).Inner, er, under);
+            yield return Line("ls", el, CurbBottom(ring, arc, -half, -1, 0, h).Inner, under);
         }
     }
 

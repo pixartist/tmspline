@@ -77,9 +77,6 @@ public static class TrackJson
         /// <summary>The mesh's fineness (TerrainQuality); missing: High.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Quality { get; set; }
-        /// <summary>How the mesh is made (TerrainMesher: voxel, seamless); missing: voxel.</summary>
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Mesher { get; set; }
         /// <summary>The 3D brush's dabs: x, y, z, radius, amount (metres of land added, negative: removed) each.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public double[]? Edits { get; set; }
@@ -195,6 +192,7 @@ public static class TrackJson
         public bool Borders { get; set; } = true;
         public BorderMaterial BorderMaterial { get; set; } = BorderMaterial.Rubber;
         public bool Underside { get; set; } = true;
+        public UndersideMaterial UndersideMaterial { get; set; }
         public ItemColor Color { get; set; }
         public Effect Effect { get; set; } = Effect.None;
         public double EffectYaw { get; set; }
@@ -256,8 +254,8 @@ public static class TrackJson
                 Surface = t.Surface, Cell = t.Cell, X0 = t.X0, Z0 = t.Z0, Columns = t.Columns, Rows = t.Rows, Skirt = Math.Max(0, t.Skirt),
                 RockAngle = t.RockAngle is { } angle && double.IsFinite(angle) ? Math.Clamp(angle, 0, 90) : 90,
                 Quality = Enum.TryParse<TerrainQuality>(t.Quality, true, out var quality) && Enum.IsDefined(quality) ? quality : TerrainQuality.High,
-                // (The loops mesher is gone: its maps are built with the boolean one.)
-                Mesher = string.Equals(t.Mesher, "loops", StringComparison.OrdinalIgnoreCase) ? TerrainMesher.Boolean : Enum.TryParse<TerrainMesher>(t.Mesher, true, out var mesher) && Enum.IsDefined(mesher) ? mesher : TerrainMesher.Voxel,
+                // (Older maps name a mesher, "mesher": voxel, seamless, loops or boolean. There is only the boolean one
+                // now: the field is ignored.)
                 Heights = t.Heights.Select(h => h is { } v && double.IsFinite(v) ? v : double.NaN).ToArray(),
                 Edits = t.Edits is { } edits && edits.Length % 5 == 0 && edits.All(double.IsFinite) ? edits : [],
                 EditsOver = t.EditsOver is { } over && over.Length % 5 == 0 && over.All(double.IsFinite) ? over : [],
@@ -307,7 +305,7 @@ public static class TrackJson
         foreach (var s in dto.Segments)
             track.Segments.Add(new TrackSegment
             {
-                Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
+                Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, UndersideMaterial = s.UndersideMaterial, Color = s.Color,
                 Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
                 Bumps = s.Bumps, BumpHeight = Math.Clamp(s.BumpHeight, -20, 20), BumpSize = Math.Clamp(s.BumpSize, 0.5, 512),
                 BumpDetail = Math.Clamp(s.BumpDetail, 0.25, 16), BumpSeed = s.BumpSeed,
@@ -342,7 +340,7 @@ public static class TrackJson
         }).ToList(),
         Segments = track.Segments.Select(s => new SegmentDto
         {
-            Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, Color = s.Color,
+            Surface = s.Surface, Borders = s.Borders, BorderMaterial = s.BorderMaterial, Underside = s.Underside, UndersideMaterial = s.UndersideMaterial, Color = s.Color,
             Effect = s.Effect, EffectYaw = s.EffectYaw, EffectPitch = s.EffectPitch,
             Bumps = s.Bumps, BumpHeight = s.BumpHeight, BumpSize = s.BumpSize, BumpDetail = s.BumpDetail, BumpSeed = s.BumpSeed,
             Signs = s.Signs, SignSide = s.SignSide, SignSpacing = s.SignSpacing, SignColor = s.SignColor,
