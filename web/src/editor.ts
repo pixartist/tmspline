@@ -1134,7 +1134,7 @@ export class Editor {
   private syncBlocks(): void {
     this.syncGround();
     const h = this.drag?.pick ?? this.hover;
-    const pillars = pillarColumns(this.map.blocks, this.library);
+    const pillars = this.columns();
     // Clips (side walls, caps) show on faces without a neighbour, columns included.
     this.blocks.setNeighbours([...this.map.blocks, ...pillars]);
     this.blocks.sync(this.map.blocks, new Set(this.selectedBlocks()), h?.kind === "block" ? h.index : null);
@@ -1644,7 +1644,16 @@ export class Editor {
     const lib = this.library;
     const blocks = this.map.blocks.map((b) =>
       !b.free && !b.pillar && b.y === 0 && lib?.hasGroundAdapter(b.name) ? { ...b, extraFlags: GROUND_ADAPTER_FLAG } : b);
-    return { ...this.map, blocks: [...blocks, ...pillarColumns(this.map.blocks, lib)] };
+    return { ...this.map, blocks: [...blocks, ...this.columns()] };
+  }
+
+  /**
+   * The columns under the map's air blocks (see pillarColumns). Only in Stadium: the block library is Stadium's, and the
+   * other environments lack some of its column pieces (the game refused a BlueBay map with TrackWallDeadendRoundPillar
+   * under start and finish blocks placed while it was Stadium).
+   */
+  private columns(): VanillaBlock[] {
+    return this.map.environment ? [] : pillarColumns(this.map.blocks, this.library);
   }
 
   /**
@@ -3299,7 +3308,7 @@ export class Editor {
     v.segmentStarts = mesh.segmentStarts;
     v.placements = mesh.objects;
     // (The gates stand where their objects now are.)
-    if (track.objects.some((o) => o.kind === "Gate")) this.blocks.syncPillars([...pillarColumns(this.map.blocks, this.library), ...this.gateBlocks()]);
+    if (track.objects.some((o) => o.kind === "Gate")) this.blocks.syncPillars([...this.columns(), ...this.gateBlocks()]);
     v.quality = quality;
     this.updateEffectArrows(v, mesh);
 
