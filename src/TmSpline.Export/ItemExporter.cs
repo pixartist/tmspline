@@ -31,10 +31,20 @@ public static class ItemExporter
             WriteSources(mesh, userDir, itemFolder, authorName);
 
         // The importer is a Windows program: its arguments use backslashes, also under Wine.
-        var output = await importer.RunAsync(userDir, $@"Items\{itemFolder}\*.Item.xml", ct);
+        string output;
+        var parts = meshes.ToList();
+        try
+        {
+            output = await importer.RunAsync(userDir, $@"Items\{itemFolder}\*.Item.xml", ct);
+        }
+        catch (ImporterException e)
+        {
+            output = e.Output;
+            parts = await RetryAsync(meshes, userDir, itemFolder, authorName, importer, e, log, ct);
+        }
         log?.Invoke(output);
 
-        return meshes.Select(m =>
+        return parts.Select(m =>
         {
             var item = FindImported(userDir, itemFolder, m.Name, output);
             UseGameMaterials(item.ItemGbxPath, m.AllMaterials, log);
@@ -114,6 +124,99 @@ public static class ItemExporter
         using (var file = File.Create(itemPath))
             gbx.Save(file);
         log?.Invoke($"{Path.GetFileName(itemPath)}: {changed} material(s) made game materials");
+    }
+
+    /// <summary>How often an item the importer fails on is split in halves at most (into up to 2^n items).</summary>
+    private const int MaxSplits = 3;
+
+    /// <summary>
+    /// After a failed importer run: every item it left without output imported on its own, and an item that fails
+    /// alone split in two halves (by its triangles, the same place), and so on, up to MaxSplits times. NadeoImporter
+    /// (its FBX reading, 2022) crashes on some meshes for no reason in the mesh itself: values (positions, normals,
+    /// UVs) do not matter, but removing any one triangle can make it pass, and each half of such a mesh imports
+    /// (found on a map whose terrain and road items crashed it at some qualities, 2026-11-20). Items with triggers,
+    /// waypoints or spawns are never split. Returns the meshes the items are now made of.
+    /// </summary>
+    private static async Task<List<MeshChunk>> RetryAsync(IReadOnlyList<MeshChunk> meshes, string userDir, string itemFolder,
+        string authorName, IImporter importer, ImporterException first, Action<string>? log, CancellationToken ct)
+    {
+        var dir = Path.Combine(userDir, "Items", ToFileSystemPath(itemFolder));
+        bool Imported(string name) => Directory.Exists(dir) && Directory.EnumerateFiles(dir)
+            .Any(f => string.Equals(Path.GetFileName(f), name + ".Item.Gbx", StringComparison.OrdinalIgnoreCase));
+        var result = new List<MeshChunk>();
+        var pending = new List<(MeshChunk Mesh, int Depth)>();
+        foreach (var mesh in meshes)
+            if (Imported(mesh.Name)) result.Add(mesh);
+            else pending.Add((mesh, 0));
+        log?.Invoke($"importer failed; {pending.Count} of {meshes.Count} items imported one by one");
+        while (pending.Count > 0)
+        {
+            var (mesh, depth) = pending[0];
+            pending.RemoveAt(0);
+            try
+            {
+                await importer.RunAsync(userDir, $@"Items\{itemFolder}\{mesh.Name}.Item.xml", ct);
+                if (!Imported(mesh.Name)) throw new ImporterException($"NadeoImporter did not produce {mesh.Name}", "");
+                result.Add(mesh);
+            }
+            catch (ImporterException) when (depth < MaxSplits && Halves(mesh) is { } halves)
+            {
+                log?.Invoke($"{mesh.Name}: importer failed, split in two");
+                DeleteSources(mesh, userDir, itemFolder);
+                foreach (var half in halves)
+                {
+                    WriteSources(half, userDir, itemFolder, authorName);
+                    pending.Add((half, depth + 1));
+                }
+            }
+            catch (ImporterException e)
+            {
+                throw new ImporterException($"{first.Message}; {mesh.Name} failed also alone", e.Output);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>A plain mesh's triangles in two halves (each with only the vertices and materials it uses); null for a mesh with triggers, waypoints or spawns, or too small.</summary>
+    private static MeshChunk[]? Halves(MeshChunk mesh)
+    {
+        if (mesh.Triggers.Count > 0 || mesh.NotCollidable.Count > 0 || mesh.Sockets.Count > 0 || mesh.Waypoint != Waypoint.None
+            || mesh.TriggerGameplay is not null || mesh.Triangles.Count < 2)
+            return null;
+        var mid = mesh.Triangles.Count / 2;
+        return [Part(mesh, mesh.Triangles.Take(mid), "_a"), Part(mesh, mesh.Triangles.Skip(mid), "_b")];
+    }
+
+    private static MeshChunk Part(MeshChunk mesh, IEnumerable<Triangle> triangles, string suffix)
+    {
+        var part = new MeshChunk
+        {
+            Name = mesh.Name + suffix, ItemOffset = mesh.ItemOffset, Frame = mesh.Frame, Effect = mesh.Effect,
+            EffectCenter = mesh.EffectCenter, EffectDirection = mesh.EffectDirection, EffectRoadDirection = mesh.EffectRoadDirection,
+            VertexShade = mesh.VertexShade, Color = mesh.Color,
+        };
+        var vertexAt = new Dictionary<int, int>();
+        int Vertex(int v)
+        {
+            if (vertexAt.TryGetValue(v, out var i)) return i;
+            i = part.Positions.Count;
+            part.Positions.Add(mesh.Positions[v]);
+            part.Normals.Add(mesh.Normals[v]);
+            part.Uv0.Add(mesh.Uv0[v]);
+            part.Uv1.Add(mesh.Uv1[v]);
+            if (v < mesh.Surface.Count) part.Surface.Add(mesh.Surface[v]);
+            return vertexAt[v] = i;
+        }
+        foreach (var t in triangles)
+            part.Triangles.Add(t with { A = Vertex(t.A), B = Vertex(t.B), C = Vertex(t.C), Material = part.MaterialIndex(mesh.Materials[t.Material]) });
+        return part;
+    }
+
+    private static void DeleteSources(MeshChunk mesh, string userDir, string itemFolder)
+    {
+        var workDir = Path.Combine(userDir, "Work", "Items", ToFileSystemPath(itemFolder));
+        foreach (var file in new[] { Path.Combine(workDir, "Mesh", mesh.Name + ".fbx"), Path.Combine(workDir, "Mesh", mesh.Name + ".MeshParams.xml"), Path.Combine(workDir, mesh.Name + ".Item.xml") })
+            if (File.Exists(file)) File.Delete(file);
     }
 
     public static void WriteSources(MeshChunk mesh, string userDir, string itemFolder, string authorName)

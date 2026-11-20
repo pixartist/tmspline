@@ -373,9 +373,15 @@ public static class RoadMeshBuilder
         ("top", 6), ("bottom_b", 1.5), ("bottom_n", 1.5),
         ("rb_out", 0.5), ("rb_top", 0.5), ("rb_in", 0.5),
         ("lb_in", 0.5), ("lb_top", 0.5), ("lb_out", 0.5),
-        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("rb_shut", 0.25), ("lb_shut", 0.25),
-        ("decal", 0.25), ("mark_r", 0.1), ("mark_l", 0.1), ("cap", 0.5), ("hole", 0.5),
+        ("rs", 0.5), ("ls", 0.5), ("rb_bot", 0.25), ("lb_bot", 0.25), ("decal", 0.25), ("mark_r", 0.1), ("mark_l", 0.1),
+        ("cap", 0.5), ("hole", 0.5),
     };
+    /// <summary>
+    /// Edges that share another's band: the curbs' inner faces under a road without underside (rb_shut, lb_shut) use the
+    /// slab's sides' (rs, ls), which only a road with underside and without borders has, so the two never meet on a ring.
+    /// (Bands of their own moved every road's lightmap, and Nadeo's importer crashed on some maps that exported before.)
+    /// </summary>
+    private static readonly (string Key, string Band)[] SharedBands = { ("rb_shut", "rs"), ("lb_shut", "ls") };
 
     public static List<MeshChunk> Build(Track track, IReadOnlyList<Ring> rings, Vec3d origin, string namePrefix, RoadMeshSettings? settings = null)
     {
@@ -391,7 +397,7 @@ public static class RoadMeshBuilder
         var ringColumns = RingColumns(track, rings, settings, bumps);
         var bands = BuildBands();
         // Small integer ids for edge keys make the per-chunk vertex cache cheap to hash.
-        var keyIds = LightmapBands.Select((b, i) => (b.Key, i)).ToDictionary(x => x.Key, x => x.i);
+        var keyIds = LightmapBands.Select(b => b.Key).Concat(SharedBands.Select(b => b.Key)).Select((key, i) => (key, i)).ToDictionary(x => x.key, x => x.i);
 
         var cutter = new HoleCutter(TrackObjects.Holes(track, rings, segmentStarts));
         var gaps = TrackObjects.GapRanges(track, segmentStarts);
@@ -920,6 +926,8 @@ public static class RoadMeshBuilder
             result[key] = (u, u + w);
             u += w;
         }
+        foreach (var (key, band) in SharedBands)
+            result[key] = result[band];
         return result;
     }
 }
