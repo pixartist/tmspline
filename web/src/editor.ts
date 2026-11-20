@@ -1367,6 +1367,21 @@ export class Editor {
    * Clears the roads: what was painted into their space ("Into the roads") is cut by them again. The paint itself
    * stays, beside and over the roads. One undo step. False when nothing was painted into the roads.
    */
+  /** Removes the raise, lower and smooth brushes' strokes (one undo step); whether there were any. */
+  clearBrushStrokes(): boolean {
+    const grid = this.map.terrain;
+    if (!grid?.edits?.length && !grid?.editsOver?.length && !grid?.smooths?.length && !grid?.smoothsOver?.length) return false;
+    this.onBeforeEdit(structuredClone(this.map));
+    this.lastMerge = { time: 0 };
+    delete grid.edits;
+    delete grid.editsOver;
+    delete grid.smooths;
+    delete grid.smoothsOver;
+    this.onChange();
+    this.syncTerrain(true);
+    return true;
+  }
+
   clearRoads(): boolean {
     const grid = this.map.terrain;
     if (!grid?.editsOver?.length && !grid?.smoothsOver?.length) return false;
@@ -1681,6 +1696,11 @@ export class Editor {
       const grid = buildTerrainGrid(roads, options, options.ownTerrain, !!this.map.environment);
       if (!grid) return null;
       const trees = plantOnTerrain(grid, options, roadFootprint(meshes));
+      // The brushes' strokes stay (they are where they were painted, not on the grid); the flatten brush's work is in
+      // the grid's heights and goes with it.
+      const old = this.map.terrain;
+      for (const key of ["edits", "editsOver", "smooths", "smoothsOver"] as const)
+        if (old?.[key]?.length) grid[key] = [...old[key]!];
       this.lastHeightMap = null;
       this.drawHeightMap();
       this.editBlocks((blocks) => {

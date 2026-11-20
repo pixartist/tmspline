@@ -763,11 +763,15 @@ function renderInspector(editor: Editor, root: HTMLElement, removePoint: () => v
       if (solid)
         checkbox(root, "Into the roads (not cut by them)", () => paint.uncut, (v) => { paint.uncut = v; apply(); });
       // What was painted into the roads cannot be painted away by the other brushes (the roads cut those): this does it.
-      buttonRow(root, [{ label: "Clear roads", onClick: () => { scenery.note = editor.clearRoads() ? "The roads cut through everything painted again." : "Nothing is painted into the roads."; editor.onChange(); } }]);
+      buttonRow(root, [
+        { label: "Clear roads", onClick: () => { scenery.note = editor.clearRoads() ? "The roads cut through everything painted again." : "Nothing is painted into the roads."; editor.onChange(); } },
+        { label: "Remove brush strokes", onClick: () => { scenery.note = editor.clearBrushStrokes() ? "Removed the raise, lower and smooth strokes." : "There are no brush strokes."; editor.onChange(); } },
+      ]);
       hint(root, "With a brush chosen, drag over the land to paint it (Alt+drag still orbits). Raise, lower and smooth work where the "
         + "cursor meets the land, also on a cutting's side or a tunnel's wall and roof, and the land follows while you paint; "
         + "the roads cut through the result unless \"Into the roads\" is ticked (Clear roads cuts those free again). Flatten "
-        + "works on open ground. Each stroke is one undo step; generating again replaces the painted land.");
+        + "works on open ground. Each stroke is one undo step. Generating again keeps the raise, lower and smooth strokes "
+        + "(Remove brush strokes takes them away) but not what was flattened.");
     }
     hint(root, (scenery.note ? scenery.note + " " : "") + (nestle
       ? "Lays a band of land round the tracks at their own height: up to just below the roads, a flat shoulder, then "

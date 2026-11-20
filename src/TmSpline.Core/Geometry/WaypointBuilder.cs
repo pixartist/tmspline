@@ -25,6 +25,12 @@ public static class WaypointBuilder
     /// <summary>From this bend on (degrees) the road counts as a pipe and the gate is a ring around it.</summary>
     private const double PipeCurveDegrees = 300;
     private const double TriggerDepth = 4;
+    /// <summary>
+    /// An effect gate's trigger depth along the road: 4 m fired the effect up to about 4 m before the gate (the game
+    /// triggers on any part of the car); still deep enough not to be stepped over (100 physics steps a second: 1.1 m
+    /// each at 400 km/h).
+    /// </summary>
+    private const double EffectTriggerDepth = 1.5;
     /// <summary>The spawn point's height over the driving surface (the car is set down from there).</summary>
     private const double SpawnHeight = 0.15;
 
@@ -163,7 +169,7 @@ public static class WaypointBuilder
 
         var trigger = new MeshChunk { Name = $"{chunk.Name}_trigger" };
         new BoxPlacer(ring, itemOrigin, frame, 1).Box(trigger, 0, new Vec3d((left + right) / 2, (bottom + top) / 2, 0),
-            new Vec3d(right - left - PostSize, top - bottom, TriggerDepth), segment);
+            new Vec3d(right - left - PostSize, top - bottom, EffectTriggerDepth), segment);
         chunk.Triggers.Add(trigger);
         return chunk;
     }
